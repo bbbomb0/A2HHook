@@ -54,7 +54,7 @@ com.kugou.android
 - Android NDK r26 或更新版本；
 - CMake 3.18+；
 - `zip` 或 Python 3；
-- 可访问 GitHub，用于构建时拉取 Dobby。
+- 仓库自带已验证的 Dobby 静态库；若你要替换版本，可自行重新编译。
 
 Linux / macOS / MSYS2 Git Bash：
 
@@ -88,7 +88,7 @@ a2h_hook_v1.5.1.zip
 
 ## 致谢
 
-- Dobby inline hook framework；
+- Dobby inline hook framework（仓库内带有已验证的静态库）；
 - KernelSU / Zygisk Next 生态。
 
 ## 开源协议

@@ -2,7 +2,6 @@
 /build/
 /bin/
 /zygisk/
-/libs/
 *.o
 *.so
 *.a
@@ -14,6 +13,13 @@
 /share_test/
 /_v100_extract/
 /碎/
+/dobby/
+
+# Commit the tested Dobby static lib only; ignore everything else in libs/
+/libs/*
+!/libs/include/
+!/libs/include/dobby.h
+!/libs/libdobby.a
 
 # Historical local notes and one-off repair helpers
 /A2HHook_v1.4.0_release_and_fix.md
@@ -23,9 +29,6 @@
 /src/a2h_zip.c
 /src/patcher.c
 /src/wrapper.c
-
-# Dobby is cloned/built at build time
-/dobby/
 
 # Logs / temporary runtime files
 *.log

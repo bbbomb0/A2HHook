@@ -6,4 +6,4 @@
 - Repository: https://github.com/jmpews/Dobby
 - License: Apache License 2.0
 
-构建脚本默认在构建阶段拉取并编译 Dobby，不会把 Dobby 源码或构建目录提交到本仓库。
+仓库内包含一份已验证可用于当前模块构建的 `libs/libdobby.a` 与 `libs/include/dobby.h`。Dobby 源码仓库和本地构建目录不提交到本仓库。
