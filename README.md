@@ -45,7 +45,7 @@ com.kugou.android
 - 模块不包含系统原厂音频库文件；
 - 不建议和其它同类音频 HAL 修改模块同时启用。
 
-如果遇到问题，请优先在 WebUI 右上角使用“分享日志”，并附上 `a2h_patch.log` 与 `action.log`。
+如果遇到问题，请优先在 WebUI 底部状态栏右侧使用“分享日志”，并附上 `a2h_patch.log` 与 `action.log`。
 
 ## 从源码构建
 
