@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>A2HHook</title>
+<style>
+:root{--bg:#f4f6f8;--surface:#ffffff;--surface2:#f8fafb;--line:#dfe5ea;--text:#15202b;--muted:#64707c;--accent:#0b7a59;--accent-soft:#e2f3ed;--danger:#c2413b;--warn:#946200;--shadow:0 10px 24px rgba(20,35,45,.07)}
+[data-theme=dark]{--bg:#101416;--surface:#171c1f;--surface2:#1f2529;--line:#2f383e;--text:#edf3f5;--muted:#9ba8af;--accent:#52d0a3;--accent-soft:#173930;--danger:#ff7f72;--warn:#f0bc63;--shadow:0 10px 28px rgba(0,0,0,.24)}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:16px;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}button,input{font:inherit}button{appearance:none}
+.shell{max-width:760px;margin:0 auto}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:2px 2px 14px}.brand{display:flex;align-items:center;gap:10px;min-width:0}.mark{width:38px;height:38px;border-radius:10px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px;flex:none}.brand-copy{min-width:0}.title{font-size:20px;font-weight:760;line-height:1.1;letter-spacing:0}.sub{font-size:12px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.icon{width:38px;height:38px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);cursor:pointer;flex:none}.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:15px;margin-bottom:12px;box-shadow:var(--shadow)}.card h2{font-size:15px;line-height:1.2;margin:0 0 4px}.card p{margin:0;color:var(--muted);font-size:12px}.mode-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.seg{border:1px solid var(--line);border-radius:10px;background:var(--surface2);padding:10px 10px 11px;color:var(--muted);cursor:pointer;text-align:left;min-height:48px}.seg strong{display:block;font-size:14px;color:inherit}.seg small{display:block;margin-top:2px;font-size:11px;line-height:1.35}.seg.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}.status{min-height:20px;margin-top:10px;font-size:12px;color:var(--muted)}.status.ok{color:var(--accent)}.status.err{color:var(--danger)}.status.warn{color:var(--warn)}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:15px 0 10px;flex-wrap:wrap}.count{font-size:12px;color:var(--muted)}.ghost{border:0;background:transparent;color:var(--accent);font-size:12px;cursor:pointer;padding:4px 0}.slots{display:grid;gap:8px}.slot{display:grid;grid-template-columns:34px 1fr;gap:8px;align-items:center}.slot-num{color:var(--muted);font-size:12px;text-align:right;font-variant-numeric:tabular-nums}.slot-wrap{position:relative}.slot-input{width:100%;height:40px;padding:0 11px;border:1px solid var(--line);background:var(--surface2);border-radius:8px;color:var(--text);font:13px ui-monospace,SFMono-Regular,Menlo,monospace;outline:0}.slot-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}.slot-input.official{border-left:3px solid var(--accent)}.slot-input.invalid{border-color:var(--danger)}.slot-input.dup{border-color:var(--warn)}.slot-tag{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--muted);pointer-events:none}.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}.btn{height:42px;border-radius:9px;border:1px solid var(--line);background:var(--surface2);color:var(--text);font-weight:650;cursor:pointer}.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn:disabled{opacity:.55;cursor:wait}.cmd{display:none;margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:8px;background:var(--surface2)}.cmd.show{display:block}.cmd code{display:block;white-space:pre-wrap;word-break:break-all;font:11px/1.45 ui-monospace,monospace;color:var(--muted);max-height:120px;overflow:auto}.cmd button{margin-top:8px;width:100%;height:34px;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:7px}.split{display:grid;grid-template-columns:1fr 1fr;gap:8px}.status-bar{display:flex;align-items:center;justify-content:space-between;gap:10px}.status-bar .status{flex:1;min-width:0;margin:0}.status-bar .btn{flex:none;height:36px;padding:0 12px;font-size:12px;white-space:nowrap}.status-bar .btn:disabled{opacity:.55;cursor:wait}.foot{text-align:center;color:var(--muted);font-size:11px;padding:8px 0 18px}
+@media(max-width:520px){body{padding:12px}.top{margin-bottom:12px}.title{font-size:18px}.card{padding:13px}.mode-row,.actions,.split{grid-template-columns:1fr}.slot{grid-template-columns:28px 1fr}.slot-num{text-align:center}}
+</style>
+</head>
+<body>
+<main class="shell">
+  <header class="top">
+    <div class="brand">
+      <div class="mark">A2</div>
+      <div class="brand-copy">
+        <div class="title">音乐触感</div>
+        <div class="sub">A2HHook · REDMI K80 Ultra</div>
+      </div>
+    </div>
+    <button class="icon" id="theme" title="切换主题">◐</button>
+  </header>
+
+  <section class="card">
+    <h2>工作模式</h2>
+    <p>全局模式覆盖所有应用；白名单模式只对下面 10 个包名生效。</p>
+    <div class="mode-row" role="tablist" aria-label="模式切换">
+      <button class="seg" id="globalBtn" type="button"><strong>全局触感</strong><small>所有应用直接启用</small></button>
+      <button class="seg" id="listBtn" type="button"><strong>白名单</strong><small>仅匹配选中应用</small></button>
+    </div>
+    <div class="status" id="status"></div>
+  </section>
+
+  <section class="card">
+    <h2>白名单包名</h2>
+    <p>默认包含官方 6 个包名；10 个槽位都可按需修改。空行表示停用该槽位。</p>
+    <div class="toolbar">
+      <span class="count" id="count"></span>
+      <button class="ghost" id="reset" type="button">恢复官方默认</button>
+    </div>
+    <div class="slots" id="slots"></div>
+    <div class="actions">
+      <button class="btn primary" id="apply" type="button">保存并应用</button>
+      <button class="btn" id="backup" type="button">导出备份</button>
+      <button class="btn" id="restore" type="button">导入备份</button>
+    </div>
+    <input class="file" type="file" id="file" accept="application/json,.json" hidden>
+    <div class="cmd" id="cmd"><code id="cmdText"></code><button id="copy" type="button">复制命令</button></div>
+  </section>
+
+  <section class="card">
+    <h2>状态</h2>
+    <div class="status-bar">
+      <div class="status" id="runtime">等待读取配置</div>
+      <button class="btn" id="shareLogs" type="button">分享日志</button>
+    </div>
+  </section>
+
+  <div class="foot">A2HHook v1.5.1</div>
+</main>
+
+<script>
+(function(){
+  'use strict';
+  const OFFICIAL=['com.kugou.android','com.tencent.qqmusic','com.netease.cloudmusic','cn.kuwo.player','com.miui.player','com.luna.music'];
+  const DEFAULTS=OFFICIAL.concat(['','','','']);
+  const LABELS=['酷狗音乐','QQ音乐','网易云音乐','酷我音乐','小米音乐','Luna音乐','自定义 1','自定义 2','自定义 3','自定义 4'];
+  const LIMITS=[63,63,63,63,63,63,63,63,63,63];
+  const STORAGE_KEY='a2h_config_v3';
+  const BACKUP_FORMAT='a2hhook-backup';
+  let mode='whitelist';
+  let slots=DEFAULTS.slice();
+  let inFlight=false;
+  const $=id=>document.getElementById(id);
+
+  function normalizeSlot(value){return String(value||'').trim();}
+  function cloneSlots(arr){
+    const out=DEFAULTS.slice();
+    arr.slice(0,10).forEach((value,index)=>{out[index]=normalizeSlot(value);});
+    return out;
+  }
+  function isValidPackage(value){return /^[A-Za-z][A-Za-z0-9_.]*\.[A-Za-z0-9_.]+$/.test(value) && value.length < 64;}
+
+  function loadLocal(){
+    try{
+      const raw=localStorage.getItem(STORAGE_KEY);
+      if(!raw) return;
+      const data=JSON.parse(raw);
+      if(data && Array.isArray(data.packages)) slots=cloneSlots(data.packages);
+      mode=data && data.mode==='global' ? 'global' : 'whitelist';
+    }catch(e){}
+  }
+
+  function saveLocal(){
+    try{localStorage.setItem(STORAGE_KEY,JSON.stringify({version:3,mode,packages:slots,updatedAt:new Date().toISOString()}));}catch(e){}
+  }
+
+  function setNotice(text, kind){
+    const node=$('status');
+    node.className='status'+(kind?' '+kind:'');
+    node.textContent=text;
+  }
+
+  function render(){
+    $('globalBtn').classList.toggle('active',mode==='global');
+    $('listBtn').classList.toggle('active',mode==='whitelist');
+    const root=$('slots');
+    root.innerHTML='';
+    const seen=new Map();
+    let enabled=0;
+    slots=cloneSlots(slots);
+    slots.forEach((value, index)=>{
+      if(value) enabled++;
+      const row=document.createElement('label');
+      row.className='slot';
+      const num=document.createElement('span');
+      num.className='slot-num';
+      num.textContent=String(index+1).padStart(2,'0');
+      const wrap=document.createElement('div');
+      wrap.className='slot-wrap';
+      const input=document.createElement('input');
+      input.className='slot-input'+(index<6?' official':'');
+      input.value=value;
+      input.placeholder=LABELS[index]+' · '+LIMITS[index]+' 字符';
+      input.autocomplete='off';
+      input.spellcheck=false;
+      input.maxLength=LIMITS[index];
+      input.addEventListener('input',()=>{
+        slots[index]=normalizeSlot(input.value);
+        refreshValidation();
+        $('cmd').classList.remove('show');
+      });
+      const tag=document.createElement('span');
+      tag.className='slot-tag';
+      tag.textContent=index<6?'官方':'';
+      wrap.appendChild(input);
+      wrap.appendChild(tag);
+      row.appendChild(num);
+      row.appendChild(wrap);
+      root.appendChild(row);
+    });
+    $('count').textContent=enabled+' / 10 已启用';
+    saveLocal();
+    refreshValidation();
+  }
+
+  function refreshValidation(){
+    const values=slots.map(normalizeSlot);
+    const count={};
+    values.forEach(v=>{if(v) count[v]=(count[v]||0)+1;});
+    [...document.querySelectorAll('.slot-input')].forEach((input, index)=>{
+      const value=normalizeSlot(input.value);
+      const invalid=value && (!isValidPackage(value) || value.length > LIMITS[index]);
+      const dup=value && count[value] > 1;
+      input.classList.toggle('invalid', invalid);
+      input.classList.toggle('dup', !invalid && dup);
+    });
+  }
+
+  function buildConfigText(){
+    return slots.map(v=>normalizeSlot(v)).join('\n') + '\n';
+  }
+
+  function shellQuote(s){
+    return "'" + String(s).replace(/'/g, "'\''") + "'";
+  }
+
+  // Prefer short single-line shell commands. Multi-line heredoc freezes some KSU WebUI bridges (esp. OS2).
+  function buildWritePackagesCmd(){
+    const values = slots.map(v => normalizeSlot(v));
+    while(values.length < 10) values.push('');
+    const joined = values.slice(0,10).map(v => shellQuote(v)).join(' ');
+    return [
+      "umask 077",
+      "mkdir -p /data/local/tmp /data/adb/modules/a2h_hook/config",
+      `printf '%s\n' ${joined} > /data/local/tmp/a2h_packages.txt`,
+      "cp /data/local/tmp/a2h_packages.txt /data/adb/modules/a2h_hook/config/packages.txt"
+    ].join('; ');
+  }
+
+  function buildCommand(state){
+    return [
+      '# A2HHook apply command',
+      buildWritePackagesCmd(),
+      `printf '%s\n' '${state}' > /data/local/tmp/a2h_state`,
+      `printf '%s\n' '${state}' > /data/adb/modules/a2h_hook/config/state`,
+      `sh /data/adb/modules/a2h_hook/action.sh ${state==='enabled'?'enable':'disable'}`
+    ].join('\n');
+  }
+
+  function findExecBridge(){
+    if(window.KSU && typeof window.KSU.exec==='function') return {owner:window.KSU, fn:window.KSU.exec};
+    if(window.ksu && typeof window.ksu.exec==='function') return {owner:window.ksu, fn:window.ksu.exec};
+    if(typeof window.exec==='function') return {owner:window, fn:window.exec};
+    return null;
+  }
+
+  function assertExecOk(result){
+    let data=result;
+    if(typeof data==='string'){
+      try{data=JSON.parse(data);}catch(e){return;}
+    }
+    if(typeof data==='number' && data!==0) throw new Error('exit '+data);
+    if(!data || typeof data!=='object') return;
+    const code=data.code ?? data.exitCode ?? data.status ?? data.errno;
+    if(data.success===false) throw new Error('exec failed');
+    if(code !== undefined && Number(code)!==0) throw new Error('exit '+code);
+  }
+
+  function withTimeout(promise, ms){
+    return new Promise((resolve, reject)=>{
+      const t=setTimeout(()=>reject(new Error('timeout '+ms+'ms')), ms);
+      Promise.resolve(promise).then(v=>{clearTimeout(t);resolve(v);}, e=>{clearTimeout(t);reject(e);});
+    });
+  }
+
+  async function execRoot(cmd, timeoutMs){
+    const bridge=findExecBridge();
+    if(!bridge) throw new Error('no-exec');
+    const ms = timeoutMs || 8000;
+    let result;
+    // Prefer simple return/promise path first; callback bridges are secondary.
+    try{
+      const ret=bridge.fn.call(bridge.owner, cmd);
+      if(ret && typeof ret.then==='function'){
+        result = await withTimeout(ret, ms);
+      }else if(ret !== undefined){
+        result = ret;
+      }else if(bridge.fn.length >= 2){
+        result = await withTimeout(new Promise((resolve,reject)=>{
+          try{
+            bridge.fn.call(bridge.owner, cmd, (code, stdout, stderr)=>{
+              resolve({code, stdout, stderr});
+            });
+          }catch(err){reject(err);}
+        }), ms);
+      }else{
+        result = null;
+      }
+    }catch(e){
+      // one fallback for callback-style bridges
+      if(bridge.fn.length >= 2){
+        result = await withTimeout(new Promise((resolve,reject)=>{
+          try{
+            bridge.fn.call(bridge.owner, cmd, (code, stdout, stderr)=>{
+              resolve({code, stdout, stderr});
+            });
+          }catch(err){reject(err);}
+        }), ms);
+      }else{
+        throw e;
+      }
+    }
+    assertExecOk(result);
+    return result;
+  }
+
+  
+  function extractStdout(result){
+    if(result == null) return '';
+    if(typeof result === 'string'){
+      try{
+        const obj=JSON.parse(result);
+        if(obj && typeof obj === 'object'){
+          return String(obj.stdout ?? obj.out ?? obj.output ?? obj.message ?? result);
+        }
+      }catch(e){}
+      return result;
+    }
+    if(typeof result === 'object'){
+      return String(result.stdout ?? result.out ?? result.output ?? result.message ?? '');
+    }
+    return String(result);
+  }
+
+  async function shareLogs(){
+    if(inFlight){
+      setNotice('正在处理其他操作，请稍候…','warn');
+      return;
+    }
+    const btn=$('shareLogs');
+    inFlight=true;
+    if(btn) btn.disabled=true;
+    setNotice('正在快速打包日志并打开分享…');
+    try{
+      const result = await execRoot('sh /data/adb/modules/a2h_hook/share_logs.sh', 12000);
+      const out = extractStdout(result);
+      const m = out.match(/ZIP_PATH\s+(\S+)/);
+      const zipPath = m ? m[1] : '';
+      if(/ZIP_FAIL/.test(out)) throw new Error('zip-failed');
+      if(/SHARE_OK/.test(out)){
+        // Keep/delete is handled by share_logs.sh watcher:
+        // cancel => keep in Download; successful send => auto delete.
+        setNotice(zipPath ? ('已打开分享，请选择应用发送。发送成功后自动删除压缩包；取消分享则保留：'+zipPath) : '已打开分享，请选择应用发送。','ok');
+        if(zipPath) $('runtime').textContent='日志包：'+zipPath+'（发送后删除 / 取消保留）';
+      }else if(/SHARE_FALLBACK/.test(out) && zipPath){
+        setNotice('日志已生成：'+zipPath+'。系统分享未完全拉起，请到“下载”目录手动发送。','warn');
+        $('runtime').textContent='日志包：'+zipPath;
+      }else if(zipPath){
+        setNotice('日志已生成：'+zipPath,'ok');
+        $('runtime').textContent='日志包：'+zipPath;
+      }else{
+        setNotice('日志打包完成。','ok');
+      }
+    }catch(e){
+      console && console.warn && console.warn(e);
+      setNotice('分享日志失败：请确认 Root 权限，或手动复制模块目录日志。','err');
+    }finally{
+      inFlight=false;
+      if(btn) btn.disabled=false;
+    }
+  }
+
+function backup(){
+    const data=JSON.stringify({format:BACKUP_FORMAT,version:3,mode,packages:slots,createdAt:new Date().toISOString()},null,2);
+    const blob=new Blob([data],{type:'application/json'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download='a2hhook-backup.json';
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+    setNotice('备份已导出。','ok');
+  }
+
+  function restoreFromText(text){
+    const data=JSON.parse(text);
+    if(!data || data.format!==BACKUP_FORMAT || !Array.isArray(data.packages)) throw new Error('invalid-backup');
+    slots=cloneSlots(data.packages);
+    mode=data.mode==='global'?'global':'whitelist';
+    render();
+    setNotice('备份已读取，请点击保存并应用。','ok');
+  }
+
+  function showCommand(state){
+    const cmd=buildCommand(state);
+    $('cmdText').textContent=cmd;
+    $('cmd').classList.add('show');
+    return cmd;
+  }
+
+  function validateAll(){
+    const values=slots.map(normalizeSlot);
+    const seen=new Map();
+    let ok=true;
+    values.forEach((value,index)=>{
+      if(!value) return;
+      if(!isValidPackage(value) || value.length > LIMITS[index]) ok=false;
+      seen.set(value, (seen.get(value)||0)+1);
+    });
+    seen.forEach((count,value)=>{if(count>1) ok=false;});
+    return ok;
+  }
+
+  
+  async function loadDeviceConfig(){
+    try{
+      const r = await execRoot("cat /data/adb/modules/a2h_hook/config/state 2>/dev/null; echo '---'; cat /data/adb/modules/a2h_hook/config/packages.txt 2>/dev/null", 5000);
+      const text = String((r && (r.stdout||r.out||r)) || '');
+      const parts = text.split('---');
+      if(parts.length >= 1){
+        const st = String(parts[0]||'').trim();
+        if(st === 'enabled') mode = 'global';
+        else if(st === 'disabled') mode = 'whitelist';
+      }
+      if(parts.length >= 2){
+        const lines = String(parts[1]||'').replace(/\r/g,'').split('\n').slice(0,10);
+        const next = DEFAULTS.slice();
+        lines.forEach((line,i)=>{ if(i<10) next[i]=normalizeSlot(line); });
+        slots = next;
+      }
+      saveLocal();
+      render();
+      $('runtime').textContent='已从设备配置加载';
+    }catch(e){
+      $('runtime').textContent='配置已加载（本地缓存）';
+    }
+  }
+
+  async function apply(){
+    if(inFlight){
+      setNotice('正在处理上一次保存，请稍候…','warn');
+      return;
+    }
+    if(!validateAll()){
+      setNotice('包名格式、长度或重复项有问题，请检查高亮槽位。','err');
+      render();
+      return;
+    }
+    const state=mode==='global'?'enabled':'disabled';
+    saveLocal();
+    inFlight=true;
+    $('apply').disabled=true;
+      setNotice('正在保存配置并排队应用…');
+    const manual=buildCommand(state);
+    try{
+      // One root call: write packages/state then apply. Avoid multi-fire lag on OS2.
+      const oneShot = [
+        buildWritePackagesCmd(),
+        `printf '%s\n' ${shellQuote(state)} > /data/local/tmp/a2h_state`,
+        `printf '%s\n' ${shellQuote(state)} > /data/adb/modules/a2h_hook/config/state`,
+        `sh /data/adb/modules/a2h_hook/action.sh queue ${shellQuote(state)}`
+      ].join('; ');
+      await execRoot(oneShot, 6000);
+      $('cmd').classList.remove('show');
+      $('runtime').textContent='最近一次保存：'+new Date().toLocaleString()+'（后台应用中）';
+      setNotice('已保存，正在后台应用；通常 1–3 秒内生效。','ok');
+    }catch(e){
+      console && console.warn && console.warn(e);
+      setNotice('配置可能已写入，应用超时或桥接失败。可复制命令手动运行。','warn');
+      $('cmdText').textContent=manual;
+      $('cmd').classList.add('show');
+    }finally{
+      inFlight=false;
+      $('apply').disabled=false;
+    }
+  }
+
+  $('globalBtn').onclick=()=>{mode='global';render();setNotice('已切换为全局触感。','ok');};
+  $('listBtn').onclick=()=>{mode='whitelist';render();setNotice('已切换为白名单模式。','ok');};
+  $('theme').onclick=()=>{
+    const root=document.documentElement;
+    root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';
+    try{localStorage.setItem('a2h_theme',root.dataset.theme);}catch(e){}
+  };
+  $('reset').onclick=()=>{slots=DEFAULTS.slice();render();setNotice('已恢复官方 6 个包名。','ok');};
+  $('apply').onclick=()=>{ if(!inFlight) apply(); };
+  $('shareLogs').onclick=()=>{ if(!inFlight) shareLogs(); };
+  $('backup').onclick=backup;
+  $('restore').onclick=()=>$('file').click();
+  $('file').onchange=e=>{const file=e.target.files&&e.target.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=()=>{try{restoreFromText(String(reader.result||''));}catch(err){setNotice('备份格式无效。','err');}}; reader.readAsText(file); e.target.value='';};
+  $('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('cmdText').textContent); setNotice('命令已复制。','ok');}catch(e){setNotice('复制失败，请长按文本手动选择。','warn');}};
+
+  try{const theme=localStorage.getItem('a2h_theme'); if(theme) document.documentElement.dataset.theme=theme;}catch(e){}
+  loadLocal();
+  render();
+  loadDeviceConfig();
+})();
+</script>
+</body>
+</html>

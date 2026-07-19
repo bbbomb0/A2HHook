@@ -1,0 +1,50 @@
+# Build outputs / release artifacts
+/build/
+/bin/
+/zygisk/
+/libs/
+*.o
+*.so
+*.a
+*.zip
+
+# Local reverse-engineering / debug material
+/system/
+/vendor/
+/share_test/
+/_v100_extract/
+/碎/
+
+# Historical local notes and one-off repair helpers
+/A2HHook_v1.4.0_release_and_fix.md
+/A2HHook_手机端修复说明.md
+/build_a2h.bat
+/fix_a2h_ksu_crash.sh
+/src/a2h_zip.c
+/src/patcher.c
+/src/wrapper.c
+
+# Dobby is cloned/built at build time
+/dobby/
+
+# Logs / temporary runtime files
+*.log
+*.tmp
+*.bak
+*.bak_*
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+__MACOSX/
+
+# Planning files are local working memory, not release source
+.planning/

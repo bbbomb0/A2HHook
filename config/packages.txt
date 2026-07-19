@@ -1,0 +1,10 @@
+com.kugou.android
+com.tencent.qqmusic
+com.netease.cloudmusic
+cn.kuwo.player
+com.miui.player
+com.luna.music
+
+
+
+
