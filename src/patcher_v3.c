@@ -1,4 +1,4 @@
-// a2h_patch v1.5.1 - v1.0 universal signature scan + 10-slot whitelist
+// a2h_patch v1.5.2-fix - v1.0 universal signature scan + 10-slot whitelist
 #define _GNU_SOURCE
 #include <stdint.h>
 #include <stdio.h>
@@ -41,7 +41,7 @@
 #define PTRACE_PEEKDATA 2
 #define PTRACE_POKEDATA 5
 #define MAX_SLOTS 10
-#define A2H_VERSION "1.5.1"
+#define A2H_VERSION "1.5.2-fix"
 
 struct user_pt_regs_a64 {
     uint64_t regs[31];

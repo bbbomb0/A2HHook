@@ -1,7 +1,8 @@
-// A2HHook runtime extension for the six-entry vendor is_A2H_app function.
-// The library is loaded into the MediaTek audio service by LD_PRELOAD.  It
-// interposes strcmp only for return addresses belonging to is_A2H_app, so the
-// extra four whitelist entries cannot change unrelated HAL comparisons.
+// A2HHook runtime extension for vendor is_A2H_app.
+// The library is loaded into the MediaTek audio service by LD_PRELOAD / Zygisk.
+// It interposes strcmp only for return addresses belonging to the active
+// is_A2H_app window, so extra whitelist entries can join the same call chain
+// without affecting unrelated HAL comparisons.
 
 #include <dlfcn.h>
 #include <fcntl.h>
@@ -10,6 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <cstdlib>
 #include <cstdarg>
 
 #include "dobby.h"
@@ -22,9 +24,12 @@ namespace {
 using strcmp_fn = int (*)(const char *, const char *);
 
 constexpr const char *kPackagesPath = "/data/local/tmp/a2h_packages.txt";
+constexpr const char *kFuncHintPath = "/data/adb/modules/a2h_hook/config/func_off";
 constexpr const char *kStatePath = "/data/local/tmp/a2h_state";
 constexpr size_t kMaxExtra = 4;
 constexpr size_t kPackageSize = 64;
+constexpr uintptr_t kFallbackFuncStart = 0x3e3fe0;
+constexpr uintptr_t kFallbackFuncEnd = 0x3e4048;
 constexpr char kTag[] = "A2HHook";
 
 pthread_once_t g_resolve_once = PTHREAD_ONCE_INIT;
@@ -34,6 +39,7 @@ pthread_mutex_t g_config_lock = PTHREAD_MUTEX_INITIALIZER;
 char g_extra[kMaxExtra][kPackageSize];
 size_t g_extra_count = 0;
 time_t g_config_mtime = 0;
+uintptr_t g_func_off = 0;
 thread_local bool g_in_hook = false;
 thread_local bool g_loading = false;
 thread_local bool g_logging = false;
@@ -76,6 +82,24 @@ void resolve_real_strcmp() {
     if (g_real_strcmp) logi("resolved strcmp hook");
 }
 
+time_t file_mtime(const char *path) {
+    struct stat st = {};
+    return (stat(path, &st) == 0) ? st.st_mtime : 0;
+}
+
+uintptr_t read_func_hint() {
+    int fd = open(kFuncHintPath, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return 0;
+    char buf[64] = {};
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0) return 0;
+    char *end = nullptr;
+    uintptr_t value = static_cast<uintptr_t>(std::strtoull(buf, &end, 16));
+    if (end == buf || value < 0x10000 || value > 0x2000000) return 0;
+    return value;
+}
+
 bool valid_package(const char *value) {
     if (!value || !*value) return false;
     size_t length = 0;
@@ -102,6 +126,7 @@ void reload_extra_locked(time_t mtime) {
     g_extra_count = 0;
     int fd = open(kPackagesPath, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
+        g_func_off = read_func_hint();
         g_config_mtime = mtime;
         return;
     }
@@ -109,6 +134,7 @@ void reload_extra_locked(time_t mtime) {
     ssize_t size = read(fd, data, sizeof(data) - 1);
     close(fd);
     if (size <= 0) {
+        g_func_off = read_func_hint();
         g_config_mtime = mtime;
         return;
     }
@@ -131,12 +157,19 @@ void reload_extra_locked(time_t mtime) {
         value_len = 0;
         ++line;
     }
+    g_func_off = read_func_hint();
+    if (g_func_off) {
+        logi("loaded func_off hint: 0x%lx", static_cast<unsigned long>(g_func_off));
+    } else {
+        logw("func_off hint missing, using fallback window");
+    }
     g_config_mtime = mtime;
 }
 
 void reload_extra_if_needed() {
-    struct stat st = {};
-    time_t mtime = (stat(kPackagesPath, &st) == 0) ? st.st_mtime : 0;
+    time_t pm = file_mtime(kPackagesPath);
+    time_t fm = file_mtime(kFuncHintPath);
+    time_t mtime = pm > fm ? pm : fm;
     if (mtime == g_config_mtime) return;
     pthread_mutex_lock(&g_config_lock);
     if (mtime != g_config_mtime) reload_extra_locked(mtime);
@@ -150,8 +183,9 @@ bool from_a2h_function(void *return_address) {
     if (std::strstr(info.dli_fname, "audio.primary.") == nullptr) return false;
     uintptr_t offset = reinterpret_cast<uintptr_t>(return_address) -
                        reinterpret_cast<uintptr_t>(info.dli_fbase);
-    // Return addresses immediately follow the six BL strcmp instructions.
-    return offset >= 0x3e3fe0 && offset <= 0x3e4048;
+    uintptr_t start = g_func_off ? (g_func_off > 0x80 ? g_func_off - 0x80 : 0) : kFallbackFuncStart;
+    uintptr_t end = g_func_off ? (g_func_off + 0x180) : kFallbackFuncEnd;
+    return offset >= start && offset <= end;
 }
 
 bool extra_match(const char *package_name) {

@@ -1,5 +1,6 @@
 # Build outputs / release artifacts
 /build/
+/build_*/
 /bin/
 /zygisk/
 *.o

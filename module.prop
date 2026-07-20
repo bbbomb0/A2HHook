@@ -1,7 +1,7 @@
 id=a2h_hook
 name=A2H 音乐触感白名单
-version=v1.5.1
-versionCode=1510
+version=v1.5.2-fix
+versionCode=1521
 author=bb_bomb
 description=全局/白名单音乐触感 · 10槽自定义包名 · 点模块栏进入WebUI
 webui=webroot

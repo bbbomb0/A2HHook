@@ -60,13 +60,19 @@ check_prereqs() {
         *) error "Unsupported OS" ;;
     esac
 
-    TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG"
-    [ ! -d "$TOOLCHAIN" ] && error "Toolchain not found: $TOOLCHAIN"
+TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/$HOST_TAG"
+[ ! -d "$TOOLCHAIN" ] && error "Toolchain not found: $TOOLCHAIN"
 
-    # CMake
-    CMAKE="cmake"
-    command -v cmake &>/dev/null || CMAKE="$ANDROID_NDK_HOME/build/cmake/3.22.1/bin/cmake"
-    info "CMake: $CMAKE"
+# CMake
+CMAKE="cmake"
+command -v cmake &>/dev/null || CMAKE="$ANDROID_NDK_HOME/build/cmake/3.22.1/bin/cmake"
+info "CMake: $CMAKE"
+if command -v ninja &>/dev/null; then
+    CMAKE_GENERATOR="-G Ninja"
+    info "Generator: Ninja"
+else
+    CMAKE_GENERATOR=""
+fi
 }
 
 # ============================================================
@@ -102,10 +108,12 @@ prepare_dobby() {
 
     info "Building Dobby from source..."
     DOBBY_BUILD="$BUILD_DIR/dobby"
+    rm -rf "$DOBBY_BUILD"
     mkdir -p "$DOBBY_BUILD"
     cd "$DOBBY_BUILD"
 
     "$CMAKE" "$DOBBY_SRC" \
+        $CMAKE_GENERATOR \
         -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
         -DANDROID_ABI=arm64-v8a \
         -DANDROID_PLATFORM="$API_LEVEL" \
@@ -133,6 +141,7 @@ prepare_dobby() {
 build_module() {
     info "Building a2h_hook.so..."
 
+    rm -rf "$BUILD_DIR/arm64-v8a"
     mkdir -p "$BUILD_DIR/arm64-v8a" "$OUTPUT_DIR"
     cd "$BUILD_DIR/arm64-v8a"
 
@@ -140,6 +149,7 @@ build_module() {
     [ -d "$DOBBY_INC" ] || DOBBY_INC="$SRC_DIR"  # use bundled dobby.h
 
     "$CMAKE" "$SRC_DIR" \
+        $CMAKE_GENERATOR \
         -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
         -DANDROID_ABI=arm64-v8a \
         -DANDROID_PLATFORM="$API_LEVEL" \
@@ -202,13 +212,28 @@ create_zip() {
     if command -v zip &>/dev/null; then
         zip -r "$ZIP_PATH" . -x "*.git*" -x "*__MACOSX*" -x "*.DS_Store"
     else
-        python3 -c "
+        PYTHON_BIN=""
+        for py in python3 python py; do
+            if command -v "$py" >/dev/null 2>&1 && "$py" -c "import sys" >/dev/null 2>&1; then
+                PYTHON_BIN="$py"
+                break
+            fi
+        done
+        [ -z "$PYTHON_BIN" ] && error "Cannot create ZIP. Install 'zip' or Python 3."
+        ZIP_PATH_PY="$ZIP_PATH"
+        if command -v cygpath >/dev/null 2>&1; then
+            ZIP_PATH_PY="$(cygpath -w "$ZIP_PATH" 2>/dev/null || printf '%s' "$ZIP_PATH")"
+        fi
+        "$PYTHON_BIN" -c "
 import zipfile, os
-with zipfile.ZipFile('$ZIP_PATH', 'w', zipfile.ZIP_DEFLATED) as zf:
+zip_path = r'''$ZIP_PATH_PY'''
+with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
     for root, dirs, files in os.walk('.'):
         for f in files:
             if '.git' in root or '__MACOSX' in f or '.DS_Store' in f: continue
-            zf.write(os.path.join(root, f))
+            p = os.path.join(root, f)
+            arc = os.path.relpath(p, '.').replace(os.sep, '/')
+            zf.write(p, arc)
 " || error "Cannot create ZIP. Install 'zip' or Python 3."
     fi
 

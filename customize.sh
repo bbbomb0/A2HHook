@@ -119,4 +119,4 @@ if [ -f "$MODDIR/webroot/index.html" ]; then
 else
   ui_print "! WebUI 缺失: webroot/index.html"
 fi
-  ui_print "- A2HHook v1.5.1 安装完成"
+  ui_print "- A2HHook v1.5.2-fix 安装完成"

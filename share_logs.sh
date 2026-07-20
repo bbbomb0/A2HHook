@@ -1,10 +1,13 @@
 #!/system/bin/sh
 # Fast log share for A2HHook WebUI.
 # cancel => keep zip; send success => delete zip.
-# No large helper binary. Prefer Documents URI to avoid slow MediaStore roundtrips.
+# Prefer DocumentsProvider URI for QQ preview compatibility, while keeping
+# MediaStore visibility for file managers and fallbacks.
 MODDIR="${0%/*}"
 LOG1="$MODDIR/a2h_patch.log"
 LOG2="$MODDIR/action.log"
+MAIN_LOG="$MODDIR/a2h_patch.log"
+ACTION_LOG="$MODDIR/action.log"
 OUT_DIR="/storage/emulated/0/Download"
 TS=$(date +%Y%m%d_%H%M%S 2>/dev/null || date +%s)
 NAME="a2h_hook_logs_${TS}.zip"
@@ -14,6 +17,17 @@ WATCH_LOG="/data/local/tmp/a2h_share_watch.log"
 MAX_LOG_BYTES="${A2H_SHARE_LOG_MAX:-262144}"
 
 mkdir -p "$OUT_DIR" "$TMP" 2>/dev/null
+
+log_share() {
+  msg="[$(date '+%F %T')] [share] $*"
+  echo "$msg" >> "$MAIN_LOG" 2>/dev/null
+  echo "$msg" >> "$ACTION_LOG" 2>/dev/null
+  echo "$msg" >> "$WATCH_LOG" 2>/dev/null
+}
+
+extract_uri() {
+  printf '%s' "$1" | sed -n 's/.*\(content:\/\/[^ ]*\).*/\1/p' | tail -n1
+}
 
 copy_log_tail() {
   src="$1"
@@ -96,49 +110,56 @@ if [ "${A2H_SHARE_DRYRUN:-0}" = "1" ]; then
   exit 0
 fi
 
-# Documents URI is readable and avoids multi-second MediaStore content calls on HyperOS.
-URI="content://com.android.externalstorage.documents/document/primary%3ADownload%2F${NAME}"
+DOC_URI="content://com.android.externalstorage.documents/document/primary%3ADownload%2F${NAME}"
+MEDIA_URI=""
+if command -v content >/dev/null 2>&1; then
+  INS=$(content insert --uri content://media/external/downloads \
+    --bind _data:s:"$OUT" \
+    --bind _display_name:s:"$NAME" \
+    --bind mime_type:s:application/zip 2>/dev/null | tr -d '\r')
+  case "$INS" in
+    *content://*)
+      MEDIA_URI=$(extract_uri "$INS")
+      ;;
+  esac
+  if [ -z "$MEDIA_URI" ]; then
+    MID=$(content query --uri content://media/external/downloads --projection _id --where "_display_name='$NAME'" 2>/dev/null | sed -n 's/.*_id=\([0-9][0-9]*\).*/\1/p' | head -n1)
+    [ -n "$MID" ] && MEDIA_URI="content://media/external/downloads/$MID"
+  fi
+fi
+URI="$DOC_URI"
+log_share "share start uri=$URI media_uri=${MEDIA_URI:-none} out=$OUT"
 
-if am start --user 0 \
+start_share() {
+  share_uri="$1"
+  am start --user 0 \
     -a android.intent.action.SEND \
+    -c android.intent.category.DEFAULT \
     -t application/zip \
-    -d "$URI" \
-    --eu android.intent.extra.STREAM "$URI" \
+    -d "$share_uri" \
+    --eu android.intent.extra.STREAM "$share_uri" \
+    --es android.intent.extra.TITLE "$NAME" \
     --es android.intent.extra.SUBJECT "A2HHook logs" \
     --grant-read-uri-permission \
     --grant-prefix-uri-permission \
-    -f 0x10000001 >/dev/null 2>&1; then
-  echo "SHARE_OK doc $URI"
+    -f 0x10000001 >/dev/null 2>&1
+}
+
+if start_share "$URI"; then
+  echo "SHARE_OK $URI"
   echo "ZIP_PATH $OUT"
+  log_share "share intent ok uri=$URI"
 else
-  # One-shot MediaStore fallback only if documents share fails.
-  if command -v content >/dev/null 2>&1; then
-    INS=$(content insert --uri content://media/external/file \
-      --bind _data:s:"$OUT" \
-      --bind _display_name:s:"$NAME" \
-      --bind mime_type:s:application/zip 2>/dev/null | tr -d '\r')
-    [ -z "$INS" ] && {
-      MID=$(content query --uri content://media/external/file --projection _id --where "_display_name='$NAME'" 2>/dev/null | sed -n 's/.*_id=\([0-9][0-9]*\).*/\1/p' | head -n1)
-      [ -n "$MID" ] && INS="content://media/external/file/$MID"
-    }
-    if [ -n "$INS" ] && am start --user 0 \
-        -a android.intent.action.SEND \
-        -t application/zip \
-        -d "$INS" \
-        --eu android.intent.extra.STREAM "$INS" \
-        --grant-read-uri-permission \
-        --grant-prefix-uri-permission \
-        -f 0x10000001 >/dev/null 2>&1; then
-      URI="$INS"
-      echo "SHARE_OK content $URI"
-      echo "ZIP_PATH $OUT"
-    else
-      echo "SHARE_FALLBACK $OUT"
-      echo "ZIP_PATH $OUT"
-    fi
+  # MediaStore fallback for ROMs/apps that reject ExternalStorageProvider URI.
+  if [ -n "$MEDIA_URI" ] && start_share "$MEDIA_URI"; then
+    URI="$MEDIA_URI"
+    echo "SHARE_OK $URI"
+    echo "ZIP_PATH $OUT"
+    log_share "share fallback intent ok uri=$URI"
   else
     echo "SHARE_FALLBACK $OUT"
     echo "ZIP_PATH $OUT"
+    log_share "share fallback keep uri=$URI media_uri=${MEDIA_URI:-none}"
   fi
 fi
 
@@ -148,39 +169,77 @@ cat > "$WATCHER" <<'WATCH'
 OUT="$1"
 URI="$2"
 WATCH_LOG="/data/local/tmp/a2h_share_watch.log"
-TARGETS='com\.tencent\.mobileqq|com\.tencent\.tim|com\.tencent\.mm|com\.tencent\.wework|com\.alibaba\.android\.rimet|com\.ss\.android\.ugc\.aweme|com\.ss\.android\.lark|com\.android\.bluetooth|com\.google\.android\.apps\.docs|com\.tencent\.qqmini|com\.tencent\.qqlite|bin\.mt\.plus|com\.baidu\.netdisk|com\.chinamobile\.mcloud|com\.termux|com\.google\.android\.gm'
+MAIN_LOG="/data/adb/modules/a2h_hook/a2h_patch.log"
+ACTION_LOG="/data/adb/modules/a2h_hook/action.log"
+TARGETS='com\.tencent\.mobileqq|com\.tencent\.qqmini|com\.tencent\.qqlite|com\.tencent\.tim|com\.tencent\.mm|com\.tencent\.wework|com\.alibaba\.android\.rimet|com\.ss\.android\.ugc\.aweme|com\.ss\.android\.lark|com\.android\.bluetooth|com\.google\.android\.apps\.docs|bin\.mt\.plus|com\.baidu\.netdisk|com\.chinamobile\.mcloud|com\.termux|com\.google\.android\.gm'
 MANAGER='com\.resukisu\.resukisu|kernelsu|ksu\.|manager|WebUI|a2h_hook|com\.android\.settings|com\.miui\.home|com\.android\.launcher|launcher'
-CHOOSER='IntentResolver|ChooserActivity|resolver\.ResolverActivity|intentresolver|MiuiResolver|ShareActivity|ResolverActivity'
-read_focus() {
-  top=$(dumpsys window windows 2>/dev/null | tr -d '\r' | grep -E "mCurrentFocus|mFocusedApp|topResumedActivity|mTopFocusedDisplayId" | head -n 8)
-  [ -n "$top" ] || top=$(dumpsys activity activities 2>/dev/null | tr -d '\r' | grep -E "topResumedActivity|mResumedActivity|mFocusedApp|mCurrentFocus|ResumedActivity|ResolverActivity|JumpActivity|qfileJumpActivity|QfavJumpActivity|QlinkShareJumpActivity|SelectConversationUI|SendAppMessageWrapperUI" | head -n 8)
-  printf '%s\n' "$top"
+CHOOSER='IntentResolver|ChooserActivity|resolver\.ResolverActivity|intentresolver|MiuiResolver|ShareActivity|ResolverActivity|com\.android\.intentresolver|com\.miui\.resolver'
+SHARE_UI='JumpActivity|qfileJumpActivity|QfavJumpActivity|QlinkShareJumpActivity|Forward|SelectConversation|SendAppMessage|Share|share|Chooser|Resolver|IntentResolver'
+MAX_LOOPS="${A2H_SHARE_WATCH_LOOPS:-90}"
+INTERVAL="${A2H_SHARE_WATCH_INTERVAL:-2}"
+TARGET_CLEAN_LOOPS="${A2H_SHARE_TARGET_CLEAN_LOOPS:-45}"
+TARGET_LEFT_LOOPS="${A2H_SHARE_TARGET_LEFT_LOOPS:-2}"
+log_w() {
+  msg="[$(date '+%F %T')] [share] $*"
+  echo "$msg" >> "$WATCH_LOG" 2>/dev/null
+  echo "$msg" >> "$MAIN_LOG" 2>/dev/null
+  echo "$msg" >> "$ACTION_LOG" 2>/dev/null
 }
-found=0; saw_chooser=0; i=0
-while [ $i -lt 12 ]; do
+brief() {
+  printf '%s' "$1" | tr '\n' '|' | cut -c 1-360
+}
+read_focus() {
+  {
+    dumpsys window windows 2>/dev/null | tr -d '\r' | grep -E "mCurrentFocus|mFocusedApp|topResumedActivity|mTopFocusedDisplayId|com.tencent|Resolver|Chooser|ShareActivity" | head -n 10
+    dumpsys activity activities 2>/dev/null | tr -d '\r' | grep -E "topResumedActivity|mResumedActivity|mFocusedApp|mCurrentFocus|ResumedActivity|ResolverActivity|ChooserActivity|JumpActivity|qfileJumpActivity|QfavJumpActivity|QlinkShareJumpActivity|SelectConversation|SendAppMessage|Forward|com.tencent" | head -n 16
+    dumpsys activity top 2>/dev/null | tr -d '\r' | grep -E "ACTIVITY|topResumedActivity|mResumedActivity|mFocusedApp|mCurrentFocus|Resolver|Chooser|ShareActivity|JumpActivity|Forward|SelectConversation|SendAppMessage|com.tencent" | head -n 12
+  } | head -n 36
+}
+found=0; saw_chooser=0; target_seen=0; target_first=-1; target_last=-1; keep_reason="timeout"; clean_reason=""; last_brief=""; i=0
+while [ "$i" -lt "$MAX_LOOPS" ] 2>/dev/null; do
   top=$(read_focus)
+  top_brief=$(brief "$top")
+  [ -n "$top_brief" ] && last_brief="$top_brief"
   echo "$top" | grep -Eq "$CHOOSER" && saw_chooser=1
   if echo "$top" | grep -Eq "$TARGETS" && ! echo "$top" | grep -Eq "$MANAGER"; then
-    found=1; echo "HIT focus i=$i" >> "$WATCH_LOG" 2>/dev/null; break
-  fi
-  if [ "$saw_chooser" = "1" ] && [ $i -ge 2 ] && ! echo "$top" | grep -Eq "$CHOOSER"; then
-    if echo "$top" | grep -Eq "$TARGETS"; then
-      found=1; echo "HIT post-chooser i=$i" >> "$WATCH_LOG" 2>/dev/null; break
-    else
-      found=0; echo "CANCEL no-target i=$i" >> "$WATCH_LOG" 2>/dev/null; break
+    if [ "$target_seen" = "0" ]; then
+      target_seen=1
+      target_first=$i
+      log_w "SEE target i=$i top=$top_brief"
+    fi
+    target_last=$i
+    if [ $((i-target_first)) -ge "$TARGET_CLEAN_LOOPS" ] 2>/dev/null; then
+      found=1
+      clean_reason="target-safe-delay"
+      log_w "HIT $clean_reason i=$i top=$top_brief"
+      break
+    fi
+  else
+    if [ "$target_seen" = "1" ] && [ $((i-target_last)) -ge "$TARGET_LEFT_LOOPS" ] 2>/dev/null; then
+      found=1
+      clean_reason="target-left"
+      log_w "HIT $clean_reason i=$i top=$top_brief"
+      break
     fi
   fi
-  [ $i -ge 8 ] && [ "$saw_chooser" = "0" ] && { echo "TIMEOUT no-chooser i=$i" >> "$WATCH_LOG" 2>/dev/null; break; }
-  i=$((i+1)); sleep 1
+  if [ "$saw_chooser" = "1" ] && [ "$target_seen" = "0" ] && [ "$i" -ge 6 ] && ! echo "$top" | grep -Eq "$CHOOSER|$TARGETS"; then
+    keep_reason="chooser-dismissed"
+    log_w "KEEP $keep_reason i=$i top=$top_brief"
+    break
+  fi
+  i=$((i+1)); sleep "$INTERVAL"
 done
 if [ "$found" = "1" ]; then
-  sleep 1
+  sleep "${A2H_SHARE_DELETE_DELAY:-5}"
   bn=$(basename "$OUT" 2>/dev/null)
   rm -f "$OUT" "/sdcard/Download/$bn" "/storage/emulated/0/Download/$bn" 2>/dev/null
-  [ -n "$bn" ] && command -v content >/dev/null 2>&1 && content delete --uri content://media/external/file --where "_display_name='$bn'" >/dev/null 2>&1 || true
-  echo "CLEANED $OUT uri=$URI" >> "$WATCH_LOG" 2>/dev/null
+  if [ -n "$bn" ] && command -v content >/dev/null 2>&1; then
+    content delete --uri content://media/external/downloads --where "_display_name='$bn'" >/dev/null 2>&1 || true
+    content delete --uri content://media/external/file --where "_display_name='$bn'" >/dev/null 2>&1 || true
+  fi
+  log_w "CLEANED reason=$clean_reason $OUT uri=$URI"
 else
-  echo "KEEP $OUT uri=$URI" >> "$WATCH_LOG" 2>/dev/null
+  log_w "KEEP reason=$keep_reason chooser=$saw_chooser target=$target_seen i=$i last=$last_brief $OUT uri=$URI"
 fi
 rm -f "$0" 2>/dev/null
 WATCH

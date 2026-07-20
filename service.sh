@@ -180,7 +180,7 @@ apply_once() {
   return $rc
 }
 
-echo "[a2h_hook] v1.5.1 $(date)" > "$LOG"
+echo "[a2h_hook] v1.5.2-fix $(date)" > "$LOG"
 chmod 755 "$PATCHER" 2>/dev/null
 ensure_state_file
 ensure_packages_file

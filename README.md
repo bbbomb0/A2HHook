@@ -9,13 +9,13 @@ A2HHook 是面向 REDMI K80 Ultra / K80U 的音乐触感模块，目标是在 Ke
 - 模块栏 WebUI 入口；
 - 日志分享、备份与恢复配置等日常维护功能。
 
-当前公开版本：`v1.5.1`。
+当前公开版本：`v1.5.2-fix`。
 
 ## 下载安装
 
 请到 GitHub Releases 下载：
 
-- `a2h_hook_v1.5.1.zip`
+- `a2h_hook_v1.5.2-fix.zip`
 
 刷入方式：
 
@@ -66,7 +66,7 @@ export ANDROID_NDK_HOME=/path/to/android-ndk
 构建完成后会生成：
 
 ```text
-a2h_hook_v1.5.1.zip
+a2h_hook_v1.5.2-fix.zip
 ```
 
 ## 仓库结构
