@@ -1,82 +1,42 @@
 #!/system/bin/sh
-MODDIR="${0%/*}"
+
+# KernelSU/APatch/Magisk late-start service. Configuration and patching are
+# delegated to bin/a2h_apply so the module does not need a root action.sh.
+
+MODDIR=${0%/*}
+APPLIER="$MODDIR/bin/a2h_apply"
 PATCHER="$MODDIR/bin/a2h_patch"
-CFG_STATE="$MODDIR/config/state"
-CFG_PKGS="$MODDIR/config/packages.txt"
-TMP_STATE="/data/local/tmp/a2h_state"
-TMP_PKGS="/data/local/tmp/a2h_packages.txt"
+CFG_DIR="$MODDIR/config"
+CFG_STATE="$CFG_DIR/state"
+CFG_SNAPSHOT="$CFG_DIR/config_snapshot"
+APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
+LAST_PID_FILE="$CFG_DIR/last_pid"
+NOTIFICATION_STATE_FILE="$CFG_DIR/notification_state"
+TMP_PKGS=/data/local/tmp/a2h_packages.txt
 LOG="$MODDIR/a2h_patch.log"
-LAST_PID_FILE="$MODDIR/config/last_pid"
-LOCK_FILE="/data/local/tmp/a2h_apply.lock"
 
 ts() { date '+%F %T'; }
-log() { echo "[$(ts)] $*" >> "$LOG" 2>/dev/null; }
-
-ensure_state_file() {
-  mkdir -p "$MODDIR/config" 2>/dev/null
-  if [ ! -f "$CFG_STATE" ]; then
-    printf '%s\n' disabled > "$CFG_STATE" 2>/dev/null
-  fi
-}
-ensure_packages_file() {
-  mkdir -p "$MODDIR/config" 2>/dev/null
-  if [ ! -f "$CFG_PKGS" ]; then
-    cat > "$CFG_PKGS" <<'EOF'
-com.kugou.android
-com.tencent.qqmusic
-com.netease.cloudmusic
-cn.kuwo.player
-com.miui.player
-com.luna.music
-
-
-
-
-EOF
-  fi
-}
-
-# Keep module config as source of truth; mirror to /data/local/tmp for WebUI.
-sync_runtime_from_module() {
-  mkdir -p /data/local/tmp "$MODDIR/config" 2>/dev/null
-  # Prefer module persistent config. If WebUI tmp is newer/non-empty, absorb it.
-  if [ -s "$TMP_PKGS" ] && [ -f "$CFG_PKGS" ]; then
-    # if tmp differs, treat tmp as latest UI write
-    if ! cmp -s "$TMP_PKGS" "$CFG_PKGS" 2>/dev/null; then
-      cp "$TMP_PKGS" "$CFG_PKGS" 2>/dev/null
-    fi
-  fi
-  [ -f "$CFG_STATE" ] && cp "$CFG_STATE" "$TMP_STATE" 2>/dev/null
-  [ -f "$CFG_PKGS" ] && cp "$CFG_PKGS" "$TMP_PKGS" 2>/dev/null
-  if [ -s "$TMP_STATE" ]; then
-    # absorb tmp state only if valid
-    st=$(cat "$TMP_STATE" 2>/dev/null)
-    if [ "$st" = "enabled" ] || [ "$st" = "disabled" ]; then
-      printf '%s
-' "$st" > "$CFG_STATE" 2>/dev/null
-    fi
-  fi
-}
+log() { printf '[%s] %s\n' "$(ts)" "$*" >> "$LOG" 2>/dev/null; }
 
 find_hal_pid() {
-  pid=$(pidof android.hardware.audio.service-aidl.mediatek 2>/dev/null | awk '{print $1}')
-  [ -n "$pid" ] && { echo "$pid"; return 0; }
-  pid=$(pgrep -f android.hardware.audio.service-aidl.mediatek 2>/dev/null | head -n1)
-  [ -n "$pid" ] && { echo "$pid"; return 0; }
-  pid=$(pidof android.hardware.audio.service 2>/dev/null | awk '{print $1}')
-  [ -n "$pid" ] && { echo "$pid"; return 0; }
-  for f in /proc/[0-9]*/cmdline; do
-    [ -r "$f" ] || continue
-    pid=${f#/proc/}
-    pid=${pid%%/*}
-    if grep -a -F -q "android.hardware.audio.service-aidl.mediatek" "$f" 2>/dev/null; then
-      echo "$pid"
+  service_pid=$(pidof android.hardware.audio.service-aidl.mediatek 2>/dev/null | awk '{print $1}')
+  [ -n "$service_pid" ] && { printf '%s\n' "$service_pid"; return 0; }
+  service_pid=$(pgrep -f android.hardware.audio.service-aidl.mediatek 2>/dev/null | head -n 1)
+  [ -n "$service_pid" ] && { printf '%s\n' "$service_pid"; return 0; }
+  service_pid=$(pidof android.hardware.audio.service 2>/dev/null | awk '{print $1}')
+  [ -n "$service_pid" ] && { printf '%s\n' "$service_pid"; return 0; }
+  for service_cmdline in /proc/[0-9]*/cmdline; do
+    [ -r "$service_cmdline" ] || continue
+    service_pid=${service_cmdline#/proc/}
+    service_pid=${service_pid%%/*}
+    if grep -a -F -q android.hardware.audio.service-aidl.mediatek "$service_cmdline" 2>/dev/null; then
+      printf '%s\n' "$service_pid"
       return 0
     fi
-    if grep -a -F -q "android.hardware.audio.service" "$f" 2>/dev/null ||
-       grep -a -F -q "audio.service-aidl" "$f" 2>/dev/null; then
-      if grep -a -F -q "audio.primary." "/proc/$pid/maps" 2>/dev/null; then
-        echo "$pid"
+    if grep -a -F -q android.hardware.audio.service "$service_cmdline" 2>/dev/null ||
+       grep -a -F -q audio.service-aidl "$service_cmdline" 2>/dev/null; then
+      if grep -a -F -q 'audio.primary.' "/proc/$service_pid/maps" 2>/dev/null; then
+        printf '%s\n' "$service_pid"
         return 0
       fi
     fi
@@ -84,155 +44,227 @@ find_hal_pid() {
   return 1
 }
 
-find_hal_base() {
-  pid="$1"
-  [ -n "$pid" ] || return 1
-  /system/bin/cat "/proc/$pid/maps" 2>/dev/null | awk '/audio.primary.mediatek.so|audio.primary.mt6991.so/ && $3 == "00000000" {split($1,a,"-"); print "0x" a[1]; exit}'
+apply_once() {
+  service_reason=$1
+  A2H_REASON="$service_reason" A2H_APPLY_ATTEMPTS=1 sh "$APPLIER" apply >> "$LOG" 2>&1
 }
 
-find_hal_base_generic() {
-  pid="$1"
-  [ -n "$pid" ] || return 1
-  /system/bin/cat "/proc/$pid/maps" 2>/dev/null | awk '
-    /audio\.primary\..*\.so/ && $3 == "00000000" {
-      split($1,a,"-");
-      score=10;
-      if ($6 ~ /audio\.primary\.mediatek\.so/) score+=50;
-      if ($6 ~ /audio\.primary\.mt6991\.so/) score+=45;
-      if ($6 ~ /\/vendor\/lib64\/hw\//) score+=10;
-      if ($2 ~ /r-xp/) score+=3;
-      if (score > best) { best=score; best_addr="0x" a[1]; }
-    }
-    END { if (best_addr) print best_addr; }
-  '
-}
-
-with_lock() {
-  # simple non-blocking lock to avoid WebUI + watcher double apply
-  if ! mkdir "$LOCK_FILE" 2>/dev/null; then
-    # stale lock older than 20s?
-    now=$(date +%s)
-    mtime=$(stat -c %Y "$LOCK_FILE" 2>/dev/null || echo 0)
-    if [ -n "$mtime" ] && [ $((now - mtime)) -gt 20 ]; then
-      rmdir "$LOCK_FILE" 2>/dev/null
-      mkdir "$LOCK_FILE" 2>/dev/null || return 1
+notification_text() {
+  notification_result=$1
+  notification_mode=$(cat "$CFG_STATE" 2>/dev/null | tr -d '\r' | head -n 1)
+  notification_active=$(awk 'NF { count++ } END { print count + 0 }' "$TMP_PKGS" 2>/dev/null)
+  [ -n "$notification_active" ] || notification_active=0
+  if [ "$notification_result" = "success" ]; then
+    if [ "$notification_mode" = "enabled" ]; then
+      printf '%s\n' '开机自动加载成功：全局音乐触感已通过运行状态校验。'
     else
-      return 1
+      printf '开机自动加载成功：白名单音乐触感已通过运行状态校验，当前启用 %s 个应用。\n' "$notification_active"
     fi
+  else
+    printf '%s\n' '开机自动加载失败：未通过运行状态校验，请打开模块 WebUI 查看状态并分享日志。'
   fi
-  return 0
 }
-unlock() { rmdir "$LOCK_FILE" 2>/dev/null; }
 
-live_ok() {
-  pid="$1"
-  mode_want="$2"
-  want="whitelist"
-  [ "$mode_want" = "enabled" ] && want="global"
-  # Quiet by default; only append details when check fails.
-  tmp="/data/local/tmp/a2h_live_check.$$"
-  if "$PATCHER" --check "$want" "$pid" >"$tmp" 2>&1; then
-    rm -f "$tmp" 2>/dev/null
+notification_live_result() {
+  notification_mode=$(cat "$CFG_STATE" 2>/dev/null | tr -d '\r' | head -n 1)
+  notification_want=whitelist
+  [ "$notification_mode" = "enabled" ] && notification_want=global
+  if [ -f "$APPLIER" ] &&
+     A2H_QUIET_CHECK=1 A2H_QUIET_PREPARE=1 sh "$APPLIER" check "$notification_want" >/dev/null 2>&1; then
+    printf '%s\n' success
+  else
+    printf '%s\n' failure
+  fi
+}
+
+record_notification_state() {
+  notification_state_value=$1
+  notification_state_tmp="$CFG_DIR/.notification_state.$$"
+  printf '%s\n' "$notification_state_value" > "$notification_state_tmp" 2>/dev/null || return 1
+  chmod 600 "$notification_state_tmp" 2>/dev/null || true
+  mv -f "$notification_state_tmp" "$NOTIFICATION_STATE_FILE" 2>/dev/null
+}
+
+post_boot_notification() {
+  notification_requested=$1
+  notification_wait=0
+  while [ "$notification_wait" -lt 60 ]; do
+    [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ] && break
+    sleep 2
+    notification_wait=$((notification_wait + 1))
+  done
+
+  notification_result=$(notification_live_result)
+  [ -n "$notification_result" ] || notification_result=failure
+  if [ "$notification_result" != "$notification_requested" ]; then
+    log "notification state refreshed requested=$notification_requested actual=$notification_result"
+  fi
+  notification_previous=$(cat "$NOTIFICATION_STATE_FILE" 2>/dev/null | tr -d '\r' | head -n 1)
+  if [ "$notification_previous" = "$notification_result" ]; then
+    log "notification unchanged result=$notification_result"
     return 0
   fi
-  echo "[live_ok FAIL want=$want pid=$pid]" >> "$LOG" 2>/dev/null
-  cat "$tmp" >> "$LOG" 2>/dev/null
-  rm -f "$tmp" 2>/dev/null
+  # Record the attempted transition before posting so an unavailable
+  # notification service does not cause retries every watcher cycle.
+  record_notification_state "$notification_result" || true
+
+  notification_body=$(notification_text "$notification_result")
+  notification_title='A2H 音乐触感'
+  notification_tag=a2h_hook
+  notification_tmp="/data/local/tmp/.a2h_notification.$$"
+
+  if /system/bin/cmd notification post -S bigtext -t "$notification_title" "$notification_tag" "$notification_body" > "$notification_tmp" 2>&1; then
+    log "boot notification posted result=$notification_result style=bigtext"
+    rm -f "$notification_tmp" 2>/dev/null
+    return 0
+  fi
+  log "boot notification bigtext failed; trying plain title"
+  cat "$notification_tmp" >> "$LOG" 2>/dev/null
+
+  if /system/bin/cmd notification post -t "$notification_title" "$notification_tag" "$notification_body" > "$notification_tmp" 2>&1; then
+    log "boot notification posted result=$notification_result style=plain"
+    rm -f "$notification_tmp" 2>/dev/null
+    return 0
+  fi
+  log "boot notification titled form failed; trying minimal form"
+  cat "$notification_tmp" >> "$LOG" 2>/dev/null
+
+  if /system/bin/cmd notification post "$notification_tag" "$notification_body" > "$notification_tmp" 2>&1; then
+    log "boot notification posted result=$notification_result style=minimal"
+    rm -f "$notification_tmp" 2>/dev/null
+    return 0
+  fi
+  log "boot notification FAIL result=$notification_result"
+  cat "$notification_tmp" >> "$LOG" 2>/dev/null
+  rm -f "$notification_tmp" 2>/dev/null
   return 1
 }
 
-apply_once() {
-  reason="$1"
-  if ! with_lock; then
-    log "watch: skip apply (busy) reason=$reason"
+set_runtime_status() {
+  next_runtime_status=$1
+  if [ "$runtime_status" = "$next_runtime_status" ]; then
+    notification_recorded=$(cat "$NOTIFICATION_STATE_FILE" 2>/dev/null | tr -d '\r' | head -n 1)
+    [ "$notification_recorded" = "$next_runtime_status" ] && return 0
+    [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ] || return 0
+    post_boot_notification "$next_runtime_status" &
     return 0
   fi
-  sync_runtime_from_module
-  ENABLED=$(cat "$CFG_STATE" 2>/dev/null)
-  [ "$ENABLED" = "enabled" ] || ENABLED="disabled"
-  PID=$(find_hal_pid)
-  if [ -z "$PID" ]; then
-    log "watch: HAL missing ($reason)"
-    unlock
-    return 1
+  previous_runtime_status=${runtime_status:-unknown}
+  runtime_status=$next_runtime_status
+  log "runtime status transition $previous_runtime_status -> $runtime_status"
+  if [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ]; then
+    post_boot_notification "$runtime_status" &
   fi
-  BASE=$(find_hal_base "$PID")
-  [ -n "$BASE" ] || BASE=$(find_hal_base_generic "$PID")
-  BASE_ARG=""
-  [ -n "$BASE" ] && BASE_ARG="--base $BASE"
-  log "watch apply reason=$reason pid=$PID base=${BASE:-auto} mode=$ENABLED"
-  rc=1
-  if [ "$ENABLED" = "enabled" ]; then
-    if "$PATCHER" "$PID" $BASE_ARG >> "$LOG" 2>&1; then
-      printf '%s\n' "$PID" > "$LAST_PID_FILE" 2>/dev/null
-      log "watch GLOBAL ok pid=$PID"
-      rc=0
-    fi
-  else
-    if "$PATCHER" --disable "$PID" "$CFG_PKGS" $BASE_ARG >> "$LOG" 2>&1; then
-      printf '%s\n' "$PID" > "$LAST_PID_FILE" 2>/dev/null
-      log "watch WHITELIST ok pid=$PID"
-      rc=0
-    fi
-  fi
-  [ "$rc" != "0" ] && log "watch apply FAIL reason=$reason pid=$PID"
-  unlock
-  return $rc
 }
 
-echo "[a2h_hook] v1.5.2-fix $(date)" > "$LOG"
-chmod 755 "$PATCHER" 2>/dev/null
-ensure_state_file
-ensure_packages_file
-sync_runtime_from_module
+module_version=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n 1)
+[ -n "$module_version" ] || module_version=unknown
+printf '[a2h_hook] %s %s\n' "$module_version" "$(date)" > "$LOG" 2>/dev/null
 
-ENABLED=$(cat "$CFG_STATE" 2>/dev/null)
-[ "$ENABLED" = "enabled" ] || ENABLED="disabled"
-log "boot apply start mode=$ENABLED"
-log "packages file:"
-nl -ba "$CFG_PKGS" 2>/dev/null | while read -r line; do log "  $line"; done
+mkdir -p "$CFG_DIR" /data/local/tmp 2>/dev/null
+rm -f "$NOTIFICATION_STATE_FILE" 2>/dev/null
+chmod 755 "$APPLIER" "$PATCHER" 2>/dev/null
 
-ok=0
-for i in $(seq 1 30); do
-  if apply_once "boot#$i"; then ok=1; break; fi
+if [ ! -f "$APPLIER" ] || [ ! -f "$PATCHER" ]; then
+  log "boot apply FAIL missing executable applier=$([ -f "$APPLIER" ] && printf yes || printf no) patcher=$([ -f "$PATCHER" ] && printf yes || printf no)"
+  post_boot_notification failure &
+  exit 1
+fi
+
+log "boot auto-apply start"
+boot_ok=0
+boot_try=1
+while [ "$boot_try" -le 30 ]; do
+  if apply_once "boot#$boot_try"; then
+    boot_ok=1
+    break
+  fi
+  log "boot auto-apply retry=$boot_try"
   sleep 2
+  boot_try=$((boot_try + 1))
 done
-[ "$ok" = "1" ] || log "boot apply TIMEOUT, continue watcher"
 
-log "watcher start"
-LAST_PID=$(cat "$LAST_PID_FILE" 2>/dev/null)
-FAILS=0
+if [ "$boot_ok" = "1" ]; then
+  boot_mode=$(cat "$CFG_STATE" 2>/dev/null | tr -d '\r' | head -n 1)
+  boot_snapshot=$(cat "$APPLIED_SNAPSHOT" 2>/dev/null)
+  log "boot auto-apply verified mode=$boot_mode snapshot=${boot_snapshot:-none} attempts=$boot_try"
+  runtime_status=success
+  post_boot_notification success &
+else
+  log "boot auto-apply TIMEOUT attempts=30; watcher will continue recovery"
+  runtime_status=failure
+  post_boot_notification failure &
+fi
+
+last_pid=$(cat "$LAST_PID_FILE" 2>/dev/null)
+watch_failures=0
+log "watcher start pid=${last_pid:-none}"
+
 while true; do
   sleep 25
-  sync_runtime_from_module
-  ENABLED=$(cat "$CFG_STATE" 2>/dev/null)
-  [ "$ENABLED" = "enabled" ] || ENABLED="disabled"
-  PID=$(find_hal_pid)
-  if [ -z "$PID" ]; then
-    FAILS=$((FAILS+1))
-    [ $((FAILS % 6)) -eq 0 ] && log "watcher: HAL not found (x$FAILS)"
+
+  current_snapshot=$(A2H_QUIET_PREPARE=1 sh "$APPLIER" snapshot 2>/dev/null)
+  snapshot_rc=$?
+  current_pid=$(find_hal_pid)
+  applied_snapshot=$(cat "$APPLIED_SNAPSHOT" 2>/dev/null)
+  need_apply=0
+  apply_reason=
+
+  if [ "$snapshot_rc" -ne 0 ] || [ -z "$current_snapshot" ]; then
+    watch_failures=$((watch_failures + 1))
+    [ $((watch_failures % 6)) -eq 0 ] && log "watcher config prepare failed x$watch_failures"
+    set_runtime_status failure
     continue
   fi
 
-  need=0
-  if [ "$PID" != "$LAST_PID" ]; then
-    need=1
-    log "watcher: HAL pid changed ${LAST_PID:-none} -> $PID"
-  else
-    # quiet check: only reapply if check fails
-    if ! live_ok "$PID" "$ENABLED" >/dev/null 2>&1; then
-      # live_ok already logged details to a2h_patch.log
-      need=1
-      log "watcher: live check failed, will reapply mode=$ENABLED pid=$PID"
+  if [ -z "$current_pid" ]; then
+    watch_failures=$((watch_failures + 1))
+    [ $((watch_failures % 6)) -eq 0 ] && log "watcher HAL not found x$watch_failures"
+    set_runtime_status failure
+    continue
+  fi
+
+  if [ "$current_pid" != "$last_pid" ]; then
+    need_apply=1
+    apply_reason="pid-change:${last_pid:-none}-$current_pid"
+    log "watcher HAL pid changed ${last_pid:-none} -> $current_pid"
+  fi
+
+  if [ "$current_snapshot" != "$applied_snapshot" ]; then
+    need_apply=1
+    if [ -n "$apply_reason" ]; then
+      apply_reason="$apply_reason,config-change"
+    else
+      apply_reason=config-change
+    fi
+    log "watcher config changed applied=${applied_snapshot:-none} current=$current_snapshot"
+  fi
+
+  if [ "$need_apply" = "0" ]; then
+    watch_mode=$(cat "$CFG_STATE" 2>/dev/null | tr -d '\r' | head -n 1)
+    watch_want=whitelist
+    [ "$watch_mode" = "enabled" ] && watch_want=global
+    if ! A2H_QUIET_CHECK=1 A2H_QUIET_PREPARE=1 sh "$APPLIER" check "$watch_want" >/dev/null 2>&1; then
+      need_apply=1
+      apply_reason=live-check
+      log "watcher live check failed pid=$current_pid mode=$watch_want"
     fi
   fi
 
-  if [ "$need" = "1" ]; then
-    if apply_once "watch"; then
-      LAST_PID=$(cat "$LAST_PID_FILE" 2>/dev/null)
-      FAILS=0
+  if [ "$need_apply" = "1" ]; then
+    if apply_once "watch:$apply_reason"; then
+      last_pid=$(cat "$LAST_PID_FILE" 2>/dev/null)
+      watch_failures=0
+      log "watcher apply verified reason=$apply_reason pid=${last_pid:-unknown}"
+      set_runtime_status success
     else
-      FAILS=$((FAILS+1))
+      watch_failures=$((watch_failures + 1))
+      log "watcher apply FAIL reason=$apply_reason failures=$watch_failures"
+      set_runtime_status failure
     fi
+  else
+    last_pid=$current_pid
+    watch_failures=0
+    set_runtime_status success
   fi
 done

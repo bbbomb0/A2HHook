@@ -1,4 +1,4 @@
-// a2h_patch v1.5.2-fix - v1.0 universal signature scan + 10-slot whitelist
+// a2h_patch v1.5.3 - v1.0 universal signature scan + 10-slot whitelist
 #define _GNU_SOURCE
 #include <stdint.h>
 #include <stdio.h>
@@ -41,7 +41,7 @@
 #define PTRACE_PEEKDATA 2
 #define PTRACE_POKEDATA 5
 #define MAX_SLOTS 10
-#define A2H_VERSION "1.5.2-fix"
+#define A2H_VERSION "1.5.3"
 
 struct user_pt_regs_a64 {
     uint64_t regs[31];
@@ -99,8 +99,30 @@ static uintptr_t slot_off(int i){return upx(slots[i].off_x);}
 static void set_slot_off(int i,uintptr_t off){slots[i].off_x=(uint32_t)off^0xA5C31F77u;} 
 static uintptr_t k_func_off(void){return g_func_off;} 
 static int load_func_off_hint(uintptr_t *out);
+static int load_cave_hint(uintptr_t *out);
+static void save_cave_hint(uintptr_t off);
 static const unsigned char SIG8[8]={0xe0,0x04,0x00,0xb4,0xfd,0x7b,0xbe,0xa9};
 static const unsigned char PATCH[8]={0x20,0x00,0x80,0x52,0xc0,0x03,0x5f,0xd6};
+static const unsigned char STOCK_TAIL8[8]={0xf3,0x0b,0x00,0xf9,0xfd,0x03,0x00,0x91};
+static const unsigned char GLOBAL_TAIL8[8]={0x1f,0x20,0x03,0xd5,0x1f,0x20,0x03,0xd5};
+static const unsigned char GLOBAL_PATCH[16]={
+    0x20,0x00,0x80,0x52,0xc0,0x03,0x5f,0xd6,
+    0x1f,0x20,0x03,0xd5,0x1f,0x20,0x03,0xd5
+};
+static int patched_global_stub_tail(const unsigned char *head, size_t n) {
+    if (!head || n < 16 || memcmp(head, PATCH, sizeof(PATCH)) != 0) return 0;
+    uint32_t w2 = (uint32_t)head[8] | ((uint32_t)head[9] << 8) |
+                  ((uint32_t)head[10] << 16) | ((uint32_t)head[11] << 24);
+    uint32_t w3 = (uint32_t)head[12] | ((uint32_t)head[13] << 8) |
+                  ((uint32_t)head[14] << 16) | ((uint32_t)head[15] << 24);
+    return ((w2 & 0xFF00001Fu) == 0xB4000000u) && w3 == 0x52800142u;
+}
+static int patched_global_tail_ok(const unsigned char *head, size_t n) {
+    if (!head || n < 16 || memcmp(head, PATCH, sizeof(PATCH)) != 0) return 0;
+    return memcmp(head + sizeof(PATCH), STOCK_TAIL8, sizeof(STOCK_TAIL8)) == 0 ||
+           memcmp(head + sizeof(PATCH), GLOBAL_TAIL8, sizeof(GLOBAL_TAIL8)) == 0 ||
+           patched_global_stub_tail(head, n);
+}
 static uint32_t load_u32le(const unsigned char *h) {
     return (uint32_t)h[0] | ((uint32_t)h[1] << 8) | ((uint32_t)h[2] << 16) | ((uint32_t)h[3] << 24);
 }
@@ -158,7 +180,7 @@ static void log_prop(const char *key){
     char cmd[192], val[256]={0};
     snprintf(cmd,sizeof(cmd),"/system/bin/getprop %s 2>/dev/null", key);
     FILE *f=popen(cmd,"r");
-    if(f){ if(fgets(val,sizeof(val),f)){ size_t n=strlen(val); while(n&&(val[n-1]=='\n'||val[n-1]=='\n')) val[--n]=0; } pclose(f); }
+    if(f){ if(fgets(val,sizeof(val),f)){ size_t n=strlen(val); while(n&&(val[n-1]=='\n'||val[n-1]=='\r')) val[--n]=0; } pclose(f); }
     fprintf(stderr,"[a2h_patch] prop %s=%s\n", key, val[0]?val:"(empty)");
 }
 static void log_system_identity(void){
@@ -341,13 +363,13 @@ static int find_pid(void) {
 static uintptr_t find_lib_base_and_maps(pid_t pid, const char *name, uintptr_t *rw_s, uintptr_t *rw_e, uintptr_t *rx_s, uintptr_t *rx_e) {
     char mp[64]; snprintf(mp,sizeof(mp),"/proc/%d/maps",pid);
     FILE *f=fopen(mp,"r"); if(!f) return 0;
-    char line[512]; uintptr_t base=0,rws=0,rwe=0,rxs=0,rxe=0;
+    char line[512]; uintptr_t base=0,first_s=0,rws=0,rwe=0,rxs=0,rxe=0;
     while(fgets(line,sizeof(line),f)) {
         if(!strstr(line,name)) continue;
         uintptr_t s=0,e=0; unsigned off=0; char perms[8]={0};
         if (sscanf(line, "%lx-%lx %7s %x", &s, &e, perms, &off) < 4) continue;
+        if (!first_s) first_s = s;
         if (!base && off == 0) base = s;
-        if (!base) base = s;
         if (strchr(perms, 'x')) {
             if (!rxs || s < rxs) rxs = s;
             if (e > rxe) rxe = e;
@@ -357,6 +379,7 @@ static uintptr_t find_lib_base_and_maps(pid_t pid, const char *name, uintptr_t *
         }
     }
     fclose(f);
+    if (!base) base = first_s;
     if (rw_s) *rw_s = rws;
     if (rw_e) *rw_e = rwe;
     if (rx_s) *rx_s = rxs;
@@ -405,9 +428,9 @@ static int valid_pkg(const char *s) {
     return strchr(s,'.')!=NULL;
 }
 static int valid_pkg_for_slot(const char *s, int slot) {
+    (void)slot;
     if(!valid_pkg(s)) return 0;
-    if(slot>=0 && slot<6 && strlen(s)>(size_t)slots[slot].max_len) return 0;
-    if(slot>=6 && strlen(s)>63) return 0;
+    /* All ten configured slots are copied into the 64-byte custom cave. */
     return 1;
 }
 static void free_pkgs(char **pkgs) {
@@ -415,28 +438,92 @@ static void free_pkgs(char **pkgs) {
     for(int i=0;i<MAX_SLOTS;++i) free(pkgs[i]);
     free(pkgs);
 }
-static char **read_pkgs(const char *path, int *rejected) {
+typedef struct {
+    int lines_read;
+    int active;
+    int rejected;
+    int extra_lines;
+    int padded_lines;
+    int fallback_defaults;
+    int explicit_all_off;
+} pkg_stats_t;
+
+static int fill_default_pkgs(char **pkgs) {
+    int active = 0;
+    for (int i = 0; i < 6; ++i) {
+        char tmp[64];
+        pkg_default(i, tmp, sizeof(tmp));
+        free(pkgs[i]);
+        pkgs[i] = strdup(tmp);
+        if (pkgs[i]) active++;
+    }
+    for (int i = 6; i < MAX_SLOTS; ++i) {
+        free(pkgs[i]);
+        pkgs[i] = NULL;
+    }
+    return active;
+}
+
+static char **read_pkgs(const char *path, pkg_stats_t *stats) {
     char **p = calloc(MAX_SLOTS, sizeof(char*));
     FILE *f = fopen(path, "r");
     if (!p) return NULL;
-    if (rejected) *rejected = 0;
+    if (stats) memset(stats, 0, sizeof(*stats));
     if (!f) {
-        for (int i = 0; i < 6; ++i) { char tmp[64]; pkg_default(i, tmp, sizeof(tmp)); p[i] = strdup(tmp); }
-        fprintf(stderr, "[a2h_patch] packages: fallback defaults (file missing: %s)\n", path);
+        int active = fill_default_pkgs(p);
+        if (stats) { stats->active = active; stats->fallback_defaults = 1; }
+        fprintf(stderr, "[a2h_patch] packages: fallback defaults (file missing: %s) active=%d\n", path, active);
         return p;
     }
-    char line[256]; int sl=0;
-    while(fgets(line,sizeof(line),f)&&sl<MAX_SLOTS) {
+    char line[256]; int sl=0, active=0, rejected=0, extra=0;
+    while(fgets(line,sizeof(line),f)) {
         trim(line);
         if(line[0]=='#') continue;
+        if(sl>=MAX_SLOTS) { extra++; continue; }
         if(line[0]) {
-            if (valid_pkg_for_slot(line, sl)) p[sl] = strdup(line);
-            else { fprintf(stderr, "[a2h_patch] slot%d rejected: '%s'\n", sl, line); if (rejected) (*rejected)++; p[sl]=NULL; }
+            if (valid_pkg_for_slot(line, sl)) {
+                p[sl] = strdup(line);
+                if (p[sl]) active++;
+            } else {
+                fprintf(stderr, "[a2h_patch] slot%d rejected: '%s'\n", sl, line);
+                rejected++;
+                p[sl]=NULL;
+            }
         } else p[sl]=NULL;
         sl++;
     }
     fclose(f);
-    fprintf(stderr, "[a2h_patch] packages file=%s lines_read=%d\n", path, sl);
+    int padded = sl < MAX_SLOTS ? MAX_SLOTS - sl : 0;
+    int fallback = 0;
+    int explicit_all_off = (sl == MAX_SLOTS && active == 0 && rejected == 0);
+    if(active == 0 && !explicit_all_off) {
+        fprintf(stderr,
+                "[a2h_patch] WARN: packages structurally invalid/empty lines=%d rejected=%d; restoring official defaults\n",
+                sl, rejected);
+        active = fill_default_pkgs(p);
+        fallback = 1;
+    } else if (sl < MAX_SLOTS) {
+        fprintf(stderr, "[a2h_patch] WARN: packages short table lines=%d padded=%d active=%d\n",
+                sl, padded, active);
+    }
+    if(extra > 0) {
+        fprintf(stderr, "[a2h_patch] WARN: packages ignored extra lines=%d\n", extra);
+    }
+    if(explicit_all_off) {
+        fprintf(stderr, "[a2h_patch] packages: explicit all-off table accepted\n");
+    }
+    if(stats) {
+        stats->lines_read = sl;
+        stats->active = active;
+        stats->rejected = rejected;
+        stats->extra_lines = extra;
+        stats->padded_lines = padded;
+        stats->fallback_defaults = fallback;
+        stats->explicit_all_off = explicit_all_off;
+    }
+    fprintf(stderr,
+            "[a2h_patch] packages file=%s lines_read=%d active=%d rejected=%d extra=%d padded=%d fallback=%d all_off=%d\n",
+            path, sl, active, rejected, extra, padded, fallback, explicit_all_off);
     return p;
 }
 
@@ -460,11 +547,150 @@ static int head_is_known(const unsigned char *head, size_t n) {
         is_stub_head(head, n)
     );
 }
+
+typedef struct {
+    int table_ok;
+    int magic_ok;
+    int active_ptrs;
+    int invalid_ptrs;
+    int content_mismatch;
+    uintptr_t table_abs;
+} stub_info_t;
+
+/* Decode the ADRP/ADD pair emitted by write_whitelist_stub_code(). */
+static int decode_stub_table(uintptr_t func_abs, const unsigned char *head, uintptr_t *table_abs) {
+    if (!head || !table_abs) return 0;
+    uint32_t adrp = load_u32le(head);
+    uint32_t add = load_u32le(head + 4);
+    if (((adrp & 0x9F00001Fu) != 0x90000001u) ||
+        ((add & 0xFFC003FFu) != 0x91000021u)) return 0;
+    int64_t imm21 = (int64_t)((((adrp >> 5) & 0x7FFFFu) << 2) | ((adrp >> 29) & 0x3u));
+    if (imm21 & (1LL << 20)) imm21 |= ~((1LL << 21) - 1);
+    int64_t page_signed = (int64_t)(func_abs & ~(uintptr_t)0xFFFu) + imm21 * 4096;
+    if (page_signed < 0) return 0;
+    uintptr_t page = (uintptr_t)page_signed;
+    uint32_t imm12 = (add >> 10) & 0xFFFu;
+    if ((add >> 22) & 1u) imm12 <<= 12;
+    *table_abs = page + (uintptr_t)imm12;
+    return 1;
+}
+
+static int inspect_stub_table(pid_t pid, uintptr_t base, uintptr_t func_off,
+                              const unsigned char *head, char **expected,
+                              int verbose, stub_info_t *out) {
+    stub_info_t info;
+    memset(&info, 0, sizeof(info));
+    uintptr_t table = 0;
+    if (!decode_stub_table(base + func_off, head, &table)) {
+        if (verbose) fprintf(stderr, "[a2h_patch] stub table decode FAIL\n");
+        if (out) *out = info;
+        return 0;
+    }
+    info.table_abs = table;
+    uintptr_t rw_lo = base + g_rw_start;
+    uintptr_t rw_hi = base + g_rw_end;
+    uintptr_t table_bytes = MAX_SLOTS * sizeof(uint64_t);
+    int range_ok = (g_rw_end > g_rw_start &&
+                    g_rw_end - g_rw_start >= table_bytes &&
+                    table >= rw_lo && table <= rw_hi - table_bytes);
+    if (!range_ok || table < base + 16) {
+        if (verbose) fprintf(stderr, "[a2h_patch] stub table out of range @0x%lx\n",
+                             (unsigned long)table);
+        if (out) *out = info;
+        return 0;
+    }
+    uint32_t magic = 0;
+    if (mem_r(pid, table - 16, &magic, sizeof(magic)) == 0 && magic == 0x31483241u) {
+        info.magic_ok = 1;
+    }
+    uint64_t ptrs[MAX_SLOTS];
+    if (mem_r(pid, table, ptrs, sizeof(ptrs)) != 0) {
+        if (verbose) fprintf(stderr, "[a2h_patch] stub pointer table read FAIL @0x%lx\n",
+                             (unsigned long)(table - base));
+        if (out) *out = info;
+        return 0;
+    }
+    uintptr_t lib_hi = base + g_rw_end;
+    for (int i = 0; i < MAX_SLOTS; ++i) {
+        const char *want = expected && expected[i] ? expected[i] : NULL;
+        if (!ptrs[i]) {
+            if (expected && want && want[0]) info.content_mismatch++;
+            continue;
+        }
+        info.active_ptrs++;
+        if (expected && (!want || !want[0])) {
+            /* A disabled slot must not retain a pointer to an old string. */
+            info.content_mismatch++;
+        }
+        uintptr_t p = (uintptr_t)ptrs[i];
+        char got[64];
+        memset(got, 0, sizeof(got));
+        if (p < base || p >= lib_hi || mem_r(pid, p, got, sizeof(got) - 1) != 0 ||
+            !valid_pkg(got)) {
+            info.invalid_ptrs++;
+            continue;
+        }
+        if (want && strcmp(got, want) != 0) info.content_mismatch++;
+        if (verbose) fprintf(stderr, "[a2h_patch] active_ptr[%d]=0x%lx value='%s'\n",
+                             i, (unsigned long)(p - base), got);
+    }
+    /* A magic marker is required for an all-off table; active legacy tables may predate it. */
+    info.table_ok = range_ok && info.invalid_ptrs == 0 &&
+                    (info.magic_ok || info.active_ptrs > 0);
+    if (verbose) {
+        fprintf(stderr,
+                "[a2h_patch] stub table=%s magic=%s active_ptrs=%d invalid_ptrs=%d content_mismatch=%d rel=0x%lx\n",
+                info.table_ok ? "OK" : "BAD", info.magic_ok ? "OK" : "missing",
+                info.active_ptrs, info.invalid_ptrs, info.content_mismatch,
+                (unsigned long)(table - base));
+    }
+    if (out) *out = info;
+    return info.table_ok;
+}
+
+static int marked_cave_ok(pid_t pid, uintptr_t base, uintptr_t cave) {
+    uintptr_t marker_span = MAX_SLOTS * 64 + 16;
+    if (g_rw_end <= g_rw_start ||
+        g_rw_end - g_rw_start < marker_span ||
+        cave < g_rw_start || cave > g_rw_end - marker_span) {
+        return 0;
+    }
+    uintptr_t marker = base + cave + MAX_SLOTS * 64;
+    uint32_t magic = 0;
+    if (mem_r(pid, marker, &magic, sizeof(magic)) != 0 || magic != 0x31483241u) {
+        return 0;
+    }
+    uintptr_t table = cave + MAX_SLOTS * 64;
+    table = (table + 16 + 7) & ~((uintptr_t)7);
+    uint64_t ptrs[MAX_SLOTS];
+    if (mem_r(pid, base + table, ptrs, sizeof(ptrs)) != 0) return 0;
+    uintptr_t rw_lo = base + g_rw_start;
+    uintptr_t rw_hi = base + g_rw_end;
+    for (int i = 0; i < MAX_SLOTS; ++i) {
+        if (ptrs[i] && (ptrs[i] < rw_lo || ptrs[i] >= rw_hi)) return 0;
+    }
+    return 1;
+}
+
+/* A legacy whitelist->global transition leaves the old stub words after the
+ * eight-byte global return sequence.  Accept that shape only when the cave
+ * marker and pointer table still belong to this module instance. */
+static int patched_global_candidate_ok(pid_t pid, uintptr_t base,
+                                       const unsigned char *head, size_t n) {
+    if (!patched_global_tail_ok(head, n)) return 0;
+    if (!patched_global_stub_tail(head, n)) return 1;
+
+    uintptr_t cave = 0;
+    return load_cave_hint(&cave) && marked_cave_ok(pid, base, cave);
+}
+
 static int score_profile(pid_t pid, uintptr_t base, const profile_t *prof) {
     int score = 0; unsigned char head[16] = {0};
     if (mem_r(pid, base + prof->func_off, head, sizeof(head)) != 0) return -1000;
     if (memcmp(head, SIG8, 8) == 0) score += 50;
-    if (memcmp(head, PATCH, 8) == 0) score += 40;
+    if (memcmp(head, PATCH, 8) == 0) {
+        score += patched_global_tail_ok(head, sizeof(head)) ? 40 : 10;
+    }
     if (is_stub_head(head, sizeof(head))) score += 35;
     for (int i = 0; i < 6; ++i) {
         char got[64]={0}, exp[64]={0}; pkg_default(i, exp, sizeof(exp));
@@ -477,7 +703,8 @@ static int score_profile(pid_t pid, uintptr_t base, const profile_t *prof) {
             prof->name, prof->hint, score, head[0], head[1], head[2], head[3]);
     return score;
 }
-// Prefer true stock prologue only. Full-text ADRP/global scanning is too noisy after patch.
+// Prefer a unique stock prologue. Patched candidates must also be unambiguous
+// and, for a legacy stub tail, prove ownership of the recorded cave marker.
 static int scan_func_by_sig(pid_t pid, uintptr_t base, uintptr_t *out_off) {
     // Locate is_A2H_app even after patching:
     // 1) stock prologue SIG8
@@ -487,7 +714,7 @@ static int scan_func_by_sig(pid_t pid, uintptr_t base, uintptr_t *out_off) {
     char mp[64]; snprintf(mp,sizeof(mp),"/proc/%d/maps",pid);
     FILE *f=fopen(mp,"r"); if(!f) return 0;
     char line[512];
-    int segs=0, hits_stock=0, hits_global=0, hits_stub=0;
+    int segs=0, hits_stock=0, hits_global_raw=0, hits_global=0, hits_stub_raw=0, hits_stub=0;
     uintptr_t best_stock=0, best_global=0, best_stub=0;
     fprintf(stderr, "[a2h_patch] Scanning exec for stock/global/stub is_A2H_app...\n");
     while (fgets(line,sizeof(line),f)) {
@@ -515,33 +742,62 @@ static int scan_func_by_sig(pid_t pid, uintptr_t base, uintptr_t *out_off) {
                 continue;
             }
             if (memcmp(h, PATCH, 8) == 0) {
-                hits_global++; best_global = rel;
+                hits_global_raw++;
+                if (patched_global_candidate_ok(pid, base, h, 16)) {
+                    hits_global++;
+                    best_global = rel;
+                }
                 continue;
             }
             if (is_stub_head(h, 16)) {
-                hits_stub++; best_stub = rel;
+                hits_stub_raw++;
+                stub_info_t si;
+                if (inspect_stub_table(pid, base, rel, h, NULL, 0, &si)) {
+                    hits_stub++;
+                    best_stub = rel;
+                }
             }
         }
         free(buf);
     }
     fclose(f);
+    fprintf(stderr,
+            "[a2h_patch] func scan candidates segs=%d stock=%d global_raw=%d global_tail=%d stub_raw=%d stub_valid=%d\n",
+            segs, hits_stock, hits_global_raw, hits_global, hits_stub_raw, hits_stub);
     uintptr_t best = 0;
     const char *kind = "none";
-    if (best_stock) { best = best_stock; kind = "stock"; }
-    else if (best_global && hits_global <= 3) { best = best_global; kind = "global"; }
-    else if (best_stub && hits_stub <= 3) { best = best_stub; kind = "stub"; }
-    else if (best_global) { best = best_global; kind = "global-multi"; }
-    else if (best_stub) { best = best_stub; kind = "stub-multi"; }
-
+    if (hits_stock == 1) {
+        best = best_stock;
+        kind = "stock";
+    } else if (hits_stock > 1) {
+        snprintf(g_scan_kind, sizeof(g_scan_kind), "ambiguous");
+        fprintf(stderr, "[a2h_patch] ERROR: ambiguous stock signature candidates=%d\n", hits_stock);
+        return 0;
+    } else if (hits_global + hits_stub == 1) {
+        if (hits_global == 1) { best = best_global; kind = "global"; }
+        else { best = best_stub; kind = "stub"; }
+    } else if (hits_global + hits_stub > 1) {
+        snprintf(g_scan_kind, sizeof(g_scan_kind), "ambiguous");
+        fprintf(stderr,
+                "[a2h_patch] ERROR: ambiguous patched candidates global=%d stub_valid=%d\n",
+                hits_global, hits_stub);
+        return 0;
+    } else if (hits_global_raw > 0) {
+        snprintf(g_scan_kind, sizeof(g_scan_kind), "ambiguous");
+        fprintf(stderr,
+                "[a2h_patch] ERROR: unverified raw global candidates=%d; refusing unsafe fallback\n",
+                hits_global_raw);
+        return 0;
+    }
     if (!best) {
-        fprintf(stderr, "[a2h_patch] func scan miss segs=%d stock=%d global=%d stub=%d\n",
-                segs, hits_stock, hits_global, hits_stub);
+        snprintf(g_scan_kind, sizeof(g_scan_kind), "miss");
+        fprintf(stderr, "[a2h_patch] func scan miss\n");
         return 0;
     }
     if (out_off) *out_off = best;
     snprintf(g_scan_kind, sizeof(g_scan_kind), "%s", kind);
-    fprintf(stderr, "[a2h_patch] is_A2H_app: 0x%lx kind=%s stock=%d global=%d stub=%d segs=%d\n",
-            (unsigned long)best, kind, hits_stock, hits_global, hits_stub, segs);
+    fprintf(stderr, "[a2h_patch] is_A2H_app: 0x%lx kind=%s stock=%d global_raw=%d global_tail=%d stub_valid=%d segs=%d\n",
+            (unsigned long)best, kind, hits_stock, hits_global_raw, hits_global, hits_stub, segs);
     return 1;
 }
 static int score_string_rel(uintptr_t rel, uintptr_t rw_rel_s, uintptr_t rw_rel_e) {
@@ -643,31 +899,78 @@ static uintptr_t find_zero_cave(pid_t pid, uintptr_t rw_abs_s, uintptr_t rw_abs_
 static int locate_targets(pid_t pid, uintptr_t base) {
     g_scan_kind[0] = 0;
 
-    // 0) If a previously saved func offset still looks valid, use it first.
-    // This is the cheapest path on repeat runs for known OS2/OS3 builds.
+    // 0) A known profile hint may use the fast path. Unknown stock hints are
+    // only clues: the eight-byte stock prologue is not unique enough by itself.
     uintptr_t hint = 0;
+    int patched_hint_ok = 0;
+    const char *patched_hint_state = NULL;
     if (load_func_off_hint(&hint)) {
         unsigned char hh[16] = {0};
-        if (mem_r(pid, base + hint, hh, 16) == 0) {
+        uintptr_t hint_abs = base + hint;
+        int hint_in_rx = (g_rx_end > g_rx_start) ?
+                         (hint_abs >= g_rx_start && hint_abs + sizeof(hh) <= g_rx_end) : 1;
+        if (!hint_in_rx) {
+            fprintf(stderr, "[a2h_patch] func_off hint ignored: 0x%lx outside RX map\n",
+                    (unsigned long)hint);
+        } else if (mem_r(pid, hint_abs, hh, sizeof(hh)) == 0) {
             const profile_t *hit = profile_for_func_off(hint);
-            int hint_ok = hit ? head_is_known(hh, 16) : (memcmp(hh, SIG8, 8) == 0 || is_stub_head(hh, 16));
-            if (!hint_ok) {
-                fprintf(stderr, "[a2h_patch] func_off hint ignored: 0x%lx head=%02x %02x %02x %02x\n",
-                        (unsigned long)hint, hh[0], hh[1], hh[2], hh[3]);
-            } else {
-                g_func_off = hint;
-                if (hit) {
+            if (hit && head_is_known(hh, sizeof(hh))) {
+                int hint_score = score_profile(pid, base, hit);
+                int state_ok = 1;
+                if (memcmp(hh, PATCH, sizeof(PATCH)) == 0 &&
+                    !patched_global_candidate_ok(pid, base, hh, sizeof(hh))) {
+                    state_ok = 0;
+                    fprintf(stderr,
+                            "[a2h_patch] known hint global tail mismatch; defer scan: 0x%lx\n",
+                            (unsigned long)hint);
+                } else if (is_stub_head(hh, sizeof(hh))) {
+                    stub_info_t si;
+                    state_ok = inspect_stub_table(pid, base, hint, hh, NULL, 0, &si);
+                    if (!state_ok) {
+                        fprintf(stderr,
+                                "[a2h_patch] known hint stub table invalid; defer scan: 0x%lx\n",
+                                (unsigned long)hint);
+                    }
+                }
+                if (hint_score >= 90 && state_ok) {
                     apply_profile(hit);
                     snprintf(g_locate_method, sizeof(g_locate_method), "hint+profile");
-                    fprintf(stderr, "[a2h_patch] selected method=%s profile=%s hint=%s func=0x%lx\n",
-                            g_locate_method, g_profile, g_profile_hint, (unsigned long)g_func_off);
-                } else {
-                    snprintf(g_locate_method, sizeof(g_locate_method), "hint");
-                    snprintf(g_profile, sizeof(g_profile), "hint");
-                    snprintf(g_profile_hint, sizeof(g_profile_hint), "saved");
-                    fprintf(stderr, "[a2h_patch] selected method=hint func=0x%lx\n", (unsigned long)g_func_off);
+                    fprintf(stderr,
+                            "[a2h_patch] selected method=%s profile=%s hint=%s func=0x%lx score=%d\n",
+                            g_locate_method, g_profile, g_profile_hint,
+                            (unsigned long)g_func_off, hint_score);
+                    return 1;
                 }
-                return 1;
+                fprintf(stderr,
+                        "[a2h_patch] known hint confidence too low; defer scan func=0x%lx score=%d\n",
+                        (unsigned long)hint, hint_score);
+            }
+            if (memcmp(hh, SIG8, sizeof(SIG8)) == 0) {
+                fprintf(stderr,
+                        "[a2h_patch] unknown stock hint deferred pending unique scan: 0x%lx\n",
+                        (unsigned long)hint);
+            } else if (patched_global_candidate_ok(pid, base, hh, sizeof(hh))) {
+                patched_hint_ok = 1;
+                patched_hint_state = "global";
+                fprintf(stderr,
+                        "[a2h_patch] validated patched hint state=global func=0x%lx (stock tail intact)\n",
+                        (unsigned long)hint);
+            } else if (is_stub_head(hh, sizeof(hh))) {
+                stub_info_t si;
+                if (inspect_stub_table(pid, base, hint, hh, NULL, 0, &si)) {
+                    patched_hint_ok = 1;
+                    patched_hint_state = "whitelist";
+                    fprintf(stderr,
+                            "[a2h_patch] validated patched hint state=whitelist func=0x%lx active_ptrs=%d magic=%d\n",
+                            (unsigned long)hint, si.active_ptrs, si.magic_ok);
+                } else {
+                    fprintf(stderr,
+                            "[a2h_patch] func_off stub hint ignored: 0x%lx table validation failed\n",
+                            (unsigned long)hint);
+                }
+            } else {
+                fprintf(stderr, "[a2h_patch] func_off hint ignored: 0x%lx head=%02x %02x %02x %02x\n",
+                        (unsigned long)hint, hh[0], hh[1], hh[2], hh[3]);
             }
         }
     }
@@ -679,9 +982,23 @@ static int locate_targets(pid_t pid, uintptr_t base) {
         int sc = score_profile(pid, base, &PROFILES[i]);
         if (sc > fast_best_score) { fast_best_score = sc; fast_best = (int)i; }
     }
-    if (fast_best >= 0 && fast_best_score >= 40) {
+    /* A fixed profile is accepted only when all six official strings and the
+     * function head agree.  A loose score here can re-use an offset from a
+     * different OTA and patch an unrelated function. */
+    if (fast_best >= 0 && fast_best_score >= 90) {
         unsigned char ph[16]={0};
-        if (mem_r(pid, base + PROFILES[fast_best].func_off, ph, 16) == 0 && head_is_known(ph, 16)) {
+        int fast_state_ok = 0;
+        if (mem_r(pid, base + PROFILES[fast_best].func_off, ph, 16) == 0) {
+            if (memcmp(ph, SIG8, sizeof(SIG8)) == 0 ||
+                patched_global_candidate_ok(pid, base, ph, sizeof(ph))) {
+                fast_state_ok = 1;
+            } else if (is_stub_head(ph, sizeof(ph))) {
+                stub_info_t si;
+                fast_state_ok = inspect_stub_table(pid, base, PROFILES[fast_best].func_off,
+                                                   ph, NULL, 0, &si);
+            }
+        }
+        if (fast_state_ok) {
             apply_profile(&PROFILES[fast_best]);
             snprintf(g_locate_method, sizeof(g_locate_method), "profile-fast");
             fprintf(stderr, "[a2h_patch] selected method=%s profile=%s hint=%s func=0x%lx score=%d\n",
@@ -695,15 +1012,9 @@ static int locate_targets(pid_t pid, uintptr_t base) {
     uintptr_t sig_off = 0;
     int sig_ok = scan_func_by_sig(pid, base, &sig_off);
 
-    if (sig_ok && strcmp(g_scan_kind, "stock") == 0) {
-        g_func_off = sig_off;
-        snprintf(g_locate_method, sizeof(g_locate_method), "scan-stock");
-        snprintf(g_profile, sizeof(g_profile), "universal");
-        snprintf(g_profile_hint, sizeof(g_profile_hint), "v1.0-style");
-        fprintf(stderr, "[a2h_patch] selected method=%s func=0x%lx kind=%s\n",
-                g_locate_method, (unsigned long)g_func_off, g_scan_kind);
-        return 1;
-    }
+    /* Do not return immediately on a unique stock hit.  main() seeds slots
+     * from the OS3 profile; OS2/unknown builds must still select or scan their
+     * package-string layout before any whitelist data is written. */
 
     // 3) Prefer known profiles when already patched / stock matches them.
     int best=-1, best_score=-100000;
@@ -737,12 +1048,18 @@ static int locate_targets(pid_t pid, uintptr_t base) {
     if (best >= 0) {
         unsigned char ph[16]={0};
         if (mem_r(pid, base + PROFILES[best].func_off, ph, 16) == 0) {
-            if (memcmp(ph, SIG8, 8)==0 || memcmp(ph, PATCH, 8)==0) profile_head_ok = 1;
-            else if (is_stub_head(ph, 16)) profile_head_ok = 1;
+            if (memcmp(ph, SIG8, 8)==0 ||
+                patched_global_candidate_ok(pid, base, ph, sizeof(ph))) profile_head_ok = 1;
+            else if (is_stub_head(ph, 16)) {
+                stub_info_t si;
+                profile_head_ok = inspect_stub_table(pid, base, PROFILES[best].func_off,
+                                                     ph, NULL, 0, &si);
+            }
         }
     }
 
-    if (best >= 0 && best_score >= 40 && profile_head_ok) {
+    if (best >= 0 && best_score >= 80 && profile_head_ok &&
+        strcmp(g_scan_kind, "ambiguous") != 0) {
         g_func_off = PROFILES[best].func_off;
         if (sig_ok && sig_off == g_func_off)
             snprintf(g_locate_method, sizeof(g_locate_method), "profile+scan");
@@ -769,11 +1086,16 @@ static int locate_targets(pid_t pid, uintptr_t base) {
         return 1;
     }
 
-    if (best >= 0 && best_score >= 20 && profile_head_ok) {
-        g_func_off = PROFILES[best].func_off;
-        snprintf(g_locate_method, sizeof(g_locate_method), "profile-weak");
-        fprintf(stderr, "[a2h_patch] selected method=%s profile=%s hint=%s func=0x%lx score=%d str_found=%d\n",
-                g_locate_method, g_profile, g_profile_hint, (unsigned long)g_func_off, best_score, str_found);
+    // The full scan recorded ambiguity/misses above. A saved patched hint is
+    // accepted only after state-specific validation (marker, stock tail, or
+    // a cave-owned legacy stub tail).
+    if (patched_hint_ok) {
+        g_func_off = hint;
+        snprintf(g_locate_method, sizeof(g_locate_method), "hint-patched-validated");
+        snprintf(g_profile, sizeof(g_profile), "hint");
+        snprintf(g_profile_hint, sizeof(g_profile_hint), "%s", patched_hint_state);
+        fprintf(stderr, "[a2h_patch] selected method=%s state=%s func=0x%lx\n",
+                g_locate_method, patched_hint_state, (unsigned long)g_func_off);
         return 1;
     }
 
@@ -784,25 +1106,40 @@ static int locate_targets(pid_t pid, uintptr_t base) {
 
 static int setup_custom_cave(pid_t pid, uintptr_t base, uintptr_t rw_abs_s, uintptr_t rw_abs_e) {
     uintptr_t need = MAX_SLOTS * 64 + 16 + (MAX_SLOTS * 8) + 32;
-    uintptr_t rws = rw_abs_s ? (rw_abs_s - base) : 0x434000;
-    uintptr_t rwe = rw_abs_e ? (rw_abs_e - base) : 0x43A000;
-    g_rw_start=rws; g_rw_end=rwe;
-    if (rwe <= rws || (rwe - rws) < need + 64) {
-        fprintf(stderr, "[a2h_patch] WARN: RW segment small/unknown, use fallback cave 0x437000\n");
-        uintptr_t cave = 0x437000;
-        for (int i = 0; i < MAX_SLOTS; ++i) {
-            set_slot_off(i, cave + (uintptr_t)i * 64);
-            slots[i].max_len = 63;
-            slots[i].label = "x";
-        }
-        g_stub_mark = cave + MAX_SLOTS * 64;
-        g_ptr_off = (g_stub_mark + 16 + 7) & ~((uintptr_t)7);
+    if (!rw_abs_s || !rw_abs_e || rw_abs_s < base || rw_abs_e <= rw_abs_s) {
+        fprintf(stderr, "[a2h_patch] ERROR: writable RW map unavailable; whitelist apply aborted\n");
         return 0;
     }
-    uintptr_t cave_abs = find_zero_cave(pid, rw_abs_s, rw_abs_e, need);
-    uintptr_t cave = cave_abs ? (cave_abs - base) : ((rwe - need - 32) & ~((uintptr_t)0xF));
-    const char *source = cave_abs ? "zero-scan" : "rw-tail";
-    if (cave < rws) cave = rws;
+    uintptr_t rws = rw_abs_s - base;
+    uintptr_t rwe = rw_abs_e - base;
+    g_rw_start=rws; g_rw_end=rwe;
+    if (rwe <= rws || (rwe - rws) < need + 64) {
+        fprintf(stderr, "[a2h_patch] ERROR: RW map too small for whitelist cave need=0x%lx available=0x%lx\n",
+                (unsigned long)need, (unsigned long)(rwe > rws ? rwe - rws : 0));
+        return 0;
+    }
+    uintptr_t cave_abs = 0;
+    uintptr_t hinted_cave = 0;
+    int reused = 0;
+    if (load_cave_hint(&hinted_cave) && hinted_cave >= rws &&
+        hinted_cave <= rwe - need) {
+        /* A marker proves this is our cave in the current HAL instance.  On a
+         * fresh process the data segment is reinitialized, so fall back to a
+         * zero scan instead of trusting an OTA-stale offset. */
+        if (marked_cave_ok(pid, base, hinted_cave)) {
+            cave_abs = base + hinted_cave;
+            reused = 1;
+            fprintf(stderr, "[a2h_patch] reuse marked cave rel=0x%lx\n",
+                    (unsigned long)hinted_cave);
+        }
+    }
+    if (!cave_abs) cave_abs = find_zero_cave(pid, rw_abs_s, rw_abs_e, need);
+    if (!cave_abs || cave_abs < rw_abs_s || cave_abs > rw_abs_e - need) {
+        fprintf(stderr, "[a2h_patch] ERROR: no verified zero RW cave available; whitelist apply aborted\n");
+        return 0;
+    }
+    uintptr_t cave = cave_abs - base;
+    const char *source = reused ? "marked-reuse" : "zero-scan";
     for (int i = 0; i < MAX_SLOTS; ++i) {
         set_slot_off(i, cave + (uintptr_t)i * 64);
         slots[i].max_len = 63;
@@ -815,7 +1152,13 @@ static int setup_custom_cave(pid_t pid, uintptr_t base, uintptr_t rw_abs_s, uint
     return 1;
 }
 static int apply_strings(pid_t pid, uintptr_t base, char **pkgs) {
-    int ok=1;
+    unsigned char saved[MAX_SLOTS][64];
+    for (int i = 0; i < MAX_SLOTS; ++i) {
+        if (mem_r(pid, base + slot_off(i), saved[i], sizeof(saved[i])) != 0) {
+            fprintf(stderr, "[a2h_patch] slot%d snapshot FAIL\n", i);
+            return 0;
+        }
+    }
     for(int i=0;i<MAX_SLOTS;i++) {
         char buf[64]; memset(buf,0,sizeof(buf));
         size_t maxlen=(size_t)slots[i].max_len; if(maxlen>=sizeof(buf)) maxlen=sizeof(buf)-1;
@@ -823,16 +1166,30 @@ static int apply_strings(pid_t pid, uintptr_t base, char **pkgs) {
         uintptr_t addr=base+slot_off(i);
         // always clear then write, avoid stale garbage in custom cave
         char z[64]; memset(z,0,sizeof(z));
-        mem_w(pid,addr,z,maxlen+1);
-        int wrc=mem_w(pid,addr,buf,maxlen+1);
+        int crc=mem_w(pid,addr,z,maxlen+1);
+        int wrc=crc==0 ? mem_w(pid,addr,buf,maxlen+1) : -1;
         char verify[64]; memset(verify,0,sizeof(verify));
-        int rrc=mem_r(pid,addr,verify,maxlen);
-        int same=(rrc==0 && strncmp(verify,buf,maxlen)==0);
-        fprintf(stderr,"[a2h_patch] slot%d off=0x%lx write=%s verify=%s value='%s'\n",
-                i,(unsigned long)slot_off(i), wrc==0?"OK":"FAIL", same?"OK":"FAIL", buf[0]?buf:"(empty)");
-        if(wrc!=0 || !same) ok=0;
+        int rrc=wrc==0 ? mem_r(pid,addr,verify,maxlen+1) : -1;
+        int same=(rrc==0 && memcmp(verify,buf,maxlen+1)==0);
+        fprintf(stderr,"[a2h_patch] slot%d off=0x%lx clear=%s write=%s verify=%s value='%s'\n",
+                i,(unsigned long)slot_off(i), crc==0?"OK":"FAIL", wrc==0?"OK":"FAIL",
+                same?"OK":"FAIL", buf[0]?buf:"(empty)");
+        if(crc!=0 || wrc!=0 || !same) {
+            int restore_ok = 1;
+            for (int j = 0; j < MAX_SLOTS; ++j) {
+                unsigned char restored[64];
+                uintptr_t restore_addr = base + slot_off(j);
+                if (mem_w(pid, restore_addr, saved[j], sizeof(saved[j])) != 0 ||
+                    mem_r(pid, restore_addr, restored, sizeof(restored)) != 0 ||
+                    memcmp(restored, saved[j], sizeof(saved[j])) != 0)
+                    restore_ok = 0;
+            }
+            fprintf(stderr, "[a2h_patch] string transaction rollback=%s after slot%d failure\n",
+                    restore_ok ? "OK" : "FAIL", i);
+            return 0;
+        }
     }
-    return ok;
+    return 1;
 }
 static int encode_adrp_add(uint32_t *adrp, uint32_t *add, int rd, uintptr_t pc, uintptr_t target) {
     int64_t page_delta = ((int64_t)(target & ~0xFFFull) - (int64_t)(pc & ~0xFFFull)) >> 12;
@@ -847,6 +1204,7 @@ static int encode_adrp_add(uint32_t *adrp, uint32_t *add, int rd, uintptr_t pc, 
 static int write_whitelist_stub_code(pid_t pid, uintptr_t base) {
     uintptr_t func = base + k_func_off();
     uintptr_t table = base + g_ptr_off;
+    uintptr_t marker_addr = base + g_stub_mark;
     uint64_t ptrs[MAX_SLOTS];
     for (int i=0;i<MAX_SLOTS;++i) {
         char first=0;
@@ -856,11 +1214,6 @@ static int write_whitelist_stub_code(pid_t pid, uintptr_t base) {
         ptrs[i] = first ? (uint64_t)(base + slot_off(i)) : 0;
         fprintf(stderr, "[a2h_patch] ptr[%d]=%s\n", i, ptrs[i]?"set":"null");
     }
-    if (mem_w(pid, table, ptrs, sizeof(ptrs)) != 0) {
-        fprintf(stderr, "[a2h_patch] ptr table write FAIL @0x%lx\n", (unsigned long)g_ptr_off); return 0;
-    }
-    uint64_t chk=0; mem_r(pid, table, &chk, sizeof(chk));
-    fprintf(stderr, "[a2h_patch] ptr table write OK first=0x%llx\n", (unsigned long long)chk);
     uint32_t code[24]; int n=0; uint32_t adrp=0, add=0;
     if (encode_adrp_add(&adrp,&add,1,func,table)!=0) {
         fprintf(stderr,"[a2h_patch] ADRP range FAIL func=0x%lx table=0x%lx\n",(unsigned long)func,(unsigned long)table);
@@ -885,9 +1238,80 @@ static int write_whitelist_stub_code(pid_t pid, uintptr_t base) {
     code[2]=0xB4000000|(15u<<5); code[4]=0x34000002|(13u<<5); code[6]=0xB4000003|(9u<<5);
     code[11]=0x54000001|(4u<<5); code[12]=0x35000005|((uint32_t)(-4 & 0x7FFFF)<<5);
     code[16]=0x14000000|((uint32_t)(-12)&0x3FFFFFF);
-    if (mem_w(pid, func, code, n*4) != 0) { fprintf(stderr,"[a2h_patch] stub code write FAIL\n"); return 0; }
-    uint32_t magic=0x31483241; mem_w(pid, base + g_stub_mark, &magic, sizeof(magic));
+    const size_t code_bytes = (size_t)n * sizeof(code[0]);
+    unsigned char old_code[sizeof(code)];
+    unsigned char old_table[sizeof(ptrs)];
+    unsigned char old_marker[16];
+    if (mem_r(pid, func, old_code, code_bytes) != 0 ||
+        mem_r(pid, table, old_table, sizeof(old_table)) != 0 ||
+        mem_r(pid, marker_addr, old_marker, sizeof(old_marker)) != 0) {
+        fprintf(stderr, "[a2h_patch] stub transaction snapshot FAIL\n");
+        return 0;
+    }
+
+    int table_started = 0, marker_started = 0, code_started = 0;
+    unsigned char table_verify[sizeof(ptrs)];
+    unsigned char marker_verify[16];
+    unsigned char code_verify[sizeof(code)];
+    if (mem_w(pid, table, ptrs, sizeof(ptrs)) != 0) {
+        table_started = 1;
+        fprintf(stderr, "[a2h_patch] ptr table write FAIL @0x%lx\n", (unsigned long)g_ptr_off);
+        goto rollback;
+    }
+    table_started = 1;
+    if (mem_r(pid, table, table_verify, sizeof(table_verify)) != 0 ||
+        memcmp(table_verify, ptrs, sizeof(ptrs)) != 0) {
+        fprintf(stderr, "[a2h_patch] ptr table verify FAIL @0x%lx\n", (unsigned long)g_ptr_off);
+        goto rollback;
+    }
+    fprintf(stderr, "[a2h_patch] ptr table write OK first=0x%llx\n",
+            (unsigned long long)ptrs[0]);
+
+    uint32_t magic=0x31483241;
+    marker_started = 1;
+    if (mem_w(pid, marker_addr, &magic, sizeof(magic)) != 0 ||
+        mem_r(pid, marker_addr, marker_verify, sizeof(marker_verify)) != 0 ||
+        memcmp(marker_verify, &magic, sizeof(magic)) != 0) {
+        fprintf(stderr, "[a2h_patch] cave marker write FAIL\n");
+        goto rollback;
+    }
+
+    code_started = 1;
+    if (mem_w(pid, func, code, code_bytes) != 0 ||
+        mem_r(pid, func, code_verify, code_bytes) != 0 ||
+        memcmp(code_verify, code, code_bytes) != 0) {
+        fprintf(stderr, "[a2h_patch] stub code write/verify FAIL\n");
+        goto rollback;
+    }
+    save_cave_hint(slot_off(0));
     return 1;
+
+rollback:
+    /* Restore the executable bytes first so an old stub never observes a
+     * partially restored table or marker. */
+    ;
+    int restore_code = 1, restore_table = 1, restore_marker = 1;
+    if (code_started) {
+        restore_code = mem_w(pid, func, old_code, code_bytes) == 0 &&
+                       mem_r(pid, func, code_verify, code_bytes) == 0 &&
+                       memcmp(code_verify, old_code, code_bytes) == 0;
+        remote_icache_flush(pid, func, code_bytes);
+        syscall(__NR_membarrier, MEMBARRIER_CMD_GLOBAL, 0);
+    }
+    if (table_started) {
+        restore_table = mem_w(pid, table, old_table, sizeof(old_table)) == 0 &&
+                        mem_r(pid, table, table_verify, sizeof(table_verify)) == 0 &&
+                        memcmp(table_verify, old_table, sizeof(old_table)) == 0;
+    }
+    if (marker_started) {
+        restore_marker = mem_w(pid, marker_addr, old_marker, sizeof(old_marker)) == 0 &&
+                         mem_r(pid, marker_addr, marker_verify, sizeof(marker_verify)) == 0 &&
+                         memcmp(marker_verify, old_marker, sizeof(old_marker)) == 0;
+    }
+    fprintf(stderr, "[a2h_patch] stub transaction rollback code=%s table=%s marker=%s\n",
+            restore_code ? "OK" : "FAIL", restore_table ? "OK" : "FAIL",
+            restore_marker ? "OK" : "FAIL");
+    return 0;
 }
 static int install_whitelist_stub(pid_t pid, uintptr_t base) {
     uintptr_t func = base + k_func_off();
@@ -909,6 +1333,10 @@ static int install_whitelist_stub(pid_t pid, uintptr_t base) {
 static int show_strings(pid_t pid, uintptr_t base) {
     int rc=0;
     for(int i=0;i<MAX_SLOTS;i++) {
+        if (!slot_off(i)) {
+            fprintf(stderr,"  [%d] off=unavailable\n", i);
+            continue;
+        }
         char buf[64]; memset(buf,0,sizeof(buf));
         size_t n=(size_t)slots[i].max_len; if(n>=sizeof(buf)) n=sizeof(buf)-1;
         if(mem_r(pid,base+slot_off(i),buf,n)==0) {
@@ -966,6 +1394,32 @@ static void save_func_off_hint(uintptr_t off) {
     f=fopen("/data/local/tmp/a2h_func_off", "w");
     if (f) { fprintf(f, "%lx\n", (unsigned long)off); fclose(f); }
 }
+static int load_cave_hint(uintptr_t *out) {
+    const char *paths[] = {
+        "/data/adb/modules/a2h_hook/config/cave_off",
+        "/data/local/tmp/a2h_cave_off",
+        NULL
+    };
+    for (int i = 0; paths[i]; ++i) {
+        FILE *f = fopen(paths[i], "r");
+        if (!f) continue;
+        unsigned long v = 0;
+        if (fscanf(f, "%lx", &v) == 1 && v >= 0x10000ul && v <= 0x2000000ul) {
+            fclose(f);
+            if (out) *out = (uintptr_t)v;
+            fprintf(stderr, "[a2h_patch] cave hint from %s: 0x%lx\n", paths[i], v);
+            return 1;
+        }
+        fclose(f);
+    }
+    return 0;
+}
+static void save_cave_hint(uintptr_t off) {
+    FILE *f = fopen("/data/adb/modules/a2h_hook/config/cave_off", "w");
+    if (f) { fprintf(f, "%lx\n", (unsigned long)off); fclose(f); }
+    f = fopen("/data/local/tmp/a2h_cave_off", "w");
+    if (f) { fprintf(f, "%lx\n", (unsigned long)off); fclose(f); }
+}
 int main(int argc,char **argv) {
     int mode=0,pid=-1; char *pkgfile=NULL; uintptr_t base_override=0; int check_want_global=-1;
     long t0=now_ms();
@@ -979,6 +1433,7 @@ int main(int argc,char **argv) {
             printf("       %s --show [PID]\n",argv[0]);
             printf("       %s --status [PID]\n",argv[0]);
             printf("       %s --check global|whitelist [PID]\n",argv[0]);
+            printf("       %s --packages FILE\n",argv[0]);
             printf("       %s --base 0x...\n",argv[0]);
             return 0;
         } else if(strcmp(argv[i],"--disable")==0){
@@ -992,6 +1447,7 @@ int main(int argc,char **argv) {
             mode=4;
             check_want_global = (strcmp(argv[++i], "global")==0) ? 1 : 0;
         }
+        else if(strcmp(argv[i],"--packages")==0 && i+1<argc) pkgfile=argv[++i];
         else if(strcmp(argv[i],"--base")==0 && i+1<argc) base_override=(uintptr_t)strtoull(argv[++i],NULL,0);
         else if(argv[i][0] != '-') pid=atoi(argv[i]);
     }
@@ -1031,31 +1487,16 @@ int main(int argc,char **argv) {
     g_attached = (trace_attach(pid) == 0);
     fprintf(stderr,"[a2h_patch] ptrace=%s\n", g_attached?"ok":"unavailable");
     if (!locate_targets(pid, base)) {
-        // Last chance: previously saved function offset (helps OS2.0.220 after global when patterns are ambiguous).
-        uintptr_t hint=0;
-        if (load_func_off_hint(&hint)) {
-            unsigned char hh[16]={0};
-            if (mem_r(pid, base + hint, hh, 16) == 0) {
-                int ok = 0;
-                if (memcmp(hh, SIG8, 8)==0 || memcmp(hh, PATCH, 8)==0) ok = 1;
-                else if (is_stub_head(hh, 16)) ok = 1;
-                if (ok) {
-                    g_func_off = hint;
-                    snprintf(g_locate_method, sizeof(g_locate_method), "hint");
-                    fprintf(stderr, "[a2h_patch] selected method=hint func=0x%lx\n", (unsigned long)hint);
-                } else {
-                    fprintf(stderr, "[a2h_patch] func_off hint invalid head\n");
-                    if(g_attached)trace_detach(pid); return 2;
-                }
-            } else {
-                if(g_attached)trace_detach(pid); return 2;
-            }
-        } else {
-            if(g_attached)trace_detach(pid); return 2;
-        }
+        fprintf(stderr, "[a2h_patch] ERROR: target location unresolved; no unsafe hint fallback\n");
+        if(g_attached)trace_detach(pid);
+        return 2;
     }
-    save_func_off_hint(k_func_off());
-    setup_custom_cave(pid, base, rw_s, rw_e);
+    if (mode == 0 || mode == 1) save_func_off_hint(k_func_off());
+    if (mode == 1 && !setup_custom_cave(pid, base, rw_s, rw_e)) {
+        fprintf(stderr, "[a2h_patch] ERROR: whitelist cave setup failed; no memory written\n");
+        if (g_attached) trace_detach(pid);
+        return 2;
+    }
     uintptr_t func_addr = base + k_func_off();
     unsigned char vfy8[16]={0};
     if (mem_r(pid,func_addr,vfy8,16)!=0) {
@@ -1076,45 +1517,68 @@ int main(int argc,char **argv) {
     if(mode==3){ if(g_attached)trace_detach(pid); fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0); return already_global?0:1; }
     if(mode==4){
         const char *cur = already_global?"global":(already_stub?"whitelist":(sig_ok?"stock":"unknown"));
-        int ok = (check_want_global==1) ? already_global : already_stub;
-        fprintf(stderr,"[a2h_patch] live: want=%s cur=%s head=%02x %02x %02x %02x method=%s func=0x%lx\n",
+        int ok = already_global;
+        int config_active = -1;
+        stub_info_t si;
+        memset(&si, 0, sizeof(si));
+        if(check_want_global != 1) {
+            pkg_stats_t stats;
+            char **pkgs = read_pkgs(pkgfile, &stats);
+            config_active = pkgs ? stats.active : -1;
+            int table_ok = already_stub && pkgs &&
+                           inspect_stub_table(pid, base, k_func_off(), vfy8, pkgs, 1, &si);
+            ok = table_ok && si.content_mismatch == 0;
+            free_pkgs(pkgs);
+        }
+        fprintf(stderr,"[a2h_patch] live: want=%s cur=%s head=%02x %02x %02x %02x method=%s func=0x%lx active_ptrs=%d config_active=%d mismatch=%d\n",
                 check_want_global==1?"global":"whitelist", cur, vfy8[0],vfy8[1],vfy8[2],vfy8[3],
-                g_locate_method[0]?g_locate_method:"?", (unsigned long)k_func_off());
+                g_locate_method[0]?g_locate_method:"?", (unsigned long)k_func_off(),
+                check_want_global==1?-1:si.active_ptrs, config_active,
+                check_want_global==1?0:si.content_mismatch);
         if(g_attached)trace_detach(pid);
         fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0);
         return ok?0:1;
     }
     if(mode==1){
         fprintf(stderr,"applying whitelist...\n");
-        int rejected=0; char **pkgs=read_pkgs(pkgfile,&rejected);
+        pkg_stats_t stats;
+        char **pkgs=read_pkgs(pkgfile,&stats);
         if(!pkgs){ fprintf(stderr,"[a2h_patch] ERROR: config\n"); if(g_attached)trace_detach(pid); return 1; }
         for(int i=0;i<MAX_SLOTS;i++) fprintf(stderr,"[a2h_patch] cfg[%d]=%s\n", i, (pkgs[i]&&pkgs[i][0])?pkgs[i]:"(empty)");
         int rc=apply_strings(pid,base,pkgs);
         int stub_ok=0;
         if(rc) stub_ok=install_whitelist_stub(pid,base);
         else fprintf(stderr,"[a2h_patch] skip stub because string apply failed\n");
-        free_pkgs(pkgs);
         unsigned char vf[16]={0}; mem_r(pid,func_addr,vf,16);
         int stubbed=is_stub_head(vf,16);
-        fprintf(stderr,"whitelist: %s\n", (rc && stub_ok && stubbed)?"OK":"FAIL");
-        fprintf(stderr,"[a2h_patch] summary method=%s profile=%s hint=%s write=%s stub=%s final=%s rejected=%d icache=ivau\n",
-                g_locate_method,g_profile,g_profile_hint, rc?"OK":"FAIL", stub_ok?"OK":"FAIL", stubbed?"whitelist":"not-whitelist", rejected);
+        stub_info_t si;
+        memset(&si, 0, sizeof(si));
+        int table_ok = stubbed && inspect_stub_table(pid, base, k_func_off(), vf, pkgs, 1, &si);
+        int final_ok = rc && stub_ok && stubbed && table_ok && si.content_mismatch == 0;
+        free_pkgs(pkgs);
+        fprintf(stderr,"whitelist: %s\n", final_ok?"OK":"FAIL");
+        fprintf(stderr,"[a2h_patch] summary method=%s profile=%s hint=%s write=%s stub=%s table=%s final=%s active=%d active_ptrs=%d lines=%d rejected=%d fallback=%d all_off=%d mismatch=%d icache=ivau\n",
+                g_locate_method,g_profile,g_profile_hint, rc?"OK":"FAIL", stub_ok?"OK":"FAIL",
+                table_ok?"OK":"FAIL", stubbed?"whitelist":"not-whitelist",
+                stats.active, si.active_ptrs, stats.lines_read, stats.rejected,
+                stats.fallback_defaults, stats.explicit_all_off, si.content_mismatch);
         if(g_attached)trace_detach(pid);
         fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0);
-        return (rc && stub_ok && stubbed)?0:1;
+        return final_ok?0:1;
     }
-    if(already_global){fprintf(stderr,"already enabled\n"); if(g_attached)trace_detach(pid); fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0); return 0;}
-    fprintf(stderr,"enabling global...\n");
-    if (mem_w(pid,func_addr,PATCH,8) != 0) {
+    int global_marked = memcmp(vfy8, GLOBAL_PATCH, sizeof(GLOBAL_PATCH)) == 0;
+    if (already_global && global_marked){fprintf(stderr,"already enabled\n"); if(g_attached)trace_detach(pid); fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0); return 0;}
+    fprintf(stderr, already_global ? "upgrading global marker...\n" : "enabling global...\n");
+    if (mem_w(pid,func_addr,GLOBAL_PATCH,sizeof(GLOBAL_PATCH)) != 0) {
         fprintf(stderr,"enable: FAIL\n"); if(g_attached)trace_detach(pid);
         fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0); return 1;
     }
     remote_icache_flush(pid, func_addr, 16);
-    mem_w(pid,func_addr,PATCH,8);
+    mem_w(pid,func_addr,GLOBAL_PATCH,sizeof(GLOBAL_PATCH));
     remote_icache_flush(pid, func_addr, 16);
     syscall(__NR_membarrier, MEMBARRIER_CMD_GLOBAL, 0);
-    unsigned char vf[8]={0}; mem_r(pid,func_addr,vf,8);
-    int ok = memcmp(vf,PATCH,8)==0;
+    unsigned char vf[16]={0}; mem_r(pid,func_addr,vf,sizeof(vf));
+    int ok = memcmp(vf,GLOBAL_PATCH,sizeof(GLOBAL_PATCH))==0;
     fprintf(stderr,"enable: %s\n",ok?"OK":"FAIL");
     fprintf(stderr,"[a2h_patch] global verify head=%02x %02x %02x %02x method=%s profile=%s hint=%s icache=ivau\n",
             vf[0],vf[1],vf[2],vf[3], g_locate_method, g_profile, g_profile_hint);

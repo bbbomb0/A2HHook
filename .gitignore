@@ -1,7 +1,9 @@
 # Build outputs / release artifacts
 /build/
 /build_*/
-/bin/
+/.analysis/
+/bin/*
+!/bin/a2h_apply
 /zygisk/
 *.o
 *.so

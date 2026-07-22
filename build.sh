@@ -195,7 +195,6 @@ create_zip() {
 
     cp "$MODULE_DIR/module.prop"  "$TEMP_ZIP/"
     cp "$MODULE_DIR/customize.sh" "$TEMP_ZIP/"
-    cp "$MODULE_DIR/action.sh"    "$TEMP_ZIP/"
     cp "$MODULE_DIR/service.sh"    "$TEMP_ZIP/"
     cp "$MODULE_DIR/post-fs-data.sh" "$TEMP_ZIP/"
     cp "$MODULE_DIR/wrapper.sh"    "$TEMP_ZIP/"
@@ -205,12 +204,67 @@ create_zip() {
     cp -r "$MODULE_DIR/webroot"    "$TEMP_ZIP/"
     cp "$MODULE_DIR/bin/a2h_patch" "$TEMP_ZIP/bin/"
     cp "$MODULE_DIR/bin/a2h_trigger" "$TEMP_ZIP/bin/"
+    cp "$MODULE_DIR/bin/a2h_apply" "$TEMP_ZIP/bin/"
     cp "$OUTPUT_DIR/a2h_hook.so" "$TEMP_ZIP/zygisk/arm64-v8a/"
 
     cd "$TEMP_ZIP"
-    chmod 0755 customize.sh action.sh service.sh post-fs-data.sh wrapper.sh share_logs.sh bin/a2h_patch bin/a2h_trigger 2>/dev/null || true
+    chmod 0755 customize.sh service.sh post-fs-data.sh wrapper.sh share_logs.sh bin/a2h_apply bin/a2h_patch bin/a2h_trigger 2>/dev/null || true
     if command -v zip &>/dev/null; then
         zip -r "$ZIP_PATH" . -x "*.git*" -x "*__MACOSX*" -x "*.DS_Store"
+        # NTFS/MSYS does not reliably preserve executable bits. Normalize the
+        # ZIP metadata so local Windows builds match Linux/CI artifacts.
+        PYTHON_BIN=""
+        for py in python3 python py; do
+            if command -v "$py" >/dev/null 2>&1 && "$py" -c "import sys, zipfile" >/dev/null 2>&1; then
+                PYTHON_BIN="$py"
+                break
+            fi
+        done
+        if [ -n "$PYTHON_BIN" ]; then
+            ZIP_PATH_PY="$ZIP_PATH"
+            if command -v cygpath &>/dev/null; then
+                ZIP_PATH_PY="$(cygpath -w "$ZIP_PATH" 2>/dev/null || printf '%s' "$ZIP_PATH")"
+            fi
+            "$PYTHON_BIN" - "$ZIP_PATH_PY" <<'PY'
+import os
+import sys
+import tempfile
+import zipfile
+
+source = sys.argv[1]
+fd, target = tempfile.mkstemp(prefix="a2h_zip_", suffix=".zip", dir=os.path.dirname(source) or ".")
+os.close(fd)
+try:
+    executable = {
+        "customize.sh", "service.sh", "post-fs-data.sh", "wrapper.sh",
+        "share_logs.sh", "bin/a2h_apply", "bin/a2h_patch", "bin/a2h_trigger",
+    }
+    with zipfile.ZipFile(source, "r") as zin, zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zout:
+        for old in zin.infolist():
+            info = zipfile.ZipInfo(old.filename, old.date_time)
+            info.create_system = 3
+            if old.is_dir():
+                info.compress_type = zipfile.ZIP_STORED
+                info.external_attr = (0o040755 << 16) | 0x10
+                data = b""
+            else:
+                info.compress_type = zipfile.ZIP_DEFLATED
+                mode = 0o100755 if old.filename in executable else 0o100644
+                info.external_attr = mode << 16
+                data = zin.read(old.filename)
+            zout.writestr(info, data)
+    os.replace(target, source)
+finally:
+    if os.path.exists(target):
+        os.unlink(target)
+PY
+        else
+            case "$(uname -s 2>/dev/null || true)" in
+                MINGW*|MSYS*|CYGWIN*)
+                    error "Python 3 is required on Windows to normalize ZIP permissions."
+                    ;;
+            esac
+        fi
     else
         PYTHON_BIN=""
         for py in python3 python py; do
@@ -224,17 +278,32 @@ create_zip() {
         if command -v cygpath >/dev/null 2>&1; then
             ZIP_PATH_PY="$(cygpath -w "$ZIP_PATH" 2>/dev/null || printf '%s' "$ZIP_PATH")"
         fi
-        "$PYTHON_BIN" -c "
-import zipfile, os
-zip_path = r'''$ZIP_PATH_PY'''
-with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
-    for root, dirs, files in os.walk('.'):
-        for f in files:
-            if '.git' in root or '__MACOSX' in f or '.DS_Store' in f: continue
-            p = os.path.join(root, f)
-            arc = os.path.relpath(p, '.').replace(os.sep, '/')
-            zf.write(p, arc)
-" || error "Cannot create ZIP. Install 'zip' or Python 3."
+        "$PYTHON_BIN" - "$ZIP_PATH_PY" <<'PY' || error "Cannot create ZIP. Install 'zip' or Python 3."
+import os
+import sys
+import zipfile
+
+zip_path = sys.argv[1]
+executable = {
+    "customize.sh", "service.sh", "post-fs-data.sh", "wrapper.sh",
+    "share_logs.sh", "bin/a2h_apply", "bin/a2h_patch", "bin/a2h_trigger",
+}
+with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+    for root, dirs, files in os.walk("."):
+        dirs[:] = [d for d in dirs if d not in (".git", "__MACOSX")]
+        for filename in files:
+            if filename == ".DS_Store":
+                continue
+            path = os.path.join(root, filename)
+            arc = os.path.relpath(path, ".").replace(os.sep, "/")
+            info = zipfile.ZipInfo.from_file(path, arc)
+            info.create_system = 3
+            mode = 0o100755 if arc in executable else 0o100644
+            info.external_attr = mode << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            with open(path, "rb") as source:
+                zf.writestr(info, source.read())
+PY
     fi
 
     cd "$SCRIPT_DIR"

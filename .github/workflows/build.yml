@@ -56,6 +56,7 @@ jobs:
         with:
           name: a2h_native_arm64-v8a
           path: |
+            bin/a2h_apply
             bin/a2h_patch
             bin/a2h_trigger
             zygisk/arm64-v8a/a2h_hook.so

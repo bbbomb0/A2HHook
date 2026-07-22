@@ -1,0 +1,1025 @@
+#!/system/bin/sh
+
+# Internal A2H configuration/apply entry point. This file intentionally does
+# not use the reserved module-root action.sh name used by root managers.
+
+SCRIPT_DIR=${0%/*}
+MODDIR=$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd)
+[ -n "$MODDIR" ] || MODDIR=/data/adb/modules/a2h_hook
+
+PATCHER="$MODDIR/bin/a2h_patch"
+CFG_DIR="$MODDIR/config"
+CFG_STATE="$CFG_DIR/state"
+CFG_PKGS="$CFG_DIR/packages.txt"
+CFG_STATES="$CFG_DIR/package_states"
+CFG_SNAPSHOT="$CFG_DIR/config_snapshot"
+CFG_REVISION="$CFG_DIR/revision"
+APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
+APPLIED_REVISION="$CFG_DIR/applied_revision"
+LAST_PID_FILE="$CFG_DIR/last_pid"
+
+TMP_STATE=/data/local/tmp/a2h_state
+TMP_PKGS=/data/local/tmp/a2h_packages.txt
+PENDING_FILE=/data/local/tmp/a2h_apply.pending
+APPLY_LOCK=/data/local/tmp/a2h_apply.lock
+WORKER_LOCK=/data/local/tmp/a2h_apply.worker
+CONFIG_LOCK=/data/local/tmp/a2h_config.lock
+
+ACTION_LOG="$MODDIR/action.log"
+MAIN_LOG="$MODDIR/a2h_patch.log"
+SELF="$MODDIR/bin/a2h_apply"
+
+CURRENT_MODE=disabled
+CURRENT_SNAPSHOT=
+CURRENT_REVISION=0
+ACTIVE_COUNT=0
+CONFIG_RECOVERED=0
+PATCHER_SUPPORTS_PACKAGES=
+
+umask 077
+
+ts() { date '+%F %T'; }
+
+log() {
+  log_line="[$(ts)] $*"
+  printf '%s\n' "$log_line" >> "$ACTION_LOG" 2>/dev/null
+  printf '%s\n' "$log_line" >> "$MAIN_LOG" 2>/dev/null
+}
+
+commit_tmp() {
+  commit_src=$1
+  commit_dest=$2
+  commit_mode=${3:-0644}
+  chmod "$commit_mode" "$commit_src" 2>/dev/null || true
+  if [ -f "$commit_dest" ] && cmp -s "$commit_src" "$commit_dest" 2>/dev/null; then
+    rm -f "$commit_src" 2>/dev/null
+    return 0
+  fi
+  mv -f "$commit_src" "$commit_dest" 2>/dev/null
+}
+
+write_value_atomic() {
+  value_dest=$1
+  value_text=$2
+  value_mode=${3:-0644}
+  value_tmp="${value_dest}.tmp.$$"
+  mkdir -p "${value_dest%/*}" 2>/dev/null || return 1
+  if ! printf '%s\n' "$value_text" > "$value_tmp"; then
+    rm -f "$value_tmp" 2>/dev/null
+    return 1
+  fi
+  commit_tmp "$value_tmp" "$value_dest" "$value_mode"
+}
+
+write_default_packages() {
+  default_dest=$1
+  cat > "$default_dest" <<'EOF'
+com.kugou.android
+com.tencent.qqmusic
+com.netease.cloudmusic
+cn.kuwo.player
+com.miui.player
+com.luna.music
+
+
+
+
+EOF
+}
+
+write_default_states() {
+  default_states_dest=$1
+  cat > "$default_states_dest" <<'EOF'
+1
+1
+1
+1
+1
+1
+0
+0
+0
+0
+EOF
+}
+
+valid_package() {
+  valid_value=$1
+  [ -z "$valid_value" ] && return 0
+  [ "${#valid_value}" -lt 64 ] || return 1
+  case "$valid_value" in
+    [A-Za-z]*.*?) ;;
+    *) return 1 ;;
+  esac
+  case "$valid_value" in
+    *[!A-Za-z0-9_.]*) return 1 ;;
+  esac
+  return 0
+}
+
+restore_default_config_unlocked() {
+  restore_reason=$1
+  restore_owner=$(cat "$CONFIG_LOCK/pid" 2>/dev/null)
+  [ "$restore_owner" = "$$" ] || {
+    log "config restore refused without lock reason=$restore_reason"
+    return 75
+  }
+  restore_pkg_tmp="$CFG_DIR/.packages.$$"
+  restore_states_tmp="$CFG_DIR/.package_states.$$"
+  write_default_packages "$restore_pkg_tmp" || return 1
+  write_default_states "$restore_states_tmp" || {
+    rm -f "$restore_pkg_tmp" 2>/dev/null
+    return 1
+  }
+  commit_tmp "$restore_pkg_tmp" "$CFG_PKGS" 0644 || return 1
+  commit_tmp "$restore_states_tmp" "$CFG_STATES" 0644 || return 1
+  CONFIG_RECOVERED=1
+  log "config recovered defaults reason=$restore_reason"
+  return 0
+}
+
+normalize_mode() {
+  mode_value=$(cat "$CFG_STATE" 2>/dev/null | tr -d '\r' | head -n 1)
+  case "$mode_value" in
+    enabled|disabled) ;;
+    *)
+      mode_value=disabled
+      log "config state invalid; fallback=disabled(whitelist)"
+      ;;
+  esac
+  write_value_atomic "$CFG_STATE" "$mode_value" 0644 || return 1
+  CURRENT_MODE=$mode_value
+  return 0
+}
+
+normalize_package_config() {
+  mkdir -p "$CFG_DIR" /data/local/tmp 2>/dev/null || return 1
+
+  norm_pkg_tmp="$CFG_DIR/.packages.$$"
+  norm_states_raw="$CFG_DIR/.package_states.raw.$$"
+  norm_states_tmp="$CFG_DIR/.package_states.$$"
+  rm -f "$norm_pkg_tmp" "$norm_states_raw" "$norm_states_tmp" 2>/dev/null
+  : > "$norm_pkg_tmp" || return 1
+
+  norm_bad=0
+  norm_count=0
+  norm_nonempty=0
+
+  if [ ! -f "$CFG_PKGS" ]; then
+    norm_bad=1
+    norm_reason=packages-missing
+  else
+    norm_bytes=$(wc -c < "$CFG_PKGS" 2>/dev/null | tr -d ' ')
+    case "$norm_bytes" in
+      ''|*[!0-9]*) norm_bad=1; norm_reason=packages-size ;;
+      *) [ "$norm_bytes" -le 1024 ] || { norm_bad=1; norm_reason=packages-oversize; } ;;
+    esac
+  fi
+
+  if [ "$norm_bad" = "0" ]; then
+    while IFS= read -r norm_line || [ -n "$norm_line" ]; do
+      norm_count=$((norm_count + 1))
+      if [ "$norm_count" -gt 10 ]; then
+        norm_bad=1
+        norm_reason=packages-over-10-lines
+        break
+      fi
+      norm_line=$(printf '%s' "$norm_line" | tr -d '\r')
+      if [ -n "$norm_line" ]; then
+        norm_nonempty=$((norm_nonempty + 1))
+      fi
+      printf '%s\n' "$norm_line" >> "$norm_pkg_tmp" || norm_bad=1
+      [ "$norm_bad" = "0" ] || break
+    done < "$CFG_PKGS"
+  fi
+
+  if [ "$norm_bad" = "0" ]; then
+    while [ "$norm_count" -lt 10 ]; do
+      printf '\n' >> "$norm_pkg_tmp" || {
+        norm_bad=1
+        norm_reason=packages-pad-failed
+        break
+      }
+      norm_count=$((norm_count + 1))
+    done
+  fi
+
+  norm_states_missing=0
+  [ -f "$CFG_STATES" ] || norm_states_missing=1
+  if [ "$norm_bad" = "0" ] && [ "$norm_states_missing" = "1" ] && [ "$norm_nonempty" -eq 0 ]; then
+    norm_bad=1
+    norm_reason=packages-empty-without-states
+  fi
+
+  if [ "$norm_bad" != "0" ]; then
+    rm -f "$norm_pkg_tmp" "$norm_states_raw" "$norm_states_tmp" 2>/dev/null
+    restore_default_config_unlocked "$norm_reason"
+    return $?
+  fi
+
+  : > "$norm_states_raw" || {
+    rm -f "$norm_pkg_tmp" 2>/dev/null
+    return 1
+  }
+  norm_state_count=0
+  norm_state_bad=0
+  if [ "$norm_states_missing" = "0" ]; then
+    norm_state_bytes=$(wc -c < "$CFG_STATES" 2>/dev/null | tr -d ' ')
+    case "$norm_state_bytes" in
+      ''|*[!0-9]*) norm_state_bad=1; norm_reason=states-size ;;
+      *) [ "$norm_state_bytes" -le 64 ] || { norm_state_bad=1; norm_reason=states-oversize; } ;;
+    esac
+    if [ "$norm_state_bad" = "0" ]; then
+      while IFS= read -r norm_state_line || [ -n "$norm_state_line" ]; do
+        norm_state_count=$((norm_state_count + 1))
+        if [ "$norm_state_count" -gt 10 ]; then
+          norm_state_bad=1
+          norm_reason=states-over-10-lines
+          break
+        fi
+        norm_state_line=$(printf '%s' "$norm_state_line" | tr -d '\r')
+        case "$norm_state_line" in
+          0|1) ;;
+          *)
+            norm_state_bad=1
+            norm_reason="state-invalid-slot-$norm_state_count"
+            break
+            ;;
+        esac
+        printf '%s\n' "$norm_state_line" >> "$norm_states_raw" || norm_state_bad=1
+        [ "$norm_state_bad" = "0" ] || break
+      done < "$CFG_STATES"
+    fi
+  fi
+
+  if [ "$norm_state_bad" != "0" ]; then
+    rm -f "$norm_pkg_tmp" "$norm_states_raw" "$norm_states_tmp" 2>/dev/null
+    restore_default_config_unlocked "$norm_reason"
+    return $?
+  fi
+
+  # Normalize the state table and validate only enabled slots.  A disabled
+  # slot intentionally keeps its label in packages.txt so the WebUI can show
+  # it and re-enable it later; that label must not invalidate the whole config
+  # while the slot is off.  The runtime table generated below still blanks
+  # disabled slots before native code sees it.
+  : > "$norm_states_tmp" || {
+    rm -f "$norm_pkg_tmp" "$norm_states_raw" 2>/dev/null
+    return 1
+  }
+  norm_seen='|'
+  norm_active=0
+  exec 3< "$norm_pkg_tmp"
+  exec 4< "$norm_states_raw"
+  norm_i=0
+  while [ "$norm_i" -lt 10 ]; do
+    IFS= read -r norm_pkg_line <&3 || norm_pkg_line=
+    if [ "$norm_states_missing" = "1" ]; then
+      [ -n "$norm_pkg_line" ] && norm_enabled=1 || norm_enabled=0
+    else
+      IFS= read -r norm_enabled <&4 || {
+        [ -n "$norm_pkg_line" ] && norm_enabled=1 || norm_enabled=0
+      }
+    fi
+    [ -n "$norm_pkg_line" ] || norm_enabled=0
+    if [ "$norm_enabled" = "1" ]; then
+      if ! valid_package "$norm_pkg_line"; then
+        norm_state_bad=1
+        norm_reason="package-invalid-active-slot-$((norm_i + 1))"
+      else
+        case "$norm_seen" in
+          *"|$norm_pkg_line|"*)
+            norm_state_bad=1
+            norm_reason="package-duplicate-active-slot-$((norm_i + 1))"
+            ;;
+          *)
+            norm_seen="${norm_seen}${norm_pkg_line}|"
+            norm_active=$((norm_active + 1))
+            ;;
+        esac
+      fi
+    fi
+    printf '%s\n' "$norm_enabled" >> "$norm_states_tmp" || norm_state_bad=1
+    norm_i=$((norm_i + 1))
+  done
+  exec 3<&-
+  exec 4<&-
+  rm -f "$norm_states_raw" 2>/dev/null
+
+  if [ "$norm_state_bad" != "0" ]; then
+    rm -f "$norm_pkg_tmp" "$norm_states_tmp" 2>/dev/null
+    restore_default_config_unlocked "$norm_reason"
+    return $?
+  fi
+
+  commit_tmp "$norm_pkg_tmp" "$CFG_PKGS" 0644 || return 1
+  commit_tmp "$norm_states_tmp" "$CFG_STATES" 0644 || return 1
+  if [ "${A2H_QUIET_PREPARE:-0}" != "1" ]; then
+    log "config normalized active=$norm_active total_nonempty=$norm_nonempty states_missing=$norm_states_missing"
+  fi
+  return 0
+}
+
+generate_runtime_config() {
+  runtime_tmp="/data/local/tmp/.a2h_packages.$$"
+  runtime_state_tmp="/data/local/tmp/.a2h_state.$$"
+  : > "$runtime_tmp" || return 1
+  ACTIVE_COUNT=0
+  exec 3< "$CFG_PKGS"
+  exec 4< "$CFG_STATES"
+  runtime_i=0
+  while [ "$runtime_i" -lt 10 ]; do
+    IFS= read -r runtime_pkg <&3 || runtime_pkg=
+    IFS= read -r runtime_enabled <&4 || runtime_enabled=0
+    if [ "$runtime_enabled" = "1" ] && [ -n "$runtime_pkg" ]; then
+      printf '%s\n' "$runtime_pkg" >> "$runtime_tmp" || {
+        exec 3<&-
+        exec 4<&-
+        rm -f "$runtime_tmp" 2>/dev/null
+        return 1
+      }
+      ACTIVE_COUNT=$((ACTIVE_COUNT + 1))
+    else
+      printf '\n' >> "$runtime_tmp" || {
+        exec 3<&-
+        exec 4<&-
+        rm -f "$runtime_tmp" 2>/dev/null
+        return 1
+      }
+    fi
+    runtime_i=$((runtime_i + 1))
+  done
+  exec 3<&-
+  exec 4<&-
+  commit_tmp "$runtime_tmp" "$TMP_PKGS" 0644 || return 1
+  printf '%s\n' "$CURRENT_MODE" > "$runtime_state_tmp" || return 1
+  commit_tmp "$runtime_state_tmp" "$TMP_STATE" 0644 || return 1
+  return 0
+}
+
+compute_snapshot() {
+  CURRENT_SNAPSHOT=$(
+    {
+      printf 'state\n'
+      cat "$CFG_STATE" 2>/dev/null
+      printf 'packages\n'
+      cat "$CFG_PKGS" 2>/dev/null
+      printf 'package_states\n'
+      cat "$CFG_STATES" 2>/dev/null
+    } | cksum 2>/dev/null | awk '{print $1 ":" $2}'
+  )
+  [ -n "$CURRENT_SNAPSHOT" ]
+}
+
+record_revision() {
+  revision_old_snapshot=$(cat "$CFG_SNAPSHOT" 2>/dev/null)
+  revision_old=$(cat "$CFG_REVISION" 2>/dev/null | tr -d '\r' | head -n 1)
+  case "$revision_old" in
+    ''|*[!0-9]*) revision_old=0 ;;
+  esac
+  if [ "$revision_old_snapshot" != "$CURRENT_SNAPSHOT" ]; then
+    CURRENT_REVISION=$((revision_old + 1))
+    [ "$CURRENT_REVISION" -gt 0 ] 2>/dev/null || CURRENT_REVISION=1
+    write_value_atomic "$CFG_SNAPSHOT" "$CURRENT_SNAPSHOT" 0644 || return 1
+    write_value_atomic "$CFG_REVISION" "$CURRENT_REVISION" 0644 || return 1
+    log "config revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT mode=$CURRENT_MODE"
+  else
+    CURRENT_REVISION=$revision_old
+  fi
+  return 0
+}
+
+prepare_config_unlocked() {
+  CONFIG_RECOVERED=0
+  normalize_mode || return 1
+  normalize_package_config || return 1
+  generate_runtime_config || return 1
+  compute_snapshot || return 1
+  record_revision || return 1
+  return 0
+}
+
+set_mode_unlocked() {
+  set_mode_value=$1
+  case "$set_mode_value" in
+    enabled|global|on) set_mode_value=enabled ;;
+    disabled|whitelist|list|off) set_mode_value=disabled ;;
+    *) return 2 ;;
+  esac
+  write_value_atomic "$CFG_STATE" "$set_mode_value" 0644
+}
+
+find_hal_pid() {
+  hal_pid=$(pidof android.hardware.audio.service-aidl.mediatek 2>/dev/null | awk '{print $1}')
+  [ -n "$hal_pid" ] && { printf '%s\n' "$hal_pid"; return 0; }
+  hal_pid=$(pgrep -f android.hardware.audio.service-aidl.mediatek 2>/dev/null | head -n 1)
+  [ -n "$hal_pid" ] && { printf '%s\n' "$hal_pid"; return 0; }
+  hal_pid=$(pidof android.hardware.audio.service 2>/dev/null | awk '{print $1}')
+  [ -n "$hal_pid" ] && { printf '%s\n' "$hal_pid"; return 0; }
+  for hal_cmdline in /proc/[0-9]*/cmdline; do
+    [ -r "$hal_cmdline" ] || continue
+    hal_pid=${hal_cmdline#/proc/}
+    hal_pid=${hal_pid%%/*}
+    if grep -a -F -q android.hardware.audio.service-aidl.mediatek "$hal_cmdline" 2>/dev/null; then
+      printf '%s\n' "$hal_pid"
+      return 0
+    fi
+    if grep -a -F -q android.hardware.audio.service "$hal_cmdline" 2>/dev/null ||
+       grep -a -F -q audio.service-aidl "$hal_cmdline" 2>/dev/null; then
+      if grep -a -F -q 'audio.primary.' "/proc/$hal_pid/maps" 2>/dev/null; then
+        printf '%s\n' "$hal_pid"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+find_hal_base() {
+  base_pid=$1
+  [ -n "$base_pid" ] || return 1
+  /system/bin/cat "/proc/$base_pid/maps" 2>/dev/null | awk '
+    /audio.primary.mediatek.so|audio.primary.mt6991.so/ && $3 == "00000000" {
+      split($1,a,"-"); print "0x" a[1]; exit
+    }
+  '
+}
+
+find_hal_base_generic() {
+  base_pid=$1
+  [ -n "$base_pid" ] || return 1
+  /system/bin/cat "/proc/$base_pid/maps" 2>/dev/null | awk '
+    /audio\.primary\..*\.so/ && $3 == "00000000" {
+      split($1,a,"-")
+      score=10
+      if ($6 ~ /audio\.primary\.mediatek\.so/) score+=50
+      if ($6 ~ /audio\.primary\.mt6991\.so/) score+=45
+      if ($6 ~ /\/vendor\/lib64\/hw\//) score+=10
+      if ($2 ~ /r-xp/) score+=3
+      if (score > best) { best=score; best_addr="0x" a[1] }
+    }
+    END { if (best_addr) print best_addr }
+  '
+}
+
+resolve_hal() {
+  HAL_PID=$(find_hal_pid)
+  [ -n "$HAL_PID" ] || return 1
+  HAL_BASE=$(find_hal_base "$HAL_PID")
+  [ -n "$HAL_BASE" ] || HAL_BASE=$(find_hal_base_generic "$HAL_PID")
+  return 0
+}
+
+lock_owner_alive() {
+  owner_lock=$1
+  owner_pid=$(cat "$owner_lock/pid" 2>/dev/null)
+  case "$owner_pid" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  kill -0 "$owner_pid" 2>/dev/null
+}
+
+claim_pid_lock() {
+  claim_dir=$1
+  if ! mkdir "$claim_dir" 2>/dev/null; then
+    return 1
+  fi
+  if ! printf '%s\n' "$$" > "$claim_dir/pid" 2>/dev/null; then
+    rm -f "$claim_dir/pid" 2>/dev/null
+    rmdir "$claim_dir" 2>/dev/null || true
+    return 2
+  fi
+  claim_owner=$(cat "$claim_dir/pid" 2>/dev/null)
+  if [ "$claim_owner" != "$$" ]; then
+    rm -f "$claim_dir/pid" 2>/dev/null
+    rmdir "$claim_dir" 2>/dev/null || true
+    return 2
+  fi
+  return 0
+}
+
+stale_lock_recheck() {
+  stale_dir=$1
+  [ -d "$stale_dir" ] || return 0
+  lock_owner_alive "$stale_dir" && return 1
+  stale_owner_1=$(cat "$stale_dir/pid" 2>/dev/null)
+  [ -n "$stale_owner_1" ] || stale_owner_1='(missing)'
+  sleep 1
+  [ -d "$stale_dir" ] || return 0
+  lock_owner_alive "$stale_dir" && return 1
+  stale_owner_2=$(cat "$stale_dir/pid" 2>/dev/null)
+  [ -n "$stale_owner_2" ] || stale_owner_2='(missing)'
+  [ "$stale_owner_1" = "$stale_owner_2" ] || return 1
+  sleep 1
+  [ -d "$stale_dir" ] || return 0
+  lock_owner_alive "$stale_dir" && return 1
+  stale_owner_3=$(cat "$stale_dir/pid" 2>/dev/null)
+  [ -n "$stale_owner_3" ] || stale_owner_3='(missing)'
+  [ "$stale_owner_2" = "$stale_owner_3" ] || return 1
+  rm -f "$stale_dir/pid" 2>/dev/null || return 1
+  rmdir "$stale_dir" 2>/dev/null
+}
+
+acquire_config_lock() {
+  config_wait=${1:-20}
+  config_try=0
+  while [ "$config_try" -le "$config_wait" ]; do
+    claim_pid_lock "$CONFIG_LOCK"
+    config_claim_rc=$?
+    [ "$config_claim_rc" -eq 0 ] && return 0
+    [ "$config_claim_rc" -le 1 ] || return 1
+    stale_lock_recheck "$CONFIG_LOCK" || true
+    [ "$config_try" -lt "$config_wait" ] || break
+    sleep 1
+    config_try=$((config_try + 1))
+  done
+  return 1
+}
+
+release_config_lock() {
+  release_owner=$(cat "$CONFIG_LOCK/pid" 2>/dev/null)
+  [ "$release_owner" = "$$" ] || return 0
+  rm -f "$CONFIG_LOCK/pid" 2>/dev/null || return 1
+  rmdir "$CONFIG_LOCK" 2>/dev/null || true
+  return 0
+}
+
+prepare_config() {
+  if ! acquire_config_lock 20; then
+    log "config prepare FAIL error=lock-timeout"
+    return 75
+  fi
+  prepare_rc=0
+  prepare_config_unlocked || prepare_rc=$?
+  if ! release_config_lock; then
+    log "config prepare FAIL error=lock-release"
+    [ "$prepare_rc" -eq 0 ] && prepare_rc=1
+  fi
+  return "$prepare_rc"
+}
+
+set_mode() {
+  if ! acquire_config_lock 20; then
+    log "set mode FAIL error=lock-timeout"
+    return 75
+  fi
+  set_mode_rc=0
+  set_mode_unlocked "$1" || set_mode_rc=$?
+  if ! release_config_lock; then
+    log "set mode FAIL error=lock-release"
+    [ "$set_mode_rc" -eq 0 ] && set_mode_rc=1
+  fi
+  return "$set_mode_rc"
+}
+
+restore_default_config() {
+  if ! acquire_config_lock 20; then
+    log "config restore FAIL error=lock-timeout reason=$1"
+    return 75
+  fi
+  restore_rc=0
+  restore_default_config_unlocked "$1" || restore_rc=$?
+  if ! release_config_lock; then
+    log "config restore FAIL error=lock-release"
+    [ "$restore_rc" -eq 0 ] && restore_rc=1
+  fi
+  return "$restore_rc"
+}
+
+acquire_apply_lock() {
+  lock_wait=${1:-60}
+  lock_try=0
+  while [ "$lock_try" -le "$lock_wait" ]; do
+    claim_pid_lock "$APPLY_LOCK"
+    apply_claim_rc=$?
+    [ "$apply_claim_rc" -eq 0 ] && return 0
+    [ "$apply_claim_rc" -le 1 ] || return 1
+    stale_lock_recheck "$APPLY_LOCK" || true
+    [ "$lock_try" -lt "$lock_wait" ] || break
+    sleep 1
+    lock_try=$((lock_try + 1))
+  done
+  return 1
+}
+
+release_apply_lock() {
+  release_owner=$(cat "$APPLY_LOCK/pid" 2>/dev/null)
+  [ "$release_owner" = "$$" ] || return 0
+  rm -f "$APPLY_LOCK/pid" 2>/dev/null
+  rmdir "$APPLY_LOCK" 2>/dev/null || true
+  return 0
+}
+
+log_slots() {
+  exec 3< "$CFG_PKGS"
+  exec 4< "$CFG_STATES"
+  slot_i=1
+  while [ "$slot_i" -le 10 ]; do
+    IFS= read -r slot_pkg <&3 || slot_pkg=
+    IFS= read -r slot_enabled <&4 || slot_enabled=0
+    [ -n "$slot_pkg" ] || slot_pkg='(empty)'
+    log "slot[$slot_i] enabled=$slot_enabled package=$slot_pkg"
+    slot_i=$((slot_i + 1))
+  done
+  exec 3<&-
+  exec 4<&-
+}
+
+run_check() {
+  check_want=$1
+  check_quiet=${2:-0}
+  check_pkgfile=${3:-$TMP_PKGS}
+  resolve_hal || return 2
+  if [ "$check_quiet" = "1" ]; then
+    check_tmp="/data/local/tmp/.a2h_check.$$"
+    if [ "$check_want" = "whitelist" ] && patcher_supports_packages; then
+      if [ -n "$HAL_BASE" ]; then
+        "$PATCHER" --check "$check_want" "$HAL_PID" --packages "$check_pkgfile" --base "$HAL_BASE" > "$check_tmp" 2>&1
+      else
+        "$PATCHER" --check "$check_want" "$HAL_PID" --packages "$check_pkgfile" > "$check_tmp" 2>&1
+      fi
+    elif [ -n "$HAL_BASE" ]; then
+      "$PATCHER" --check "$check_want" "$HAL_PID" --base "$HAL_BASE" > "$check_tmp" 2>&1
+    else
+      "$PATCHER" --check "$check_want" "$HAL_PID" > "$check_tmp" 2>&1
+    fi
+    check_rc=$?
+    if [ "$check_rc" -ne 0 ]; then
+      log "live check FAIL want=$check_want pid=$HAL_PID base=${HAL_BASE:-auto}"
+      cat "$check_tmp" >> "$MAIN_LOG" 2>/dev/null
+    fi
+    rm -f "$check_tmp" 2>/dev/null
+    return "$check_rc"
+  fi
+  if [ "$check_want" = "whitelist" ] && patcher_supports_packages; then
+    if [ -n "$HAL_BASE" ]; then
+      "$PATCHER" --check "$check_want" "$HAL_PID" --packages "$check_pkgfile" --base "$HAL_BASE"
+    else
+      "$PATCHER" --check "$check_want" "$HAL_PID" --packages "$check_pkgfile"
+    fi
+  elif [ -n "$HAL_BASE" ]; then
+    "$PATCHER" --check "$check_want" "$HAL_PID" --base "$HAL_BASE"
+  else
+    "$PATCHER" --check "$check_want" "$HAL_PID"
+  fi
+}
+
+patcher_supports_packages() {
+  if [ "$PATCHER_SUPPORTS_PACKAGES" = "yes" ]; then
+    return 0
+  fi
+  if [ "$PATCHER_SUPPORTS_PACKAGES" = "no" ]; then
+    return 1
+  fi
+  if "$PATCHER" --help 2>&1 | grep -F -q -- '--packages'; then
+    PATCHER_SUPPORTS_PACKAGES=yes
+    return 0
+  fi
+  PATCHER_SUPPORTS_PACKAGES=no
+  log "patcher lacks --packages; whitelist live check uses legacy shape-only verification"
+  return 1
+}
+
+apply_current() {
+  apply_reason=$1
+  resolve_hal || {
+    log "apply FAIL reason=$apply_reason error=no-hal"
+    return 2
+  }
+  apply_want=whitelist
+  [ "$CURRENT_MODE" = "enabled" ] && apply_want=global
+  log "apply start reason=$apply_reason pid=$HAL_PID base=${HAL_BASE:-auto} mode=$CURRENT_MODE want=$apply_want revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT"
+  log_slots
+
+  apply_rc=1
+  if [ "$CURRENT_MODE" = "enabled" ]; then
+    if [ -n "$HAL_BASE" ]; then
+      "$PATCHER" "$HAL_PID" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
+    else
+      "$PATCHER" "$HAL_PID" >> "$MAIN_LOG" 2>&1
+    fi
+    apply_rc=$?
+  else
+    if [ -n "$HAL_BASE" ]; then
+      "$PATCHER" --disable "$HAL_PID" "$TMP_PKGS" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
+    else
+      "$PATCHER" --disable "$HAL_PID" "$TMP_PKGS" >> "$MAIN_LOG" 2>&1
+    fi
+    apply_rc=$?
+  fi
+
+  if [ "$apply_rc" -eq 0 ]; then
+    if [ "$apply_want" = "whitelist" ] && patcher_supports_packages; then
+      if [ -n "$HAL_BASE" ]; then
+        "$PATCHER" --check "$apply_want" "$HAL_PID" --packages "$TMP_PKGS" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
+      else
+        "$PATCHER" --check "$apply_want" "$HAL_PID" --packages "$TMP_PKGS" >> "$MAIN_LOG" 2>&1
+      fi
+    elif [ -n "$HAL_BASE" ]; then
+      "$PATCHER" --check "$apply_want" "$HAL_PID" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
+    else
+      "$PATCHER" --check "$apply_want" "$HAL_PID" >> "$MAIN_LOG" 2>&1
+    fi
+    check_rc=$?
+  else
+    check_rc=1
+  fi
+
+  if [ "$apply_rc" -eq 0 ] && [ "$check_rc" -eq 0 ]; then
+    write_value_atomic "$LAST_PID_FILE" "$HAL_PID" 0644 || true
+    log "apply verified reason=$apply_reason pid=$HAL_PID mode=$apply_want revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT"
+    return 0
+  fi
+  log "apply FAIL reason=$apply_reason pid=$HAL_PID mode=$apply_want patch_rc=$apply_rc check_rc=$check_rc revision=$CURRENT_REVISION"
+  return 1
+}
+
+record_applied() {
+  write_value_atomic "$APPLIED_SNAPSHOT" "$CURRENT_SNAPSHOT" 0644 || return 1
+  write_value_atomic "$APPLIED_REVISION" "$CURRENT_REVISION" 0644 || return 1
+  return 0
+}
+
+apply_stable() {
+  stable_reason=${1:-manual}
+  stable_max=${A2H_APPLY_ATTEMPTS:-4}
+  case "$stable_max" in
+    ''|*[!0-9]*) stable_max=4 ;;
+  esac
+  [ "$stable_max" -gt 0 ] 2>/dev/null || stable_max=1
+
+  if ! acquire_apply_lock 60; then
+    log "apply FAIL reason=$stable_reason error=busy-timeout"
+    return 75
+  fi
+
+  stable_try=1
+  stable_rc=1
+  while [ "$stable_try" -le "$stable_max" ]; do
+    if ! prepare_config; then
+      log "apply FAIL reason=$stable_reason error=config-prepare attempt=$stable_try"
+      stable_rc=2
+      break
+    fi
+    stable_before=$CURRENT_SNAPSHOT
+    stable_before_rev=$CURRENT_REVISION
+    if apply_current "$stable_reason#$stable_try"; then
+      stable_patch_rc=0
+    else
+      stable_patch_rc=$?
+    fi
+    if ! prepare_config; then
+      log "apply FAIL reason=$stable_reason error=config-recheck attempt=$stable_try"
+      stable_rc=2
+      break
+    fi
+    stable_after=$CURRENT_SNAPSHOT
+    if [ "$stable_patch_rc" -eq 0 ] && [ "$stable_before" = "$stable_after" ]; then
+      if record_applied; then
+        stable_rc=0
+      else
+        log "apply FAIL reason=$stable_reason error=record-applied"
+        stable_rc=2
+      fi
+      break
+    fi
+    if [ "$stable_before" != "$stable_after" ]; then
+      log "config changed during apply old=$stable_before_rev/$stable_before new=$CURRENT_REVISION/$stable_after; retry latest"
+    else
+      log "apply retry reason=$stable_reason attempt=$stable_try rc=$stable_patch_rc"
+      sleep 1
+    fi
+    stable_try=$((stable_try + 1))
+  done
+
+  release_apply_lock
+  if [ "$stable_rc" -eq 0 ]; then
+    printf 'APPLY_OK mode=%s revision=%s snapshot=%s active=%s\n' "$CURRENT_MODE" "$CURRENT_REVISION" "$CURRENT_SNAPSHOT" "$ACTIVE_COUNT"
+  else
+    log "apply exhausted reason=$stable_reason attempts=$stable_try rc=$stable_rc"
+  fi
+  return "$stable_rc"
+}
+
+mark_pending() {
+  pending_text="$CURRENT_SNAPSHOT $CURRENT_REVISION"
+  write_value_atomic "$PENDING_FILE" "$pending_text" 0600
+}
+
+claim_worker_lock() {
+  if mkdir "$WORKER_LOCK" 2>/dev/null; then
+    printf '%s\n' "$$" > "$WORKER_LOCK/pid" 2>/dev/null
+    return 0
+  fi
+  return 1
+}
+
+release_worker_lock() {
+  worker_owner=$(cat "$WORKER_LOCK/pid" 2>/dev/null)
+  [ "$worker_owner" = "$$" ] || return 0
+  rm -f "$WORKER_LOCK/pid" 2>/dev/null
+  rmdir "$WORKER_LOCK" 2>/dev/null
+}
+
+start_worker() {
+  start_try=0
+  while [ "$start_try" -lt 2 ]; do
+    if mkdir "$WORKER_LOCK" 2>/dev/null; then
+      printf '%s\n' starting > "$WORKER_LOCK/status" 2>/dev/null
+      if command -v nohup >/dev/null 2>&1; then
+        nohup sh "$SELF" __worker >/dev/null 2>&1 < /dev/null &
+      else
+        sh "$SELF" __worker >/dev/null 2>&1 < /dev/null &
+      fi
+      start_pid=$!
+      printf '%s\n' "$start_pid" > "$WORKER_LOCK/pid" 2>/dev/null
+      rm -f "$WORKER_LOCK/status" 2>/dev/null
+      log "queue worker started pid=$start_pid"
+      return 0
+    fi
+
+    if lock_owner_alive "$WORKER_LOCK"; then
+      return 0
+    fi
+    sleep 1
+    if lock_owner_alive "$WORKER_LOCK"; then
+      return 0
+    fi
+    rm -f "$WORKER_LOCK/pid" "$WORKER_LOCK/status" 2>/dev/null
+    rmdir "$WORKER_LOCK" 2>/dev/null || return 1
+    start_try=$((start_try + 1))
+  done
+  return 1
+}
+
+worker_main() {
+  printf '%s\n' "$$" > "$WORKER_LOCK/pid" 2>/dev/null
+  rm -f "$WORKER_LOCK/status" 2>/dev/null
+  worker_failures=0
+  while :; do
+    if [ ! -f "$PENDING_FILE" ]; then
+      release_worker_lock
+      if [ -f "$PENDING_FILE" ] && claim_worker_lock; then
+        continue
+      fi
+      return 0
+    fi
+
+    worker_marker=$(cat "$PENDING_FILE" 2>/dev/null)
+    rm -f "$PENDING_FILE" 2>/dev/null
+    log "queue worker consume marker=$worker_marker"
+    if A2H_APPLY_ATTEMPTS=3 apply_stable queue; then
+      worker_failures=0
+    else
+      worker_failures=$((worker_failures + 1))
+      if prepare_config; then
+        mark_pending || true
+      fi
+      if [ "$worker_failures" -ge 3 ]; then
+        log "queue worker paused after failures=$worker_failures; pending preserved"
+        release_worker_lock
+        return 1
+      fi
+      sleep 2
+    fi
+
+    if prepare_config; then
+      worker_applied=$(cat "$APPLIED_SNAPSHOT" 2>/dev/null)
+      if [ "$worker_applied" != "$CURRENT_SNAPSHOT" ]; then
+        log "queue worker found newer config applied=${worker_applied:-none} current=$CURRENT_SNAPSHOT"
+        mark_pending || true
+      fi
+    fi
+  done
+}
+
+queue_latest() {
+  if ! prepare_config; then
+    log "queue FAIL error=config-prepare"
+    return 2
+  fi
+  mark_pending || {
+    log "queue FAIL error=pending-write"
+    return 2
+  }
+  log "queue accepted mode=$CURRENT_MODE revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT"
+  if ! start_worker; then
+    log "queue FAIL error=worker-start pending=preserved"
+    return 1
+  fi
+  printf 'QUEUED mode=%s revision=%s snapshot=%s active=%s\n' "$CURRENT_MODE" "$CURRENT_REVISION" "$CURRENT_SNAPSHOT" "$ACTIVE_COUNT"
+  return 0
+}
+
+show_current_unlocked() {
+  prepare_config || return 2
+  resolve_hal || {
+    printf '%s\n' 'HAL not found' >&2
+    return 2
+  }
+  if [ -n "$HAL_BASE" ]; then
+    "$PATCHER" --show "$HAL_PID" --base "$HAL_BASE"
+  else
+    "$PATCHER" --show "$HAL_PID"
+  fi
+}
+
+show_current() {
+  if ! acquire_apply_lock 20; then
+    log "show FAIL error=apply-lock-timeout"
+    return 75
+  fi
+  show_rc=0
+  show_current_unlocked || show_rc=$?
+  release_apply_lock || {
+    log "show FAIL error=apply-lock-release"
+    [ "$show_rc" -eq 0 ] && show_rc=1
+  }
+  return "$show_rc"
+}
+
+check_current_unlocked() {
+  check_arg=${1:-}
+  A2H_QUIET_PREPARE=1 prepare_config || return 2
+  case "$check_arg" in
+    global|enabled) check_mode=global ;;
+    whitelist|disabled) check_mode=whitelist ;;
+    '')
+      check_mode=whitelist
+      [ "$CURRENT_MODE" = "enabled" ] && check_mode=global
+      ;;
+    *) return 2 ;;
+  esac
+  run_check "$check_mode" "${A2H_QUIET_CHECK:-0}"
+}
+
+check_current() {
+  if ! acquire_apply_lock 20; then
+    log "check FAIL error=apply-lock-timeout"
+    return 75
+  fi
+  check_rc=0
+  check_current_unlocked "$1" || check_rc=$?
+  release_apply_lock || {
+    log "check FAIL error=apply-lock-release"
+    [ "$check_rc" -eq 0 ] && check_rc=1
+  }
+  return "$check_rc"
+}
+
+snapshot_current() {
+  A2H_QUIET_PREPARE=1 prepare_config || return 2
+  printf '%s\n' "$CURRENT_SNAPSHOT"
+}
+
+chmod 755 "$PATCHER" "$SELF" 2>/dev/null
+mkdir -p "$CFG_DIR" /data/local/tmp 2>/dev/null
+touch "$ACTION_LOG" "$MAIN_LOG" 2>/dev/null
+
+command_name=${1:-apply}
+case "$command_name" in
+  enable|global|on)
+    set_mode enabled || exit $?
+    apply_stable "${A2H_REASON:-enable}"
+    exit $?
+    ;;
+  disable|whitelist|list|off)
+    set_mode disabled || exit $?
+    apply_stable "${A2H_REASON:-disable}"
+    exit $?
+    ;;
+  apply)
+    apply_stable "${A2H_REASON:-apply}"
+    exit $?
+    ;;
+  queue)
+    if [ -n "${2:-}" ]; then
+      set_mode "$2" || {
+        printf 'invalid mode: %s\n' "$2" >&2
+        exit 2
+      }
+    fi
+    queue_latest
+    exit $?
+    ;;
+  show|status)
+    show_current
+    exit $?
+    ;;
+  check)
+    check_current "${2:-}"
+    exit $?
+    ;;
+  snapshot)
+    snapshot_current
+    exit $?
+    ;;
+  __worker)
+    worker_main
+    exit $?
+    ;;
+  *)
+    printf '%s\n' 'usage: a2h_apply [queue [enabled|disabled]|apply|enable|disable|show|status|check [global|whitelist]|snapshot]' >&2
+    exit 2
+    ;;
+esac

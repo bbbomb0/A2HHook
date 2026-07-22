@@ -5,17 +5,19 @@ A2HHook 是面向 REDMI K80 Ultra / K80U 的音乐触感模块，目标是在 Ke
 - 全局音乐触感；
 - 官方 6 个音乐应用白名单；
 - 额外 4 个自定义包名槽位，共 10 槽；
+- 10 个槽位分别启用或关闭，关闭时保留已填写包名；
 - 全局模式 / 白名单模式一键切换；
+- 手机重启后自动应用配置，并通过通知中心反馈结果；
 - 模块栏 WebUI 入口；
 - 日志分享、备份与恢复配置等日常维护功能。
 
-当前公开版本：`v1.5.2-fix`。
+当前公开版本：`v1.5.3`。
 
 ## 下载安装
 
 请到 GitHub Releases 下载：
 
-- `a2h_hook_v1.5.2-fix.zip`
+- `a2h_hook_v1.5.3.zip`
 
 刷入方式：
 
@@ -23,7 +25,7 @@ A2HHook 是面向 REDMI K80 Ultra / K80U 的音乐触感模块，目标是在 Ke
 2. 重启手机；
 3. 进入模块卡片 WebUI；
 4. 选择“全局模式”或“白名单模式”；
-5. 白名单模式下可编辑 10 个包名槽位，保存并应用。
+5. 白名单模式下可编辑 10 个包名并分别使用右侧开关；模式、包名或开关变化会自动保存并应用。
 
 默认官方白名单：
 
@@ -36,12 +38,13 @@ com.netease.cloudmusic
 com.kugou.android
 ```
 
-第 7～10 槽用于自定义包名，留空代表禁用该槽位。
+第 7～10 槽用于自定义包名。每个槽位都可单独关闭，关闭后包名仍会保留。
 
 ## 兼容性说明
 
 - 已按 HyperOS 2.x / 3.x 差异做通用定位与回退处理；
 - 当前主线保留双写入与 I-cache flush 兼容保险；
+- 当前连接实机仅为 K80U / HyperOS 3.0.302；HyperOS 2.0.208 修复依据离线日志与 OS2.0.218 HAL 静态分析，仍需对应系统用户实测反馈；
 - 模块不包含系统原厂音频库文件；
 - 不建议和其它同类音频 HAL 修改模块同时启用。
 
@@ -53,7 +56,7 @@ com.kugou.android
 
 - Android NDK r26 或更新版本；
 - CMake 3.18+；
-- `zip` 或 Python 3；
+- `zip` 或 Python 3；Windows 使用 `zip` 时还需要 Python 3 规范 ZIP 权限元数据；
 - 仓库自带已验证的 Dobby 静态库；若你要替换版本，可自行重新编译。
 
 Linux / macOS / MSYS2 Git Bash：
@@ -66,7 +69,7 @@ export ANDROID_NDK_HOME=/path/to/android-ndk
 构建完成后会生成：
 
 ```text
-a2h_hook_v1.5.2-fix.zip
+a2h_hook_v1.5.3.zip
 ```
 
 ## 仓库结构
@@ -76,7 +79,7 @@ a2h_hook_v1.5.2-fix.zip
 ├── src/                 # native 源码
 ├── webroot/             # KernelSU WebUI
 ├── config/              # 默认配置
-├── action.sh            # WebUI/模块动作入口
+├── bin/a2h_apply        # WebUI/开机服务内部应用入口
 ├── service.sh           # 开机后台应用逻辑
 ├── share_logs.sh        # 日志打包分享
 ├── customize.sh         # 安装脚本

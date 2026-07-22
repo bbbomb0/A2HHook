@@ -26,10 +26,14 @@ using strcmp_fn = int (*)(const char *, const char *);
 constexpr const char *kPackagesPath = "/data/local/tmp/a2h_packages.txt";
 constexpr const char *kFuncHintPath = "/data/adb/modules/a2h_hook/config/func_off";
 constexpr const char *kStatePath = "/data/local/tmp/a2h_state";
+constexpr const char *kStateFallbackPath = "/data/adb/modules/a2h_hook/config/state";
 constexpr size_t kMaxExtra = 4;
 constexpr size_t kPackageSize = 64;
-constexpr uintptr_t kFallbackFuncStart = 0x3e3fe0;
-constexpr uintptr_t kFallbackFuncEnd = 0x3e4048;
+// Used only before the patcher has written config/func_off.  It covers the
+// observed OS2/OS3 function locations long enough to load the real hint; once
+// loaded, from_a2h_function() returns to the narrow per-build window.
+constexpr uintptr_t kBootstrapFuncStart = 0x3e3f00;
+constexpr uintptr_t kBootstrapFuncEnd = 0x3e4600;
 constexpr char kTag[] = "A2HHook";
 
 pthread_once_t g_resolve_once = PTHREAD_ONCE_INIT;
@@ -38,7 +42,7 @@ strcmp_fn g_original_strcmp = nullptr;
 pthread_mutex_t g_config_lock = PTHREAD_MUTEX_INITIALIZER;
 char g_extra[kMaxExtra][kPackageSize];
 size_t g_extra_count = 0;
-time_t g_config_mtime = 0;
+uint64_t g_config_stamp = 0;
 uintptr_t g_func_off = 0;
 thread_local bool g_in_hook = false;
 thread_local bool g_loading = false;
@@ -82,9 +86,24 @@ void resolve_real_strcmp() {
     if (g_real_strcmp) logi("resolved strcmp hook");
 }
 
-time_t file_mtime(const char *path) {
+uint64_t file_stamp(const char *path) {
     struct stat st = {};
-    return (stat(path, &st) == 0) ? st.st_mtime : 0;
+    if (stat(path, &st) != 0) return 0;
+    uint64_t stamp = static_cast<uint64_t>(st.st_mtime);
+    stamp = stamp * 1315423911u + static_cast<uint64_t>(st.st_size);
+#if defined(__BIONIC__) || defined(__linux__)
+    stamp = stamp * 1315423911u + static_cast<uint64_t>(st.st_mtim.tv_nsec);
+#endif
+    return stamp;
+}
+
+uint64_t combined_stamp(uint64_t package_stamp, uint64_t hint_stamp) {
+    if (package_stamp == 0 && hint_stamp == 0) return 0;
+    // Do not use max(package_stamp, hint_stamp): a changed file can hash to a
+    // smaller value and then fail to invalidate the cached package list.
+    uint64_t mixed = package_stamp ^ (hint_stamp + 0x9e3779b97f4a7c15ULL +
+                                      (package_stamp << 6) + (package_stamp >> 2));
+    return mixed ? mixed : 1;
 }
 
 uintptr_t read_func_hint() {
@@ -116,18 +135,19 @@ bool valid_package(const char *value) {
 bool whitelist_mode() {
     char state[16] = {};
     int fd = open(kStatePath, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) fd = open(kStateFallbackPath, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return true;
     ssize_t n = read(fd, state, sizeof(state) - 1);
     close(fd);
     return n <= 0 || std::strncmp(state, "enabled", 7) != 0;
 }
 
-void reload_extra_locked(time_t mtime) {
+void reload_extra_locked(uint64_t stamp) {
     g_extra_count = 0;
     int fd = open(kPackagesPath, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         g_func_off = read_func_hint();
-        g_config_mtime = mtime;
+        g_config_stamp = stamp;
         return;
     }
     char data[4096] = {};
@@ -135,7 +155,7 @@ void reload_extra_locked(time_t mtime) {
     close(fd);
     if (size <= 0) {
         g_func_off = read_func_hint();
-        g_config_mtime = mtime;
+        g_config_stamp = stamp;
         return;
     }
     size_t line = 0;
@@ -163,16 +183,16 @@ void reload_extra_locked(time_t mtime) {
     } else {
         logw("func_off hint missing, using fallback window");
     }
-    g_config_mtime = mtime;
+    g_config_stamp = stamp;
 }
 
 void reload_extra_if_needed() {
-    time_t pm = file_mtime(kPackagesPath);
-    time_t fm = file_mtime(kFuncHintPath);
-    time_t mtime = pm > fm ? pm : fm;
-    if (mtime == g_config_mtime) return;
+    uint64_t pm = file_stamp(kPackagesPath);
+    uint64_t fm = file_stamp(kFuncHintPath);
+    uint64_t stamp = combined_stamp(pm, fm);
+    if (stamp == g_config_stamp) return;
     pthread_mutex_lock(&g_config_lock);
-    if (mtime != g_config_mtime) reload_extra_locked(mtime);
+    if (stamp != g_config_stamp) reload_extra_locked(stamp);
     pthread_mutex_unlock(&g_config_lock);
 }
 
@@ -183,8 +203,8 @@ bool from_a2h_function(void *return_address) {
     if (std::strstr(info.dli_fname, "audio.primary.") == nullptr) return false;
     uintptr_t offset = reinterpret_cast<uintptr_t>(return_address) -
                        reinterpret_cast<uintptr_t>(info.dli_fbase);
-    uintptr_t start = g_func_off ? (g_func_off > 0x80 ? g_func_off - 0x80 : 0) : kFallbackFuncStart;
-    uintptr_t end = g_func_off ? (g_func_off + 0x180) : kFallbackFuncEnd;
+    uintptr_t start = g_func_off ? (g_func_off > 0x80 ? g_func_off - 0x80 : 0) : kBootstrapFuncStart;
+    uintptr_t end = g_func_off ? (g_func_off + 0x180) : kBootstrapFuncEnd;
     return offset >= start && offset <= end;
 }
 
@@ -221,6 +241,10 @@ int hooked_strcmp(const char *lhs, const char *rhs) {
 }
 
 __attribute__((constructor)) static void install_hook() {
+    // Load any persisted package list and function hint before the first
+    // strcmp call.  On a first boot the hint may not exist yet; the bootstrap
+    // window above allows a later call to reload it after the patcher runs.
+    reload_extra_if_needed();
     pthread_once(&g_resolve_once, resolve_real_strcmp);
     if (!g_real_strcmp) {
         logw("failed to resolve strcmp");
