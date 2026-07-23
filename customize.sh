@@ -78,7 +78,7 @@ if [ "$MODDIR" != "$OLD_MODULE" ] && [ -d "$OLD_MODULE/config" ]; then
   fi
 fi
 
-# A root-level action.sh creates the manager's Action button. v1.5.3 uses an
+# A root-level action.sh creates the manager's Action button. v1.5.4 uses an
 # internal command instead, so remove the legacy entry from both update paths.
 rm -f "$MODDIR/action.sh" 2>/dev/null
 for legacy_module in /data/adb/modules/a2h_hook /data/adb/modules_update/a2h_hook; do
@@ -187,4 +187,4 @@ if [ -f "$MODDIR/webroot/index.html" ]; then
 else
   ui_print "! WebUI 缺失: webroot/index.html"
 fi
-  ui_print "- A2HHook v1.5.3 安装完成"
+  ui_print "- A2HHook v1.5.4 安装完成"

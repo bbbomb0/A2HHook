@@ -1,4 +1,4 @@
-// a2h_patch v1.5.3 - v1.0 universal signature scan + 10-slot whitelist
+// a2h_patch v1.5.4 - v1.0 universal signature scan + 10-slot whitelist
 #define _GNU_SOURCE
 #include <stdint.h>
 #include <stdio.h>
@@ -41,7 +41,10 @@
 #define PTRACE_PEEKDATA 2
 #define PTRACE_POKEDATA 5
 #define MAX_SLOTS 10
-#define A2H_VERSION "1.5.3"
+#define A2H_VERSION "1.5.4"
+#define WHITELIST_CAVE_BYTES (MAX_SLOTS * 64 + 16 + MAX_SLOTS * 8 + 32)
+#define WHITELIST_STUB_WORDS 19
+#define WHITELIST_STUB_BYTES (WHITELIST_STUB_WORDS * sizeof(uint32_t))
 
 struct user_pt_regs_a64 {
     uint64_t regs[31];
@@ -88,12 +91,13 @@ typedef struct {
     const char *name; const char *hint; uintptr_t func_off; uintptr_t slot_off[6]; int slot_len[6];
 } profile_t;
 static const profile_t PROFILES[] = {
-    {"os3_0x3e3fc0","HyperOS3/OS3-like",0x3E3FC0,{0xADC9C,0xB19F4,0xB507E,0xBC5CC,0xBC5DB,0xFCFFA},{17,19,22,14,15,14}},
-    {"os2_0x3e4280","HyperOS2/OS2-like",0x3E4280,{0xADE45,0xB1BBB,0xB5280,0xBC7CE,0xBC7DD,0xFD0FF},{17,19,22,14,15,14}},
+    {"os3_0_302_0x3e3fc0","HyperOS3.0.302 verified",0x3E3FC0,{0xADC9C,0xB19F4,0xB507E,0xBC5CC,0xBC5DB,0xFCFFA},{17,19,22,14,15,14}},
+    {"os2_0_218_0x3e4280","HyperOS2.0.218 static",0x3E4280,{0xADE45,0xB1BBB,0xB5280,0xBC7CE,0xBC7DD,0xFD0FF},{17,19,22,14,15,14}},
 };
 static slot_t slots[MAX_SLOTS];
 static uintptr_t g_func_off=0x3E3FC0,g_ptr_off=0x437200,g_stub_mark=0x437100,g_rw_start=0,g_rw_end=0,g_rx_start=0,g_rx_end=0;
-static char g_libname[64]={0}, g_profile[48]={0}, g_profile_hint[48]={0}, g_locate_method[32]={0}, g_scan_kind[16]={0};
+static uintptr_t g_elf_tail_start=0,g_elf_tail_end=0,g_elf_tail_candidate=0;
+static char g_libname[64]={0}, g_profile[48]={0}, g_profile_hint[48]={0}, g_locate_method[32]={0}, g_scan_kind[24]={0};
 static int g_attached=0;
 static uintptr_t slot_off(int i){return upx(slots[i].off_x);} 
 static void set_slot_off(int i,uintptr_t off){slots[i].off_x=(uint32_t)off^0xA5C31F77u;} 
@@ -108,6 +112,9 @@ static const unsigned char GLOBAL_TAIL8[8]={0x1f,0x20,0x03,0xd5,0x1f,0x20,0x03,0
 static const unsigned char GLOBAL_PATCH[16]={
     0x20,0x00,0x80,0x52,0xc0,0x03,0x5f,0xd6,
     0x1f,0x20,0x03,0xd5,0x1f,0x20,0x03,0xd5
+};
+static const unsigned char WHITELIST_MARKER[16]={
+    'A','2','H','1','W','L','S','T','0','0','0','2',0,0,0,0
 };
 static int patched_global_stub_tail(const unsigned char *head, size_t n) {
     if (!head || n < 16 || memcmp(head, PATCH, sizeof(PATCH)) != 0) return 0;
@@ -175,6 +182,164 @@ static int mem_r(pid_t pid,uintptr_t addr,void *buf,size_t len){
     }
     if(lseek(fd,(off_t)addr,SEEK_SET)!=(off_t)addr){close(fd);return -1;}
     ssize_t n=read(fd,buf,len); close(fd); return n==(ssize_t)len?0:-1;
+}
+
+static int exact_whitelist_stub_shape(const unsigned char *h, size_t n) {
+    static const uint32_t tail[WHITELIST_STUB_WORDS - 2] = {
+        0xB40001E0u, 0x52800142u, 0x340001A2u, 0xF8408423u,
+        0xB4000123u, 0xAA0003E4u, 0x38401485u, 0x38401466u,
+        0x6B0600BFu, 0x54000081u, 0x35FFFF85u, 0x52800020u,
+        0xD65F03C0u, 0x51000442u, 0x17FFFFF4u, 0x52800000u,
+        0xD65F03C0u
+    };
+    if (!h || n < WHITELIST_STUB_BYTES || !is_stub_head(h, n)) return 0;
+    for (size_t i = 0; i < sizeof(tail) / sizeof(tail[0]); ++i) {
+        if (load_u32le(h + (i + 2) * sizeof(uint32_t)) != tail[i]) return 0;
+    }
+    return 1;
+}
+
+static int exact_whitelist_stub_at(pid_t pid, uintptr_t addr) {
+    unsigned char code[WHITELIST_STUB_BYTES];
+    return mem_r(pid, addr, code, sizeof(code)) == 0 &&
+           exact_whitelist_stub_shape(code, sizeof(code));
+}
+
+static int writable_map_contains(pid_t pid, uintptr_t start, uintptr_t end,
+                                 uintptr_t *map_start, uintptr_t *map_end) {
+    if (!start || end <= start) return 0;
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%d/maps", pid);
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    char line[512];
+    int found = 0;
+    while (fgets(line, sizeof(line), f)) {
+        uintptr_t s = 0, e = 0;
+        char perms[8] = {0};
+        if (sscanf(line, "%lx-%lx %7s", &s, &e, perms) != 3) continue;
+        if (start >= s && end <= e && perms[0] == 'r' && perms[1] == 'w') {
+            if (map_start) *map_start = s;
+            if (map_end) *map_end = e;
+            found = 1;
+            break;
+        }
+    }
+    fclose(f);
+    return found;
+}
+
+/* Derive storage only from bytes outside the final writable PT_LOAD's
+ * declared p_memsz but inside its loader-rounded writable page.  Unlike a
+ * zero scan inside .bss, this area is not owned by any ELF section/object. */
+static int discover_elf_tail_region(pid_t pid, uintptr_t base, uintptr_t need) {
+    g_elf_tail_start = 0;
+    g_elf_tail_end = 0;
+    g_elf_tail_candidate = 0;
+    if (!base || !need) return 0;
+
+    Elf64_Ehdr eh;
+    memset(&eh, 0, sizeof(eh));
+    if (mem_r(pid, base, &eh, sizeof(eh)) != 0 ||
+        memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0 ||
+        eh.e_ident[EI_CLASS] != ELFCLASS64 ||
+        eh.e_ident[EI_DATA] != ELFDATA2LSB ||
+        eh.e_phentsize != sizeof(Elf64_Phdr) ||
+        eh.e_phnum == 0 || eh.e_phnum > 128 ||
+        eh.e_phoff > 1024 * 1024) {
+        fprintf(stderr, "[a2h_patch] ELF tail unavailable: invalid ELF64 header\n");
+        return 0;
+    }
+
+    size_t ph_bytes = (size_t)eh.e_phnum * sizeof(Elf64_Phdr);
+    Elf64_Phdr *ph = (Elf64_Phdr *)malloc(ph_bytes);
+    if (!ph) return 0;
+    if (mem_r(pid, base + (uintptr_t)eh.e_phoff, ph, ph_bytes) != 0) {
+        free(ph);
+        fprintf(stderr, "[a2h_patch] ELF tail unavailable: program headers unreadable\n");
+        return 0;
+    }
+
+    uintptr_t segment_end = 0;
+    int writable_index = -1;
+    for (size_t i = 0; i < eh.e_phnum; ++i) {
+        if (ph[i].p_type != PT_LOAD) continue;
+        if (ph[i].p_filesz > ph[i].p_memsz ||
+            ph[i].p_vaddr > UINTPTR_MAX - ph[i].p_memsz) {
+            fprintf(stderr, "[a2h_patch] ELF tail unavailable: malformed PT_LOAD index=%lu\n",
+                    (unsigned long)i);
+            free(ph);
+            return 0;
+        }
+        if (!(ph[i].p_flags & PF_W) || ph[i].p_memsz == 0) continue;
+        uintptr_t end = (uintptr_t)(ph[i].p_vaddr + ph[i].p_memsz);
+        if (end > segment_end) {
+            segment_end = end;
+            writable_index = (int)i;
+        }
+    }
+    if (writable_index < 0 || !segment_end || segment_end > UINTPTR_MAX - 15) {
+        free(ph);
+        fprintf(stderr, "[a2h_patch] ELF tail unavailable: writable PT_LOAD missing\n");
+        return 0;
+    }
+
+    long page_long = sysconf(_SC_PAGESIZE);
+    uintptr_t page = page_long > 0 ? (uintptr_t)page_long : 4096;
+    if ((page & (page - 1)) != 0 || segment_end > UINTPTR_MAX - (page - 1)) {
+        free(ph);
+        fprintf(stderr, "[a2h_patch] ELF tail unavailable: invalid page size\n");
+        return 0;
+    }
+    uintptr_t tail_start = (segment_end + 15) & ~(uintptr_t)15;
+    uintptr_t tail_end = (segment_end + page - 1) & ~(page - 1);
+    if (tail_end <= tail_start || tail_end - tail_start < need) {
+        free(ph);
+        fprintf(stderr,
+                "[a2h_patch] ELF tail too small segment_end=0x%lx tail=0x%lx-0x%lx need=0x%lx\n",
+                (unsigned long)segment_end, (unsigned long)tail_start,
+                (unsigned long)tail_end, (unsigned long)need);
+        return 0;
+    }
+    for (size_t i = 0; i < eh.e_phnum; ++i) {
+        if ((int)i == writable_index || ph[i].p_type != PT_LOAD || ph[i].p_memsz == 0)
+            continue;
+        uintptr_t other_start = (uintptr_t)ph[i].p_vaddr;
+        uintptr_t other_end = (uintptr_t)(ph[i].p_vaddr + ph[i].p_memsz);
+        if (other_start < tail_end && other_end > tail_start) {
+            fprintf(stderr,
+                    "[a2h_patch] ELF tail unavailable: PT_LOAD overlap index=%lu rel=0x%lx-0x%lx\n",
+                    (unsigned long)i, (unsigned long)other_start,
+                    (unsigned long)other_end);
+            free(ph);
+            return 0;
+        }
+    }
+    free(ph);
+    uintptr_t candidate = (tail_end - need) & ~(uintptr_t)15;
+    if (candidate < tail_start || base > UINTPTR_MAX - tail_end) return 0;
+
+    uintptr_t map_start = 0, map_end = 0;
+    if (!writable_map_contains(pid, base + candidate, base + tail_end,
+                               &map_start, &map_end)) {
+        fprintf(stderr,
+                "[a2h_patch] ELF tail unavailable: candidate not in one writable map rel=0x%lx-0x%lx\n",
+                (unsigned long)candidate, (unsigned long)tail_end);
+        return 0;
+    }
+
+    g_elf_tail_start = tail_start;
+    g_elf_tail_end = tail_end;
+    g_elf_tail_candidate = candidate;
+    if (!g_rw_start || tail_start < g_rw_start) g_rw_start = tail_start;
+    if (tail_end > g_rw_end) g_rw_end = tail_end;
+    fprintf(stderr,
+            "[a2h_patch] ELF tail ready segment_end=0x%lx safe=0x%lx-0x%lx candidate=0x%lx need=0x%lx map=0x%lx-0x%lx\n",
+            (unsigned long)segment_end, (unsigned long)tail_start,
+            (unsigned long)tail_end, (unsigned long)candidate,
+            (unsigned long)need, (unsigned long)(map_start - base),
+            (unsigned long)(map_end - base));
+    return 1;
 }
 static void log_prop(const char *key){
     char cmd[192], val[256]={0};
@@ -590,17 +755,35 @@ static int inspect_stub_table(pid_t pid, uintptr_t base, uintptr_t func_off,
     uintptr_t rw_lo = base + g_rw_start;
     uintptr_t rw_hi = base + g_rw_end;
     uintptr_t table_bytes = MAX_SLOTS * sizeof(uint64_t);
+    uintptr_t table_delta = MAX_SLOTS * 64 + 16;
+    int tail_ok = (g_elf_tail_end > g_elf_tail_start &&
+                   table >= base + g_elf_tail_start &&
+                   table <= base + g_elf_tail_end - table_bytes);
     int range_ok = (g_rw_end > g_rw_start &&
                     g_rw_end - g_rw_start >= table_bytes &&
-                    table >= rw_lo && table <= rw_hi - table_bytes);
+                    table >= rw_lo && table <= rw_hi - table_bytes && tail_ok);
     if (!range_ok || table < base + 16) {
         if (verbose) fprintf(stderr, "[a2h_patch] stub table out of range @0x%lx\n",
                              (unsigned long)table);
         if (out) *out = info;
         return 0;
     }
-    uint32_t magic = 0;
-    if (mem_r(pid, table - 16, &magic, sizeof(magic)) == 0 && magic == 0x31483241u) {
+    if (table < base + table_delta) {
+        if (verbose) fprintf(stderr, "[a2h_patch] stub table has invalid cave layout\n");
+        if (out) *out = info;
+        return 0;
+    }
+    uintptr_t cave_abs = table - table_delta;
+    if (((cave_abs - base) & 15u) != 0 ||
+        cave_abs < base + g_elf_tail_start ||
+        cave_abs > base + g_elf_tail_end - WHITELIST_CAVE_BYTES) {
+        if (verbose) fprintf(stderr, "[a2h_patch] stub cave outside ELF tail\n");
+        if (out) *out = info;
+        return 0;
+    }
+    unsigned char marker[sizeof(WHITELIST_MARKER)];
+    if (mem_r(pid, table - sizeof(marker), marker, sizeof(marker)) == 0 &&
+        memcmp(marker, WHITELIST_MARKER, sizeof(marker)) == 0) {
         info.magic_ok = 1;
     }
     uint64_t ptrs[MAX_SLOTS];
@@ -625,7 +808,9 @@ static int inspect_stub_table(pid_t pid, uintptr_t base, uintptr_t func_off,
         uintptr_t p = (uintptr_t)ptrs[i];
         char got[64];
         memset(got, 0, sizeof(got));
-        if (p < base || p >= lib_hi || mem_r(pid, p, got, sizeof(got) - 1) != 0 ||
+        uintptr_t expected_ptr = cave_abs + (uintptr_t)i * 64;
+        if (p != expected_ptr || p < base || p >= lib_hi ||
+            mem_r(pid, p, got, sizeof(got) - 1) != 0 ||
             !valid_pkg(got)) {
             info.invalid_ptrs++;
             continue;
@@ -634,9 +819,7 @@ static int inspect_stub_table(pid_t pid, uintptr_t base, uintptr_t func_off,
         if (verbose) fprintf(stderr, "[a2h_patch] active_ptr[%d]=0x%lx value='%s'\n",
                              i, (unsigned long)(p - base), got);
     }
-    /* A magic marker is required for an all-off table; active legacy tables may predate it. */
-    info.table_ok = range_ok && info.invalid_ptrs == 0 &&
-                    (info.magic_ok || info.active_ptrs > 0);
+    info.table_ok = range_ok && info.magic_ok && info.invalid_ptrs == 0;
     if (verbose) {
         fprintf(stderr,
                 "[a2h_patch] stub table=%s magic=%s active_ptrs=%d invalid_ptrs=%d content_mismatch=%d rel=0x%lx\n",
@@ -650,14 +833,18 @@ static int inspect_stub_table(pid_t pid, uintptr_t base, uintptr_t func_off,
 
 static int marked_cave_ok(pid_t pid, uintptr_t base, uintptr_t cave) {
     uintptr_t marker_span = MAX_SLOTS * 64 + 16;
-    if (g_rw_end <= g_rw_start ||
+    if ((cave & 15u) != 0 ||
+        g_rw_end <= g_rw_start || g_elf_tail_end <= g_elf_tail_start ||
+        g_elf_tail_end - g_elf_tail_start < WHITELIST_CAVE_BYTES ||
         g_rw_end - g_rw_start < marker_span ||
-        cave < g_rw_start || cave > g_rw_end - marker_span) {
+        cave < g_rw_start || cave > g_rw_end - marker_span ||
+        cave < g_elf_tail_start || cave > g_elf_tail_end - WHITELIST_CAVE_BYTES) {
         return 0;
     }
     uintptr_t marker = base + cave + MAX_SLOTS * 64;
-    uint32_t magic = 0;
-    if (mem_r(pid, marker, &magic, sizeof(magic)) != 0 || magic != 0x31483241u) {
+    unsigned char marker_value[sizeof(WHITELIST_MARKER)];
+    if (mem_r(pid, marker, marker_value, sizeof(marker_value)) != 0 ||
+        memcmp(marker_value, WHITELIST_MARKER, sizeof(marker_value)) != 0) {
         return 0;
     }
     uintptr_t table = cave + MAX_SLOTS * 64;
@@ -667,9 +854,27 @@ static int marked_cave_ok(pid_t pid, uintptr_t base, uintptr_t cave) {
     uintptr_t rw_lo = base + g_rw_start;
     uintptr_t rw_hi = base + g_rw_end;
     for (int i = 0; i < MAX_SLOTS; ++i) {
-        if (ptrs[i] && (ptrs[i] < rw_lo || ptrs[i] >= rw_hi)) return 0;
+        uintptr_t expected = base + cave + (uintptr_t)i * 64;
+        if (ptrs[i] && (ptrs[i] != expected || ptrs[i] < rw_lo || ptrs[i] >= rw_hi))
+            return 0;
     }
     return 1;
+}
+
+static int exact_stub_targets_cave(pid_t pid, uintptr_t base,
+                                   uintptr_t func_off, uintptr_t cave) {
+    unsigned char code[WHITELIST_STUB_BYTES];
+    uintptr_t table_abs = 0;
+    uintptr_t expected_rel = cave + MAX_SLOTS * 64 + sizeof(WHITELIST_MARKER);
+    expected_rel = (expected_rel + 7) & ~(uintptr_t)7;
+    uintptr_t expected_table = base + expected_rel;
+    if ((cave & 15u) != 0) return 0;
+    if (mem_r(pid, base + func_off, code, sizeof(code)) != 0 ||
+        !exact_whitelist_stub_shape(code, sizeof(code)) ||
+        !decode_stub_table(base + func_off, code, &table_abs)) {
+        return 0;
+    }
+    return table_abs == expected_table;
 }
 
 /* A legacy whitelist->global transition leaves the old stub words after the
@@ -694,14 +899,62 @@ static int score_profile(pid_t pid, uintptr_t base, const profile_t *prof) {
     if (is_stub_head(head, sizeof(head))) score += 35;
     for (int i = 0; i < 6; ++i) {
         char got[64]={0}, exp[64]={0}; pkg_default(i, exp, sizeof(exp));
-        if (mem_r(pid, base + prof->slot_off[i], got, prof->slot_len[i]) != 0) { score -= 5; continue; }
-        if (exp[0] && strncmp(got, exp, prof->slot_len[i]) == 0) score += 10;
+        size_t slot_len = prof->slot_len[i] > 0 ? (size_t)prof->slot_len[i] : 0;
+        if (!slot_len || mem_r(pid, base + prof->slot_off[i], got, slot_len) != 0) {
+            score -= 5;
+            continue;
+        }
+        if (exp[0] && strncmp(got, exp, slot_len) == 0) score += 10;
         else if (got[0] && strchr(got, '.')) score += 2;
         else score -= 3;
     }
     fprintf(stderr, "[a2h_patch] profile %s (%s) score=%d head=%02x %02x %02x %02x\n",
             prof->name, prof->hint, score, head[0], head[1], head[2], head[3]);
     return score;
+}
+
+static int profile_official_strings_exact(pid_t pid, uintptr_t base,
+                                          const profile_t *prof) {
+    if (!prof) return 0;
+    for (int i = 0; i < 6; ++i) {
+        char got[64] = {0};
+        char exp[64] = {0};
+        pkg_default(i, exp, sizeof(exp));
+        size_t n = strlen(exp);
+        if (n != (size_t)prof->slot_len[i] ||
+            mem_r(pid, base + prof->slot_off[i], got, n + 1) != 0 ||
+            memcmp(got, exp, n + 1) != 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* A v1.5.2-era stub can outlive its unmarked or overwritten RW table until
+ * the HAL restarts.  For a known function offset, the stub opcode shape plus
+ * all six exact official strings identifies the target strongly enough to
+ * let whitelist apply rebuild the cave and table.  Unknown offsets still
+ * require a fully valid table. */
+static int known_profile_stub_state_ok(pid_t pid, uintptr_t base,
+                                       const profile_t *prof,
+                                       const unsigned char *head, int score,
+                                       const char *context) {
+    if (!prof || !is_stub_head(head, 16)) return 0;
+    stub_info_t si;
+    if (inspect_stub_table(pid, base, prof->func_off, head, NULL, 0, &si)) {
+        return 1;
+    }
+    if (score >= 95 && profile_official_strings_exact(pid, base, prof) &&
+        exact_whitelist_stub_at(pid, base + prof->func_off)) {
+        /* Emit the concrete table failure only on the recovery path. */
+        inspect_stub_table(pid, base, prof->func_off, head, NULL, 1, &si);
+        fprintf(stderr,
+                "[a2h_patch] WARN: known profile stale stub table; allow repair context=%s profile=%s func=0x%lx score=%d\n",
+                context ? context : "?", prof->name,
+                (unsigned long)prof->func_off, score);
+        return 1;
+    }
+    return 0;
 }
 // Prefer a unique stock prologue. Patched candidates must also be unambiguous
 // and, for a legacy stub tail, prove ownership of the recorded cave marker.
@@ -714,8 +967,9 @@ static int scan_func_by_sig(pid_t pid, uintptr_t base, uintptr_t *out_off) {
     char mp[64]; snprintf(mp,sizeof(mp),"/proc/%d/maps",pid);
     FILE *f=fopen(mp,"r"); if(!f) return 0;
     char line[512];
-    int segs=0, hits_stock=0, hits_global_raw=0, hits_global=0, hits_stub_raw=0, hits_stub=0;
-    uintptr_t best_stock=0, best_global=0, best_stub=0;
+    int segs=0, hits_stock=0, hits_global_raw=0, hits_global=0;
+    int hits_stub_raw=0, hits_stub=0, hits_stub_stale_exact=0;
+    uintptr_t best_stock=0, best_global=0, best_stub=0, best_stub_stale=0;
     fprintf(stderr, "[a2h_patch] Scanning exec for stock/global/stub is_A2H_app...\n");
     while (fgets(line,sizeof(line),f)) {
         if (!strstr(line, g_libname[0]?g_libname:"audio.primary")) continue;
@@ -755,6 +1009,10 @@ static int scan_func_by_sig(pid_t pid, uintptr_t base, uintptr_t *out_off) {
                 if (inspect_stub_table(pid, base, rel, h, NULL, 0, &si)) {
                     hits_stub++;
                     best_stub = rel;
+                } else if (i + WHITELIST_STUB_BYTES <= len &&
+                           exact_whitelist_stub_shape(h, len - i)) {
+                    hits_stub_stale_exact++;
+                    best_stub_stale = rel;
                 }
             }
         }
@@ -762,8 +1020,9 @@ static int scan_func_by_sig(pid_t pid, uintptr_t base, uintptr_t *out_off) {
     }
     fclose(f);
     fprintf(stderr,
-            "[a2h_patch] func scan candidates segs=%d stock=%d global_raw=%d global_tail=%d stub_raw=%d stub_valid=%d\n",
-            segs, hits_stock, hits_global_raw, hits_global, hits_stub_raw, hits_stub);
+            "[a2h_patch] func scan candidates segs=%d stock=%d global_raw=%d global_tail=%d stub_raw=%d stub_valid=%d stub_stale_exact=%d\n",
+            segs, hits_stock, hits_global_raw, hits_global, hits_stub_raw,
+            hits_stub, hits_stub_stale_exact);
     uintptr_t best = 0;
     const char *kind = "none";
     if (hits_stock == 1) {
@@ -773,20 +1032,21 @@ static int scan_func_by_sig(pid_t pid, uintptr_t base, uintptr_t *out_off) {
         snprintf(g_scan_kind, sizeof(g_scan_kind), "ambiguous");
         fprintf(stderr, "[a2h_patch] ERROR: ambiguous stock signature candidates=%d\n", hits_stock);
         return 0;
-    } else if (hits_global + hits_stub == 1) {
+    } else if (hits_global + hits_stub + hits_stub_stale_exact == 1) {
         if (hits_global == 1) { best = best_global; kind = "global"; }
-        else { best = best_stub; kind = "stub"; }
-    } else if (hits_global + hits_stub > 1) {
+        else if (hits_stub == 1) { best = best_stub; kind = "stub"; }
+        else { best = best_stub_stale; kind = "stub-stale-exact"; }
+    } else if (hits_global + hits_stub + hits_stub_stale_exact > 1) {
         snprintf(g_scan_kind, sizeof(g_scan_kind), "ambiguous");
         fprintf(stderr,
-                "[a2h_patch] ERROR: ambiguous patched candidates global=%d stub_valid=%d\n",
-                hits_global, hits_stub);
+                "[a2h_patch] ERROR: ambiguous patched candidates global=%d stub_valid=%d stub_stale_exact=%d\n",
+                hits_global, hits_stub, hits_stub_stale_exact);
         return 0;
-    } else if (hits_global_raw > 0) {
+    } else if (hits_global_raw > 0 || hits_stub_raw > 0) {
         snprintf(g_scan_kind, sizeof(g_scan_kind), "ambiguous");
         fprintf(stderr,
-                "[a2h_patch] ERROR: unverified raw global candidates=%d; refusing unsafe fallback\n",
-                hits_global_raw);
+                "[a2h_patch] ERROR: unverified raw patched candidates global=%d stub=%d; refusing unsafe fallback\n",
+                hits_global_raw, hits_stub_raw);
         return 0;
     }
     if (!best) {
@@ -796,8 +1056,9 @@ static int scan_func_by_sig(pid_t pid, uintptr_t base, uintptr_t *out_off) {
     }
     if (out_off) *out_off = best;
     snprintf(g_scan_kind, sizeof(g_scan_kind), "%s", kind);
-    fprintf(stderr, "[a2h_patch] is_A2H_app: 0x%lx kind=%s stock=%d global_raw=%d global_tail=%d stub_valid=%d segs=%d\n",
-            (unsigned long)best, kind, hits_stock, hits_global_raw, hits_global, hits_stub, segs);
+    fprintf(stderr, "[a2h_patch] is_A2H_app: 0x%lx kind=%s stock=%d global_raw=%d global_tail=%d stub_valid=%d stub_stale_exact=%d segs=%d\n",
+            (unsigned long)best, kind, hits_stock, hits_global_raw, hits_global,
+            hits_stub, hits_stub_stale_exact, segs);
     return 1;
 }
 static int score_string_rel(uintptr_t rel, uintptr_t rw_rel_s, uintptr_t rw_rel_e) {
@@ -872,29 +1133,18 @@ static int scan_official_strings(pid_t pid, uintptr_t base) {
     }
     return found;
 }
-static uintptr_t find_zero_cave(pid_t pid, uintptr_t rw_abs_s, uintptr_t rw_abs_e, uintptr_t need) {
-    if (rw_abs_e <= rw_abs_s || need == 0) return 0;
-    size_t len = (size_t)(rw_abs_e - rw_abs_s);
-    if (len < (size_t)need + 64) return 0;
-    if (len > 1024 * 1024) len = 1024 * 1024;
-    unsigned char *buf = (unsigned char*)malloc(len);
-    if (!buf) return 0;
-    uintptr_t found = 0;
-    if (mem_r(pid, rw_abs_s, buf, len) == 0) {
-        size_t limit = len - (size_t)need;
-        for (size_t pos = limit; pos > 0; ) {
-            pos &= ~(size_t)0xF;
-            int zero = 1;
-            for (size_t j = 0; j < (size_t)need; ++j) {
-                if (buf[pos + j] != 0) { zero = 0; break; }
-            }
-            if (zero) { found = rw_abs_s + pos; break; }
-            if (pos == 0) break;
-            pos -= 16;
+static int memory_is_zero(pid_t pid, uintptr_t start, uintptr_t len) {
+    unsigned char buf[256];
+    while (len) {
+        size_t n = len < sizeof(buf) ? (size_t)len : sizeof(buf);
+        if (mem_r(pid, start, buf, n) != 0) return 0;
+        for (size_t i = 0; i < n; ++i) {
+            if (buf[i] != 0) return 0;
         }
+        start += n;
+        len -= n;
     }
-    free(buf);
-    return found;
+    return 1;
 }
 static int locate_targets(pid_t pid, uintptr_t base) {
     g_scan_kind[0] = 0;
@@ -924,8 +1174,8 @@ static int locate_targets(pid_t pid, uintptr_t base) {
                             "[a2h_patch] known hint global tail mismatch; defer scan: 0x%lx\n",
                             (unsigned long)hint);
                 } else if (is_stub_head(hh, sizeof(hh))) {
-                    stub_info_t si;
-                    state_ok = inspect_stub_table(pid, base, hint, hh, NULL, 0, &si);
+                    state_ok = known_profile_stub_state_ok(pid, base, hit, hh,
+                                                           hint_score, "hint");
                     if (!state_ok) {
                         fprintf(stderr,
                                 "[a2h_patch] known hint stub table invalid; defer scan: 0x%lx\n",
@@ -963,6 +1213,12 @@ static int locate_targets(pid_t pid, uintptr_t base) {
                     fprintf(stderr,
                             "[a2h_patch] validated patched hint state=whitelist func=0x%lx active_ptrs=%d magic=%d\n",
                             (unsigned long)hint, si.active_ptrs, si.magic_ok);
+                } else if (exact_whitelist_stub_at(pid, hint_abs)) {
+                    patched_hint_ok = 1;
+                    patched_hint_state = "whitelist-stale-exact";
+                    fprintf(stderr,
+                            "[a2h_patch] validated stale exact whitelist stub hint func=0x%lx\n",
+                            (unsigned long)hint);
                 } else {
                     fprintf(stderr,
                             "[a2h_patch] func_off stub hint ignored: 0x%lx table validation failed\n",
@@ -993,9 +1249,10 @@ static int locate_targets(pid_t pid, uintptr_t base) {
                 patched_global_candidate_ok(pid, base, ph, sizeof(ph))) {
                 fast_state_ok = 1;
             } else if (is_stub_head(ph, sizeof(ph))) {
-                stub_info_t si;
-                fast_state_ok = inspect_stub_table(pid, base, PROFILES[fast_best].func_off,
-                                                   ph, NULL, 0, &si);
+                fast_state_ok = known_profile_stub_state_ok(pid, base,
+                                                            &PROFILES[fast_best], ph,
+                                                            fast_best_score,
+                                                            "profile-fast");
             }
         }
         if (fast_state_ok) {
@@ -1051,9 +1308,10 @@ static int locate_targets(pid_t pid, uintptr_t base) {
             if (memcmp(ph, SIG8, 8)==0 ||
                 patched_global_candidate_ok(pid, base, ph, sizeof(ph))) profile_head_ok = 1;
             else if (is_stub_head(ph, 16)) {
-                stub_info_t si;
-                profile_head_ok = inspect_stub_table(pid, base, PROFILES[best].func_off,
-                                                     ph, NULL, 0, &si);
+                profile_head_ok = known_profile_stub_state_ok(pid, base,
+                                                              &PROFILES[best], ph,
+                                                              best_score,
+                                                              "profile-final");
             }
         }
     }
@@ -1089,7 +1347,7 @@ static int locate_targets(pid_t pid, uintptr_t base) {
     // The full scan recorded ambiguity/misses above. A saved patched hint is
     // accepted only after state-specific validation (marker, stock tail, or
     // a cave-owned legacy stub tail).
-    if (patched_hint_ok) {
+    if (patched_hint_ok && strcmp(g_scan_kind, "ambiguous") != 0) {
         g_func_off = hint;
         snprintf(g_locate_method, sizeof(g_locate_method), "hint-patched-validated");
         snprintf(g_profile, sizeof(g_profile), "hint");
@@ -1105,7 +1363,7 @@ static int locate_targets(pid_t pid, uintptr_t base) {
 }
 
 static int setup_custom_cave(pid_t pid, uintptr_t base, uintptr_t rw_abs_s, uintptr_t rw_abs_e) {
-    uintptr_t need = MAX_SLOTS * 64 + 16 + (MAX_SLOTS * 8) + 32;
+    uintptr_t need = WHITELIST_CAVE_BYTES;
     if (!rw_abs_s || !rw_abs_e || rw_abs_s < base || rw_abs_e <= rw_abs_s) {
         fprintf(stderr, "[a2h_patch] ERROR: writable RW map unavailable; whitelist apply aborted\n");
         return 0;
@@ -1113,33 +1371,41 @@ static int setup_custom_cave(pid_t pid, uintptr_t base, uintptr_t rw_abs_s, uint
     uintptr_t rws = rw_abs_s - base;
     uintptr_t rwe = rw_abs_e - base;
     g_rw_start=rws; g_rw_end=rwe;
-    if (rwe <= rws || (rwe - rws) < need + 64) {
-        fprintf(stderr, "[a2h_patch] ERROR: RW map too small for whitelist cave need=0x%lx available=0x%lx\n",
-                (unsigned long)need, (unsigned long)(rwe > rws ? rwe - rws : 0));
+    if (!discover_elf_tail_region(pid, base, need)) {
+        fprintf(stderr, "[a2h_patch] ERROR: no verified ELF tail for whitelist cave\n");
         return 0;
     }
     uintptr_t cave_abs = 0;
     uintptr_t hinted_cave = 0;
     int reused = 0;
-    if (load_cave_hint(&hinted_cave) && hinted_cave >= rws &&
-        hinted_cave <= rwe - need) {
-        /* A marker proves this is our cave in the current HAL instance.  On a
-         * fresh process the data segment is reinitialized, so fall back to a
-         * zero scan instead of trusting an OTA-stale offset. */
+    if (load_cave_hint(&hinted_cave) && hinted_cave >= g_elf_tail_start &&
+        hinted_cave <= g_elf_tail_end - need) {
+        /* A marker proves ownership only inside the unallocated ELF tail. */
         if (marked_cave_ok(pid, base, hinted_cave)) {
             cave_abs = base + hinted_cave;
             reused = 1;
             fprintf(stderr, "[a2h_patch] reuse marked cave rel=0x%lx\n",
                     (unsigned long)hinted_cave);
+        } else if (exact_stub_targets_cave(pid, base, k_func_off(), hinted_cave)) {
+            cave_abs = base + hinted_cave;
+            reused = 2;
+            fprintf(stderr,
+                    "[a2h_patch] repair exact-stub-owned cave rel=0x%lx\n",
+                    (unsigned long)hinted_cave);
         }
     }
-    if (!cave_abs) cave_abs = find_zero_cave(pid, rw_abs_s, rw_abs_e, need);
-    if (!cave_abs || cave_abs < rw_abs_s || cave_abs > rw_abs_e - need) {
-        fprintf(stderr, "[a2h_patch] ERROR: no verified zero RW cave available; whitelist apply aborted\n");
-        return 0;
+    if (!cave_abs) {
+        cave_abs = base + g_elf_tail_candidate;
+        if (!memory_is_zero(pid, cave_abs, need)) {
+            fprintf(stderr,
+                    "[a2h_patch] ERROR: ELF tail candidate is not zero rel=0x%lx need=0x%lx\n",
+                    (unsigned long)g_elf_tail_candidate, (unsigned long)need);
+            return 0;
+        }
     }
     uintptr_t cave = cave_abs - base;
-    const char *source = reused ? "marked-reuse" : "zero-scan";
+    const char *source = reused == 1 ? "elf-tail-reuse" :
+                         (reused == 2 ? "elf-tail-stub-repair" : "elf-tail-zero");
     for (int i = 0; i < MAX_SLOTS; ++i) {
         set_slot_off(i, cave + (uintptr_t)i * 64);
         slots[i].max_len = 63;
@@ -1148,7 +1414,7 @@ static int setup_custom_cave(pid_t pid, uintptr_t base, uintptr_t rw_abs_s, uint
     g_stub_mark = cave + MAX_SLOTS * 64;
     g_ptr_off = (g_stub_mark + 16 + 7) & ~((uintptr_t)7);
     fprintf(stderr, "[a2h_patch] RW rel=0x%lx-0x%lx cave=0x%lx source=%s ptr=0x%lx mark=0x%lx need=0x%lx\n",
-            (unsigned long)rws,(unsigned long)rwe,(unsigned long)cave,source,(unsigned long)g_ptr_off,(unsigned long)g_stub_mark,(unsigned long)need);
+            (unsigned long)g_rw_start,(unsigned long)g_rw_end,(unsigned long)cave,source,(unsigned long)g_ptr_off,(unsigned long)g_stub_mark,(unsigned long)need);
     return 1;
 }
 static int apply_strings(pid_t pid, uintptr_t base, char **pkgs) {
@@ -1267,11 +1533,10 @@ static int write_whitelist_stub_code(pid_t pid, uintptr_t base) {
     fprintf(stderr, "[a2h_patch] ptr table write OK first=0x%llx\n",
             (unsigned long long)ptrs[0]);
 
-    uint32_t magic=0x31483241;
     marker_started = 1;
-    if (mem_w(pid, marker_addr, &magic, sizeof(magic)) != 0 ||
+    if (mem_w(pid, marker_addr, WHITELIST_MARKER, sizeof(WHITELIST_MARKER)) != 0 ||
         mem_r(pid, marker_addr, marker_verify, sizeof(marker_verify)) != 0 ||
-        memcmp(marker_verify, &magic, sizeof(magic)) != 0) {
+        memcmp(marker_verify, WHITELIST_MARKER, sizeof(marker_verify)) != 0) {
         fprintf(stderr, "[a2h_patch] cave marker write FAIL\n");
         goto rollback;
     }
@@ -1474,7 +1739,7 @@ int main(int argc,char **argv) {
         else {
             t=find_lib_base_and_maps(pid,n2,&rw_s,&rw_e,&rx_s,&rx_e);
             if(t) snprintf(g_libname,sizeof(g_libname),"%s",n2);
-            else t=find_audio_primary_base_and_maps(pid,&rw_s,&rw_e,&rx_s,&rx_e);
+            else (void)find_audio_primary_base_and_maps(pid,&rw_s,&rw_e,&rx_s,&rx_e);
         }
         base=base_override;
     }
@@ -1486,6 +1751,20 @@ int main(int argc,char **argv) {
             (unsigned long)rx_s, (unsigned long)rx_e);
     g_attached = (trace_attach(pid) == 0);
     fprintf(stderr,"[a2h_patch] ptrace=%s\n", g_attached?"ok":"unavailable");
+    if (!discover_elf_tail_region(pid, base, WHITELIST_CAVE_BYTES)) {
+        fprintf(stderr,
+                "[a2h_patch] WARN: whitelist ELF tail unavailable; global mode remains eligible\n");
+    }
+#ifdef A2H_DIAGNOSTIC_SCAN_ONLY
+    uintptr_t diagnostic_off = 0;
+    int diagnostic_ok = scan_func_by_sig(pid, base, &diagnostic_off);
+    fprintf(stderr,
+            "[a2h_patch] diagnostic universal scan=%s func=0x%lx kind=%s\n",
+            diagnostic_ok ? "OK" : "FAIL", (unsigned long)diagnostic_off,
+            g_scan_kind[0] ? g_scan_kind : "none");
+    if (g_attached) trace_detach(pid);
+    return diagnostic_ok ? 0 : 2;
+#endif
     if (!locate_targets(pid, base)) {
         fprintf(stderr, "[a2h_patch] ERROR: target location unresolved; no unsafe hint fallback\n");
         if(g_attached)trace_detach(pid);
