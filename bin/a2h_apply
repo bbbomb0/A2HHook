@@ -121,8 +121,7 @@ valid_package() {
 
 restore_default_config_unlocked() {
   restore_reason=$1
-  restore_owner=$(cat "$CONFIG_LOCK/pid" 2>/dev/null)
-  [ "$restore_owner" = "$$" ] || {
+  lock_owned_by_self "$CONFIG_LOCK" || {
     log "config restore refused without lock reason=$restore_reason"
     return 75
   }
@@ -549,13 +548,80 @@ resolve_hal() {
   return 0
 }
 
-lock_owner_alive() {
-  owner_lock=$1
-  owner_pid=$(cat "$owner_lock/pid" 2>/dev/null)
-  case "$owner_pid" in
+process_starttime() {
+  process_pid=$1
+  case "$process_pid" in
     ''|*[!0-9]*) return 1 ;;
   esac
-  kill -0 "$owner_pid" 2>/dev/null
+  process_stat=$(cat "/proc/$process_pid/stat" 2>/dev/null) || return 1
+  process_tail=${process_stat##*) }
+  [ "$process_tail" != "$process_stat" ] || return 1
+  set -- $process_tail
+  [ "$#" -ge 20 ] || return 1
+  shift 19
+  process_value=$1
+  case "$process_value" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  printf '%s\n' "$process_value"
+}
+
+read_lock_owner() {
+  owner_lock=$1
+  LOCK_OWNER_TOKEN=$(cat "$owner_lock/pid" 2>/dev/null) || return 1
+  set -- $LOCK_OWNER_TOKEN
+  case "$#" in
+    1)
+      LOCK_OWNER_PID=$1
+      LOCK_OWNER_START=
+      LOCK_OWNER_FORMAT=legacy
+      ;;
+    2)
+      LOCK_OWNER_PID=$1
+      LOCK_OWNER_START=$2
+      LOCK_OWNER_FORMAT=paired
+      ;;
+    *) return 1 ;;
+  esac
+  case "$LOCK_OWNER_PID" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  if [ "$LOCK_OWNER_FORMAT" = "paired" ]; then
+    case "$LOCK_OWNER_START" in
+      ''|*[!0-9]*) return 1 ;;
+    esac
+    LOCK_OWNER_TOKEN="$LOCK_OWNER_PID $LOCK_OWNER_START"
+  else
+    LOCK_OWNER_TOKEN=$LOCK_OWNER_PID
+  fi
+  return 0
+}
+
+legacy_lock_owner_alive() {
+  legacy_pid=$1
+  kill -0 "$legacy_pid" 2>/dev/null || return 1
+  legacy_cmdline="/proc/$legacy_pid/cmdline"
+  [ -r "$legacy_cmdline" ] || return 1
+  grep -a -F -q 'a2h_apply' "$legacy_cmdline" 2>/dev/null ||
+    grep -a -F -q 'a2h_config.lock' "$legacy_cmdline" 2>/dev/null
+}
+
+lock_owner_alive() {
+  owner_lock=$1
+  read_lock_owner "$owner_lock" || return 1
+  if [ "$LOCK_OWNER_FORMAT" = "legacy" ]; then
+    legacy_lock_owner_alive "$LOCK_OWNER_PID"
+    return $?
+  fi
+  owner_live_start=$(process_starttime "$LOCK_OWNER_PID") || return 1
+  [ "$owner_live_start" = "$LOCK_OWNER_START" ]
+}
+
+lock_owned_by_self() {
+  self_lock=$1
+  self_start=$(process_starttime "$$") || return 1
+  self_owner=$(cat "$self_lock/pid" 2>/dev/null) || return 1
+  [ "$self_owner" = "$$ $self_start" ]
 }
 
 claim_pid_lock() {
@@ -563,13 +629,18 @@ claim_pid_lock() {
   if ! mkdir "$claim_dir" 2>/dev/null; then
     return 1
   fi
-  if ! printf '%s\n' "$$" > "$claim_dir/pid" 2>/dev/null; then
+  claim_start=$(process_starttime "$$") || {
+    rmdir "$claim_dir" 2>/dev/null || true
+    return 2
+  }
+  claim_token="$$ $claim_start"
+  if ! printf '%s\n' "$claim_token" > "$claim_dir/pid" 2>/dev/null; then
     rm -f "$claim_dir/pid" 2>/dev/null
     rmdir "$claim_dir" 2>/dev/null || true
     return 2
   fi
   claim_owner=$(cat "$claim_dir/pid" 2>/dev/null)
-  if [ "$claim_owner" != "$$" ]; then
+  if [ "$claim_owner" != "$claim_token" ]; then
     rm -f "$claim_dir/pid" 2>/dev/null
     rmdir "$claim_dir" 2>/dev/null || true
     return 2
@@ -579,24 +650,37 @@ claim_pid_lock() {
 
 stale_lock_recheck() {
   stale_dir=$1
+  stale_status=${2:-}
+  case "$stale_status" in
+    ''|"$stale_dir/status") ;;
+    *) return 1 ;;
+  esac
   [ -d "$stale_dir" ] || return 0
   lock_owner_alive "$stale_dir" && return 1
-  stale_owner_1=$(cat "$stale_dir/pid" 2>/dev/null)
-  [ -n "$stale_owner_1" ] || stale_owner_1='(missing)'
+  stale_owner_1=$(cat "$stale_dir/pid" 2>/dev/null) || stale_owner_1='(missing)'
   sleep 1
   [ -d "$stale_dir" ] || return 0
   lock_owner_alive "$stale_dir" && return 1
-  stale_owner_2=$(cat "$stale_dir/pid" 2>/dev/null)
-  [ -n "$stale_owner_2" ] || stale_owner_2='(missing)'
+  stale_owner_2=$(cat "$stale_dir/pid" 2>/dev/null) || stale_owner_2='(missing)'
   [ "$stale_owner_1" = "$stale_owner_2" ] || return 1
   sleep 1
   [ -d "$stale_dir" ] || return 0
   lock_owner_alive "$stale_dir" && return 1
-  stale_owner_3=$(cat "$stale_dir/pid" 2>/dev/null)
-  [ -n "$stale_owner_3" ] || stale_owner_3='(missing)'
+  stale_owner_3=$(cat "$stale_dir/pid" 2>/dev/null) || stale_owner_3='(missing)'
   [ "$stale_owner_2" = "$stale_owner_3" ] || return 1
   rm -f "$stale_dir/pid" 2>/dev/null || return 1
+  [ -z "$stale_status" ] || rm -f "$stale_status" 2>/dev/null || return 1
   rmdir "$stale_dir" 2>/dev/null
+}
+
+release_pid_lock() {
+  release_dir=$1
+  release_start=$(process_starttime "$$") || return 1
+  release_expected="$$ $release_start"
+  release_actual=$(cat "$release_dir/pid" 2>/dev/null) || return 1
+  [ "$release_actual" = "$release_expected" ] || return 1
+  rm -f "$release_dir/pid" 2>/dev/null || return 1
+  rmdir "$release_dir" 2>/dev/null
 }
 
 acquire_config_lock() {
@@ -616,11 +700,7 @@ acquire_config_lock() {
 }
 
 release_config_lock() {
-  release_owner=$(cat "$CONFIG_LOCK/pid" 2>/dev/null)
-  [ "$release_owner" = "$$" ] || return 0
-  rm -f "$CONFIG_LOCK/pid" 2>/dev/null || return 1
-  rmdir "$CONFIG_LOCK" 2>/dev/null || true
-  return 0
+  release_pid_lock "$CONFIG_LOCK"
 }
 
 prepare_config() {
@@ -682,11 +762,7 @@ acquire_apply_lock() {
 }
 
 release_apply_lock() {
-  release_owner=$(cat "$APPLY_LOCK/pid" 2>/dev/null)
-  [ "$release_owner" = "$$" ] || return 0
-  rm -f "$APPLY_LOCK/pid" 2>/dev/null
-  rmdir "$APPLY_LOCK" 2>/dev/null || true
-  return 0
+  release_pid_lock "$APPLY_LOCK"
 }
 
 log_slots() {
@@ -886,55 +962,75 @@ mark_pending() {
 }
 
 claim_worker_lock() {
-  if mkdir "$WORKER_LOCK" 2>/dev/null; then
-    printf '%s\n' "$$" > "$WORKER_LOCK/pid" 2>/dev/null
-    return 0
-  fi
-  return 1
+  claim_pid_lock "$WORKER_LOCK"
 }
 
 release_worker_lock() {
-  worker_owner=$(cat "$WORKER_LOCK/pid" 2>/dev/null)
-  [ "$worker_owner" = "$$" ] || return 0
-  rm -f "$WORKER_LOCK/pid" 2>/dev/null
-  rmdir "$WORKER_LOCK" 2>/dev/null
+  release_pid_lock "$WORKER_LOCK"
 }
 
 start_worker() {
   start_try=0
   while [ "$start_try" -lt 2 ]; do
     if mkdir "$WORKER_LOCK" 2>/dev/null; then
-      printf '%s\n' starting > "$WORKER_LOCK/status" 2>/dev/null
+      start_parent_time=$(process_starttime "$$") || {
+        rmdir "$WORKER_LOCK" 2>/dev/null || true
+        return 1
+      }
+      start_bootstrap="starting $$ $start_parent_time"
+      printf '%s\n' "$start_bootstrap" > "$WORKER_LOCK/status" 2>/dev/null || {
+        rmdir "$WORKER_LOCK" 2>/dev/null || true
+        return 1
+      }
       if command -v nohup >/dev/null 2>&1; then
-        nohup sh "$SELF" __worker >/dev/null 2>&1 < /dev/null &
+        A2H_WORKER_BOOTSTRAP="$start_bootstrap" nohup sh "$SELF" __worker >/dev/null 2>&1 < /dev/null &
       else
-        sh "$SELF" __worker >/dev/null 2>&1 < /dev/null &
+        A2H_WORKER_BOOTSTRAP="$start_bootstrap" sh "$SELF" __worker >/dev/null 2>&1 < /dev/null &
       fi
       start_pid=$!
-      printf '%s\n' "$start_pid" > "$WORKER_LOCK/pid" 2>/dev/null
-      rm -f "$WORKER_LOCK/status" 2>/dev/null
-      log "queue worker started pid=$start_pid"
-      return 0
+      start_child_time=$(process_starttime "$start_pid") || start_child_time=
+      if [ -n "$start_child_time" ] &&
+         [ "$(cat "$WORKER_LOCK/status" 2>/dev/null)" = "$start_bootstrap" ]; then
+        printf '%s %s\n' "$start_pid" "$start_child_time" > "$WORKER_LOCK/pid" 2>/dev/null || true
+        rm -f "$WORKER_LOCK/status" 2>/dev/null || true
+      fi
+      if lock_owner_alive "$WORKER_LOCK"; then
+        log "queue worker started pid=$start_pid start=$start_child_time"
+        return 0
+      fi
+      [ -f "$PENDING_FILE" ] || return 0
+      stale_lock_recheck "$WORKER_LOCK" "$WORKER_LOCK/status" || true
+      return 1
     fi
 
     if lock_owner_alive "$WORKER_LOCK"; then
       return 0
     fi
-    sleep 1
-    if lock_owner_alive "$WORKER_LOCK"; then
-      return 0
-    fi
-    rm -f "$WORKER_LOCK/pid" "$WORKER_LOCK/status" 2>/dev/null
-    rmdir "$WORKER_LOCK" 2>/dev/null || return 1
+    stale_lock_recheck "$WORKER_LOCK" "$WORKER_LOCK/status" || {
+      lock_owner_alive "$WORKER_LOCK" && return 0
+      return 1
+    }
     start_try=$((start_try + 1))
   done
   return 1
 }
 
 worker_main() {
-  printf '%s\n' "$$" > "$WORKER_LOCK/pid" 2>/dev/null
-  rm -f "$WORKER_LOCK/status" 2>/dev/null
-  worker_failures=0
+  worker_bootstrap=${A2H_WORKER_BOOTSTRAP:-}
+  worker_start=$(process_starttime "$$") || return 1
+  worker_token="$$ $worker_start"
+  [ -d "$WORKER_LOCK" ] || return 1
+  if [ -n "$worker_bootstrap" ]; then
+    worker_status=$(cat "$WORKER_LOCK/status" 2>/dev/null)
+    worker_existing=$(cat "$WORKER_LOCK/pid" 2>/dev/null)
+    if [ "$worker_status" != "$worker_bootstrap" ] &&
+       [ "$worker_existing" != "$worker_token" ]; then
+      return 1
+    fi
+  fi
+  printf '%s\n' "$worker_token" > "$WORKER_LOCK/pid" 2>/dev/null || return 1
+  rm -f "$WORKER_LOCK/status" 2>/dev/null || true
+  [ "$(cat "$WORKER_LOCK/pid" 2>/dev/null)" = "$worker_token" ] || return 1
   while :; do
     if [ ! -f "$PENDING_FILE" ]; then
       release_worker_lock
@@ -947,19 +1043,18 @@ worker_main() {
     worker_marker=$(cat "$PENDING_FILE" 2>/dev/null)
     rm -f "$PENDING_FILE" 2>/dev/null
     log "queue worker consume marker=$worker_marker"
-    if A2H_APPLY_ATTEMPTS=3 apply_stable queue; then
-      worker_failures=0
-    else
-      worker_failures=$((worker_failures + 1))
+    if ! A2H_APPLY_ATTEMPTS=2 apply_stable queue; then
       if prepare_config; then
-        mark_pending || true
+        worker_current_marker="$CURRENT_SNAPSHOT $CURRENT_REVISION"
+        if [ "$worker_current_marker" != "$worker_marker" ]; then
+          log "queue worker retrying newer marker old=$worker_marker new=$worker_current_marker"
+          mark_pending || true
+          continue
+        fi
       fi
-      if [ "$worker_failures" -ge 3 ]; then
-        log "queue worker paused after failures=$worker_failures; pending preserved"
-        release_worker_lock
-        return 1
-      fi
-      sleep 2
+      log "queue worker paused after stable failure marker=$worker_marker; service watcher owns recovery"
+      release_worker_lock
+      return 1
     fi
 
     if prepare_config; then

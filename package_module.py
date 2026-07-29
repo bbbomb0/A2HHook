@@ -25,7 +25,6 @@ FILES = (
     "wrapper.sh",
     "webroot/index.html",
     "webroot/coolapk.png",
-    "zygisk/arm64-v8a/a2h_hook.so",
 )
 
 EXECUTABLE = {
@@ -54,13 +53,28 @@ TEXT_FILES = {
 
 def read_version(root: Path) -> str:
     module_prop = (root / "module.prop").read_text(encoding="utf-8")
-    for line in module_prop.splitlines():
-        if line.startswith("version="):
-            version = line.split("=", 1)[1].strip()
-            if re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z._-]*", version):
-                return version
-            raise ValueError(f"Invalid module version: {version!r}")
-    raise ValueError("module.prop does not contain version=")
+    versions = [
+        line.split("=", 1)[1].strip()
+        for line in module_prop.splitlines()
+        if line.startswith("version=")
+    ]
+    version_codes = [
+        line.split("=", 1)[1].strip()
+        for line in module_prop.splitlines()
+        if line.startswith("versionCode=")
+    ]
+    if len(versions) != 1:
+        raise ValueError("module.prop must contain exactly one version=")
+    if len(version_codes) != 1:
+        raise ValueError("module.prop must contain exactly one versionCode=")
+
+    version = versions[0]
+    version_code = version_codes[0]
+    if not re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z._-]*", version):
+        raise ValueError(f"Invalid module version: {version!r}")
+    if not re.fullmatch(r"[1-9][0-9]*", version_code):
+        raise ValueError(f"Invalid module versionCode: {version_code!r}")
+    return version
 
 
 def verify_archive(path: Path) -> None:
@@ -85,6 +99,8 @@ def verify_archive(path: Path) -> None:
 
 def package(root: Path) -> Path:
     root = root.resolve(strict=True)
+    if len(FILES) != len(set(FILES)):
+        raise ValueError("Release manifest contains duplicate paths")
     version = read_version(root)
     output = root / f"a2h_hook_{version}.zip"
     temporary = output.with_suffix(".zip.tmp")

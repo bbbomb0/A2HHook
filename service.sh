@@ -15,6 +15,8 @@ CFG_SNAPSHOT="$CFG_DIR/config_snapshot"
 APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
 LAST_PID_FILE="$CFG_DIR/last_pid"
 NOTIFICATION_STATE_FILE="$CFG_DIR/notification_state"
+NOTIFICATION_RETRY_FILE="$CFG_DIR/notification_retry_state"
+NOTIFICATION_LOCK_DIR="$CFG_DIR/.notification_lock"
 TMP_PKGS=/data/local/tmp/a2h_packages.txt
 LOG="$MODDIR/a2h_patch.log"
 
@@ -93,12 +95,41 @@ notification_live_result() {
   fi
 }
 
+record_notification_marker() {
+  notification_marker_file=$1
+  notification_marker_value=$2
+  notification_marker_tmp="${notification_marker_file}.$$"
+  printf '%s\n' "$notification_marker_value" > "$notification_marker_tmp" 2>/dev/null || return 1
+  chmod 600 "$notification_marker_tmp" 2>/dev/null || true
+  mv -f "$notification_marker_tmp" "$notification_marker_file" 2>/dev/null
+}
+
 record_notification_state() {
-  notification_state_value=$1
-  notification_state_tmp="$CFG_DIR/.notification_state.$$"
-  printf '%s\n' "$notification_state_value" > "$notification_state_tmp" 2>/dev/null || return 1
-  chmod 600 "$notification_state_tmp" 2>/dev/null || true
-  mv -f "$notification_state_tmp" "$NOTIFICATION_STATE_FILE" 2>/dev/null
+  record_notification_marker "$NOTIFICATION_STATE_FILE" "$1"
+}
+
+post_notification_once() {
+  : > "$notification_tmp" 2>/dev/null || return 1
+  if /system/bin/cmd notification post -S bigtext -t "$notification_title" "$notification_tag" "$notification_body" > "$notification_tmp" 2>&1; then
+    notification_style=bigtext
+    return 0
+  fi
+  log "boot notification bigtext failed; trying plain title"
+  cat "$notification_tmp" >> "$LOG" 2>/dev/null
+
+  if /system/bin/cmd notification post -t "$notification_title" "$notification_tag" "$notification_body" > "$notification_tmp" 2>&1; then
+    notification_style=plain
+    return 0
+  fi
+  log "boot notification titled form failed; trying minimal form"
+  cat "$notification_tmp" >> "$LOG" 2>/dev/null
+
+  if /system/bin/cmd notification post "$notification_tag" "$notification_body" > "$notification_tmp" 2>&1; then
+    notification_style=minimal
+    return 0
+  fi
+  cat "$notification_tmp" >> "$LOG" 2>/dev/null
+  return 1
 }
 
 post_boot_notification() {
@@ -110,6 +141,11 @@ post_boot_notification() {
     notification_wait=$((notification_wait + 1))
   done
 
+  if ! mkdir "$NOTIFICATION_LOCK_DIR" 2>/dev/null; then
+    log "notification worker already active"
+    return 0
+  fi
+
   notification_result=$(notification_live_result)
   [ -n "$notification_result" ] || notification_result=failure
   if [ "$notification_result" != "$notification_requested" ]; then
@@ -118,41 +154,47 @@ post_boot_notification() {
   notification_previous=$(cat "$NOTIFICATION_STATE_FILE" 2>/dev/null | tr -d '\r' | head -n 1)
   if [ "$notification_previous" = "$notification_result" ]; then
     log "notification unchanged result=$notification_result"
+    rmdir "$NOTIFICATION_LOCK_DIR" 2>/dev/null
     return 0
   fi
-  # Record the attempted transition before posting so an unavailable
-  # notification service does not cause retries every watcher cycle.
-  record_notification_state "$notification_result" || true
+
+  notification_exhausted=$(cat "$NOTIFICATION_RETRY_FILE" 2>/dev/null | tr -d '\r' | head -n 1)
+  if [ "$notification_exhausted" = "$notification_result" ]; then
+    log "notification retry limit already reached result=$notification_result"
+    rmdir "$NOTIFICATION_LOCK_DIR" 2>/dev/null
+    return 1
+  fi
+  [ -z "$notification_exhausted" ] || rm -f "$NOTIFICATION_RETRY_FILE" 2>/dev/null
 
   notification_body=$(notification_text "$notification_result")
   notification_title='A2H 音乐触感'
   notification_tag=a2h_hook
   notification_tmp="/data/local/tmp/.a2h_notification.$$"
+  notification_attempt=1
+  notification_delay=2
+  while [ "$notification_attempt" -le 3 ]; do
+    if post_notification_once; then
+      if record_notification_state "$notification_result"; then
+        rm -f "$NOTIFICATION_RETRY_FILE" 2>/dev/null
+        log "boot notification posted result=$notification_result style=$notification_style attempt=$notification_attempt"
+      else
+        log "boot notification posted but state record failed result=$notification_result"
+      fi
+      rm -f "$notification_tmp" 2>/dev/null
+      rmdir "$NOTIFICATION_LOCK_DIR" 2>/dev/null
+      return 0
+    fi
+    log "boot notification post failed result=$notification_result attempt=$notification_attempt/3"
+    [ "$notification_attempt" -ge 3 ] && break
+    sleep "$notification_delay"
+    notification_delay=$((notification_delay * 2))
+    notification_attempt=$((notification_attempt + 1))
+  done
 
-  if /system/bin/cmd notification post -S bigtext -t "$notification_title" "$notification_tag" "$notification_body" > "$notification_tmp" 2>&1; then
-    log "boot notification posted result=$notification_result style=bigtext"
-    rm -f "$notification_tmp" 2>/dev/null
-    return 0
-  fi
-  log "boot notification bigtext failed; trying plain title"
-  cat "$notification_tmp" >> "$LOG" 2>/dev/null
-
-  if /system/bin/cmd notification post -t "$notification_title" "$notification_tag" "$notification_body" > "$notification_tmp" 2>&1; then
-    log "boot notification posted result=$notification_result style=plain"
-    rm -f "$notification_tmp" 2>/dev/null
-    return 0
-  fi
-  log "boot notification titled form failed; trying minimal form"
-  cat "$notification_tmp" >> "$LOG" 2>/dev/null
-
-  if /system/bin/cmd notification post "$notification_tag" "$notification_body" > "$notification_tmp" 2>&1; then
-    log "boot notification posted result=$notification_result style=minimal"
-    rm -f "$notification_tmp" 2>/dev/null
-    return 0
-  fi
-  log "boot notification FAIL result=$notification_result"
-  cat "$notification_tmp" >> "$LOG" 2>/dev/null
+  record_notification_marker "$NOTIFICATION_RETRY_FILE" "$notification_result" || true
+  log "boot notification FAIL result=$notification_result attempts=3; retry limit reached"
   rm -f "$notification_tmp" 2>/dev/null
+  rmdir "$NOTIFICATION_LOCK_DIR" 2>/dev/null
   return 1
 }
 
@@ -161,6 +203,8 @@ set_runtime_status() {
   if [ "$runtime_status" = "$next_runtime_status" ]; then
     notification_recorded=$(cat "$NOTIFICATION_STATE_FILE" 2>/dev/null | tr -d '\r' | head -n 1)
     [ "$notification_recorded" = "$next_runtime_status" ] && return 0
+    notification_exhausted=$(cat "$NOTIFICATION_RETRY_FILE" 2>/dev/null | tr -d '\r' | head -n 1)
+    [ "$notification_exhausted" = "$next_runtime_status" ] && return 0
     [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ] || return 0
     post_boot_notification "$next_runtime_status" &
     return 0
@@ -168,6 +212,7 @@ set_runtime_status() {
   previous_runtime_status=${runtime_status:-unknown}
   runtime_status=$next_runtime_status
   log "runtime status transition $previous_runtime_status -> $runtime_status"
+  rm -f "$NOTIFICATION_RETRY_FILE" 2>/dev/null
   if [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ]; then
     post_boot_notification "$runtime_status" &
   fi
@@ -178,7 +223,8 @@ module_version=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | hea
 printf '[a2h_hook] %s %s\n' "$module_version" "$(date)" > "$LOG" 2>/dev/null
 
 mkdir -p "$CFG_DIR" /data/local/tmp 2>/dev/null
-rm -f "$NOTIFICATION_STATE_FILE" 2>/dev/null
+rm -f "$NOTIFICATION_STATE_FILE" "$NOTIFICATION_RETRY_FILE" 2>/dev/null
+rmdir "$NOTIFICATION_LOCK_DIR" 2>/dev/null
 chmod 755 "$APPLIER" "$PATCHER" 2>/dev/null
 
 if [ ! -f "$APPLIER" ] || [ ! -f "$PATCHER" ]; then
@@ -190,13 +236,18 @@ fi
 log "boot auto-apply start"
 boot_ok=0
 boot_try=1
-while [ "$boot_try" -le 30 ]; do
+boot_delay=1
+while [ "$boot_try" -le 8 ]; do
   if apply_once "boot#$boot_try"; then
     boot_ok=1
     break
   fi
-  log "boot auto-apply retry=$boot_try"
-  sleep 2
+  log "boot auto-apply retry=$boot_try delay=${boot_delay}s"
+  sleep "$boot_delay"
+  if [ "$boot_delay" -lt 8 ]; then
+    boot_delay=$((boot_delay * 2))
+    [ "$boot_delay" -le 8 ] || boot_delay=8
+  fi
   boot_try=$((boot_try + 1))
 done
 
@@ -207,7 +258,7 @@ if [ "$boot_ok" = "1" ]; then
   runtime_status=success
   post_boot_notification success &
 else
-  log "boot auto-apply TIMEOUT attempts=30; watcher will continue recovery"
+  log "boot auto-apply TIMEOUT attempts=8; watcher will continue with bounded backoff"
   runtime_status=failure
   post_boot_notification failure &
 fi
@@ -215,10 +266,15 @@ fi
 last_pid=$(cat "$LAST_PID_FILE" 2>/dev/null)
 last_raw_signature=$(raw_config_signature)
 watch_failures=0
+watch_cycle=0
+failed_key=
+failure_delay_cycles=1
+failure_retry_cycle=0
 log "watcher start pid=${last_pid:-none}"
 
 while true; do
   sleep 25
+  watch_cycle=$((watch_cycle + 1))
 
   raw_signature_before=$(raw_config_signature)
   if [ "$raw_signature_before" != "$last_raw_signature" ]; then
@@ -254,6 +310,12 @@ while true; do
     continue
   fi
 
+  attempt_key="$current_pid|$current_snapshot"
+  if [ "$attempt_key" = "$failed_key" ] && [ "$watch_cycle" -lt "$failure_retry_cycle" ]; then
+    set_runtime_status failure
+    continue
+  fi
+
   if [ "$current_pid" != "$last_pid" ]; then
     need_apply=1
     apply_reason="pid-change:${last_pid:-none}-$current_pid"
@@ -285,16 +347,31 @@ while true; do
     if apply_once "watch:$apply_reason"; then
       last_pid=$(cat "$LAST_PID_FILE" 2>/dev/null)
       watch_failures=0
+      failed_key=
+      failure_delay_cycles=1
+      failure_retry_cycle=0
       log "watcher apply verified reason=$apply_reason pid=${last_pid:-unknown}"
       set_runtime_status success
     else
       watch_failures=$((watch_failures + 1))
-      log "watcher apply FAIL reason=$apply_reason failures=$watch_failures"
+      if [ "$failed_key" = "$attempt_key" ]; then
+        failure_delay_cycles=$((failure_delay_cycles * 2))
+      else
+        failure_delay_cycles=2
+      fi
+      [ "$failure_delay_cycles" -le 24 ] || failure_delay_cycles=24
+      failed_key=$attempt_key
+      failure_retry_cycle=$((watch_cycle + failure_delay_cycles))
+      failure_delay_seconds=$((failure_delay_cycles * 25))
+      log "watcher apply FAIL reason=$apply_reason failures=$watch_failures retry_in=${failure_delay_seconds}s key=$failed_key"
       set_runtime_status failure
     fi
   else
     last_pid=$current_pid
     watch_failures=0
+    failed_key=
+    failure_delay_cycles=1
+    failure_retry_cycle=0
     set_runtime_status success
   fi
 done

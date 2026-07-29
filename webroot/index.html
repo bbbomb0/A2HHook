@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:,">
 <title>A2HHook</title>
 <style>
 :root{--bg:#f3f5f6;--surface:#fff;--field:#f7f9fa;--line:#dce2e6;--text:#172027;--muted:#68757d;--accent:#08775a;--soft:#e1f2ec;--danger:#bd3f39;--warn:#916100;--shadow:0 8px 20px rgba(25,38,45,.07)}
@@ -11,7 +12,7 @@
 *{box-sizing:border-box}body{margin:0;min-height:100vh;padding:8px;background:var(--bg);color:var(--text);font:13px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}button,input{font:inherit}button{appearance:none}[hidden]{display:none!important}
 .shell{width:min(100%,620px);margin:0 auto}.top{height:42px;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;padding:0 2px}.brand{display:flex;align-items:center;gap:8px;min-width:0}.mark{width:34px;height:34px;border-radius:7px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:800;flex:none}.brand-copy{min-width:0}.title{font-size:17px;font-weight:750;line-height:1.05}.sub{margin-top:2px;color:var(--muted);font-size:10px;white-space:nowrap}.top-actions{display:flex;align-items:center;gap:6px}.version{color:var(--muted);font-size:10px}.icon{width:34px;height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--text);display:grid;place-items:center;cursor:pointer;font-size:17px}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px;box-shadow:var(--shadow)}.mode{height:38px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 4px 7px;border-bottom:1px solid var(--line)}.mode-copy{display:flex;align-items:baseline;gap:7px;min-width:0}.mode-title{font-size:14px;font-weight:700}.mode-value{color:var(--muted);font-size:11px}.switch{position:relative;display:inline-flex;width:42px;height:26px;align-items:center;justify-content:center;cursor:pointer;flex:none}.switch input{position:absolute;width:1px;height:1px;opacity:0}.track{position:relative;width:40px;height:24px;border:1px solid var(--line);border-radius:12px;background:var(--field);pointer-events:none;transition:background .16s ease,border-color .16s ease}.track:after{content:"";position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:50%;background:var(--muted);transition:transform .16s ease,background .16s ease}.switch input:checked+.track{border-color:var(--accent);background:var(--soft)}.switch input:checked+.track:after{transform:translateX(16px);background:var(--accent)}.switch input:focus-visible+.track{box-shadow:0 0 0 3px var(--soft)}
-.toolbar{height:34px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 1px}.list-title{font-size:12px;font-weight:650}.count{margin-left:6px;color:var(--muted);font-size:10px}.reset{width:30px;height:28px;border:0;border-radius:6px;background:transparent;color:var(--accent);font-size:18px;cursor:pointer}.slots{display:grid;gap:4px}.slot{height:34px;display:grid;grid-template-columns:20px minmax(0,1fr) 40px;gap:4px;align-items:center}.slot-num{color:var(--muted);font-size:10px;text-align:center;font-variant-numeric:tabular-nums}.slot-wrap{position:relative;min-width:0}.slot-input{width:100%;height:32px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--field);color:var(--text);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0;outline:0}.slot-input.official{border-left:3px solid var(--accent);padding-right:30px}.slot-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--soft)}.slot-input.invalid{border-color:var(--danger)}.slot-input.dup{border-color:var(--warn)}.slot-tag{position:absolute;right:7px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:9px;pointer-events:none}.slot-switch{width:40px;height:26px}.slot-switch .track{width:36px;height:22px}.slot-switch .track:after{width:16px;height:16px}.slot-switch input:checked+.track:after{transform:translateX(14px)}.slot-switch input:disabled+.track{opacity:.4}.slot-switch input:disabled{cursor:not-allowed}
+.toolbar{height:34px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 1px}.toolbar-actions{display:flex;align-items:center;gap:2px}.list-title{font-size:12px;font-weight:650}.count{margin-left:6px;color:var(--muted);font-size:10px}.reset{width:30px;height:28px;border:0;border-radius:6px;background:transparent;color:var(--accent);font-size:18px;cursor:pointer}.reset:disabled{opacity:.4;cursor:not-allowed}.slots{display:grid;gap:4px}.slot{height:34px;display:grid;grid-template-columns:20px minmax(0,1fr) 40px;gap:4px;align-items:center}.slot-num{color:var(--muted);font-size:10px;text-align:center;font-variant-numeric:tabular-nums}.slot-wrap{position:relative;min-width:0}.slot-input{width:100%;height:32px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--field);color:var(--text);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0;outline:0}.slot-input.official{border-left:3px solid var(--accent);padding-right:30px}.slot-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--soft)}.slot-input:disabled{opacity:.55;cursor:not-allowed}.slot-input.invalid{border-color:var(--danger)}.slot-input.dup{border-color:var(--warn)}.slot-tag{position:absolute;right:7px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:9px;pointer-events:none}.slot-switch{width:40px;height:26px}.slot-switch .track{width:36px;height:22px}.slot-switch .track:after{width:16px;height:16px}.slot-switch input:checked+.track:after{transform:translateX(14px)}.switch input:disabled+.track{opacity:.4}.switch input:disabled{cursor:not-allowed}
 .author{height:34px;display:flex;align-items:center;justify-content:center;gap:10px;margin-top:4px;color:var(--muted)}.author-mark{font-size:10px;white-space:nowrap}.socials{display:flex;align-items:center;gap:3px}.social-link{width:28px;height:28px;display:grid;place-items:center;border-radius:6px;color:var(--muted);text-decoration:none;transition:color .16s ease,background .16s ease}.social-link:hover,.social-link:focus-visible{color:var(--accent);background:var(--soft);outline:0}.social-link svg{width:17px;height:17px;fill:currentColor}.coolapk-icon{width:19px;height:19px;display:block}
 .toast{position:fixed;z-index:20;left:50%;bottom:max(14px,env(safe-area-inset-bottom));transform:translate(-50%,12px);width:min(calc(100% - 24px),520px);padding:9px 12px;border:1px solid var(--line);border-radius:7px;background:var(--surface);box-shadow:0 10px 28px rgba(0,0,0,.18);color:var(--text);font-size:12px;text-align:center;opacity:0;visibility:hidden;transition:opacity .16s ease,transform .16s ease}.toast.show{opacity:1;visibility:visible;transform:translate(-50%,0)}.toast.ok{color:var(--accent)}.toast.err{color:var(--danger)}.toast.warn{color:var(--warn)}
 .cmd-panel{position:fixed;z-index:30;inset:0;padding:20px;background:rgba(0,0,0,.42);display:grid;place-items:center}.cmd-box{width:min(100%,520px);max-height:75vh;padding:12px;border-radius:8px;background:var(--surface);border:1px solid var(--line)}.cmd-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-weight:700}.cmd-close{width:30px;height:30px;border:0;background:transparent;color:var(--muted);font-size:20px;cursor:pointer}.cmd-box code{display:block;max-height:45vh;overflow:auto;padding:9px;border-radius:6px;background:var(--field);color:var(--muted);font:10px/1.4 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all}.cmd-copy{width:100%;height:34px;margin-top:8px;border:0;border-radius:6px;background:var(--accent);color:#fff;font-weight:650;cursor:pointer}
@@ -29,7 +30,7 @@
       </div>
     </div>
     <div class="top-actions">
-      <span class="version">v1.5.5</span>
+      <span class="version">v1.5.5-fix</span>
       <button class="icon" id="theme" type="button" title="切换主题" aria-label="切换主题">☼</button>
     </div>
   </header>
@@ -47,7 +48,10 @@
     </div>
     <div class="toolbar">
       <div><span class="list-title">应用白名单</span><span class="count" id="count"></span></div>
-      <button class="reset" id="reset" type="button" title="恢复官方默认" aria-label="恢复官方默认">↺</button>
+      <div class="toolbar-actions">
+        <button class="reset" id="retry" type="button" title="重新读取配置" aria-label="重新读取配置" hidden>↻</button>
+        <button class="reset" id="reset" type="button" title="恢复官方默认" aria-label="恢复官方默认">↺</button>
+      </div>
     </div>
     <div class="slots" id="slots"></div>
   </section>
@@ -82,17 +86,20 @@
   const LABELS=['酷狗音乐','QQ音乐','网易云音乐','酷我音乐','小米音乐','Luna音乐','自定义 1','自定义 2','自定义 3','自定义 4'];
   const STORAGE_KEY='a2h_config_v5';
   const LEGACY_STORAGE_KEY='a2h_config_v4';
-  const APPLY_DELAY=180;
+  const DEVICE_MARKERS={state:'__A2H_DEVICE_STATE__',packages:'__A2H_DEVICE_PACKAGES__',states:'__A2H_DEVICE_STATES__',end:'__A2H_DEVICE_END__'};
   let mode='whitelist';
   let slots=DEFAULTS.slice();
   let slotEnabled=[true,true,true,true,true,true,false,false,false,false];
   let configRevision=0;
-  let applyTimer=0;
+  let deviceConfigReady=false;
+  let deviceConfigStatus='loading';
   let applyPending=false;
+  let packageWritePending=false;
   let applyBusy=false;
   let applyReason='';
   let lastAppliedKey='';
   let toastTimer=0;
+  let execSerial=0;
   const $=id=>document.getElementById(id);
 
   function normalizeSlot(value){return String(value||'').trim();}
@@ -141,7 +148,9 @@
   function renderMode(){
     const global=mode==='global';
     $('globalMode').checked=global;
-    $('modeValue').textContent=global?'开启 · 全局':'关闭 · 白名单';
+    $('globalMode').disabled=!deviceConfigReady||applyBusy;
+    $('modeValue').textContent=deviceConfigReady?(global?'开启 · 全局':'关闭 · 白名单'):(deviceConfigStatus==='error'?'读取失败':'正在读取');
+    $('reset').disabled=!deviceConfigReady;
   }
   function updateCount(){
     let active=0;
@@ -181,6 +190,7 @@
       input.autocomplete='off';
       input.spellcheck=false;
       input.maxLength=63;
+      input.disabled=!deviceConfigReady;
       let committed=value;
       const toggle=document.createElement('input');
       input.addEventListener('input',()=>{
@@ -205,7 +215,7 @@
         saveLocal();
         updateCount();
         refreshValidation();
-        requestApply('包名已更新');
+        requestApply('包名已更新',true);
       };
       input.addEventListener('change',commitInput);
       input.addEventListener('blur',commitInput);
@@ -217,7 +227,7 @@
       toggle.setAttribute('role','switch');
       toggle.setAttribute('aria-label',LABELS[index]+'开关');
       toggle.checked=Boolean(slotEnabled[index]&&value);
-      toggle.disabled=!value;
+      toggle.disabled=!deviceConfigReady||!value;
       toggle.addEventListener('change',()=>{
         const current=normalizeSlot(input.value);
         if(!current){toggle.checked=false;slotEnabled[index]=false;return;}
@@ -233,7 +243,7 @@
         updateCount();
         refreshValidation();
         hideCommand();
-        requestApply('槽位 '+String(index+1)+' 已更新');
+        requestApply('槽位 '+String(index+1)+' 已更新',true);
       });
       const track=document.createElement('span');
       track.className='track';
@@ -251,7 +261,7 @@
     updateCount();
     refreshValidation();
   }
-  function render(){renderMode();renderSlots();saveLocal();}
+  function render(){renderMode();renderSlots();}
 
   function shellQuote(value){return "'"+String(value).replace(/'/g,"'\"'\"'")+"'";}
   function snapshotConfig(){
@@ -283,79 +293,134 @@
       'umask 077;',
       'cfg=/data/adb/modules/a2h_hook/config; cfg_lock=/data/local/tmp/a2h_config.lock;',
       'mkdir -p "$cfg" /data/local/tmp || exit 74;',
-      'tag=$$; pkg_tmp="$cfg/.packages.$tag"; state_tmp="$cfg/.package_states.$tag"; mode_tmp="$cfg/.state.$tag"; gen_tmp="$cfg/.generation.$tag";',
-      'cfg_lock_alive() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); case "$cfg_owner" in \'\'|*[!0-9]*) return 1 ;; esac; kill -0 "$cfg_owner" 2>/dev/null; };',
-      'cfg_cleanup() { rm -f "$pkg_tmp" "$state_tmp" "$mode_tmp" "$gen_tmp" 2>/dev/null; };',
-      'cfg_release() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); [ "$cfg_owner" = "$$" ] || return 1; rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null || true; };',
-      'cfg_abort() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); if [ "$cfg_owner" = "$$" ]; then rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; fi; cfg_cleanup; };',
+      'tag=$$; pkg_tmp="$cfg/.packages.$tag"; state_tmp="$cfg/.package_states.$tag"; gen_tmp="$cfg/.generation.$tag";',
+      'cfg_proc_start() { cfg_pid=$1; case "$cfg_pid" in \'\'|*[!0-9]*) return 1 ;; esac; cfg_stat=$(cat "/proc/$cfg_pid/stat" 2>/dev/null) || return 1; cfg_tail=${cfg_stat##*) }; [ "$cfg_tail" != "$cfg_stat" ] || return 1; set -- $cfg_tail; [ "$#" -ge 20 ] || return 1; shift 19; case "$1" in \'\'|*[!0-9]*) return 1 ;; esac; printf \'%s\\n\' "$1"; };',
+      'cfg_lock_alive() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null) || return 1; set -- $cfg_owner; case "$#" in 1) cfg_pid=$1; case "$cfg_pid" in \'\'|*[!0-9]*) return 1 ;; esac; kill -0 "$cfg_pid" 2>/dev/null || return 1; grep -a -F -q \'a2h_apply\' "/proc/$cfg_pid/cmdline" 2>/dev/null || grep -a -F -q \'a2h_config.lock\' "/proc/$cfg_pid/cmdline" 2>/dev/null ;; 2) cfg_pid=$1; cfg_saved_start=$2; case "$cfg_pid:$cfg_saved_start" in *[!0-9:]*) return 1 ;; esac; cfg_live_start=$(cfg_proc_start "$cfg_pid") || return 1; [ "$cfg_live_start" = "$cfg_saved_start" ] ;; *) return 1 ;; esac; };',
+      'cfg_cleanup() { rm -f "$pkg_tmp" "$state_tmp" "$gen_tmp" 2>/dev/null; };',
+      'cfg_release() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); [ "$cfg_owner" = "$cfg_token" ] || return 1; rm -f "$cfg_lock/pid" 2>/dev/null || return 1; rmdir "$cfg_lock" 2>/dev/null; };',
+      'cfg_abort() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); if [ "$cfg_owner" = "$cfg_token" ]; then rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; fi; cfg_cleanup; };',
       "trap 'cfg_abort' 0 1 2 15;",
       "printf '%s\\n' "+names+' > "$pkg_tmp" || exit 74;',
       "printf '%s\\n' "+flags+' > "$state_tmp" || exit 74;',
-      "printf '%s\\n' "+shellQuote(data.mode==='global'?'enabled':'disabled')+' > "$mode_tmp" || exit 74;',
       "printf '%s\\n' "+shellQuote(data.generation)+' > "$gen_tmp" || exit 74;',
-      'chmod 600 "$pkg_tmp" "$state_tmp" "$mode_tmp" "$gen_tmp" || exit 74;',
-      'cfg_wait=0; while ! mkdir "$cfg_lock" 2>/dev/null; do if cfg_lock_alive; then cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -lt 6 ] || exit 75; sleep 1; continue; fi; sleep 1; cfg_lock_alive && continue; sleep 1; cfg_lock_alive && continue; rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null || true; cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -lt 6 ] || exit 75; done;',
-      'printf \'%s\\n\' "$$" > "$cfg_lock/pid" 2>/dev/null || { rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; exit 75; };',
-      'cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); [ "$cfg_owner" = "$$" ] || { rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; exit 75; };',
+      'chmod 600 "$pkg_tmp" "$state_tmp" "$gen_tmp" || exit 74;',
+      'cfg_wait=0; while ! mkdir "$cfg_lock" 2>/dev/null; do if cfg_lock_alive; then cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -lt 6 ] || exit 75; sleep 1; continue; fi; cfg_old=$(cat "$cfg_lock/pid" 2>/dev/null || printf \'(missing)\'); sleep 1; cfg_lock_alive && continue; cfg_mid=$(cat "$cfg_lock/pid" 2>/dev/null || printf \'(missing)\'); [ "$cfg_old" = "$cfg_mid" ] || continue; sleep 1; cfg_lock_alive && continue; cfg_now=$(cat "$cfg_lock/pid" 2>/dev/null || printf \'(missing)\'); [ "$cfg_mid" = "$cfg_now" ] || continue; rm -f "$cfg_lock/pid" 2>/dev/null || exit 75; rmdir "$cfg_lock" 2>/dev/null || true; cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -lt 6 ] || exit 75; done;',
+      'cfg_start=$(cfg_proc_start "$$") || { rmdir "$cfg_lock" 2>/dev/null; exit 75; }; cfg_token="$$ $cfg_start";',
+      'printf \'%s\\n\' "$cfg_token" > "$cfg_lock/pid" 2>/dev/null || { rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; exit 75; };',
+      'cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); [ "$cfg_owner" = "$cfg_token" ] || { rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; exit 75; };',
       'mv -f "$gen_tmp" "$cfg/config_generation" || exit 74;',
       'mv -f "$pkg_tmp" "$cfg/packages.txt" || exit 74;',
       'mv -f "$state_tmp" "$cfg/package_states" || exit 74;',
-      'mv -f "$mode_tmp" "$cfg/state" || exit 74;',
       'cfg_release || exit 75; trap - 0 1 2 15;'
     ];
     return readable?'(\n  '+lines.join('\n  ')+'\n)':'( '+lines.join(' ')+' )';
   }
-  function buildCommand(state,snapshot){
+  function buildCommand(state,snapshot,writePackages){
     const data=snapshot||snapshotConfig();
     data.mode=state==='enabled'?'global':'whitelist';
-    return ['# A2HHook apply command',buildWritePackagesCmd(data,true),'sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state)].join('\n');
+    const commands=['# A2HHook apply command'];
+    if(writePackages) commands.push(buildWritePackagesCmd(data,true));
+    commands.push('sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state));
+    return commands.join('\n');
   }
 
   function findExecBridge(){
-    if(window.KSU&&typeof window.KSU.exec==='function') return {owner:window.KSU,fn:window.KSU.exec};
-    if(window.ksu&&typeof window.ksu.exec==='function') return {owner:window.ksu,fn:window.ksu.exec};
-    if(typeof window.exec==='function') return {owner:window,fn:window.exec};
+    if(window.ksu&&typeof window.ksu.exec==='function') return {kind:'raw',owner:window.ksu,fn:window.ksu.exec};
+    if(window.KSU&&typeof window.KSU.exec==='function') return {kind:'promise',owner:window.KSU,fn:window.KSU.exec};
+    if(typeof window.exec==='function') return {kind:'callback',owner:window,fn:window.exec};
     return null;
   }
-  function assertExecOk(result){
-    let data=result;
-    if(typeof data==='string'){try{data=JSON.parse(data);}catch(error){return;}}
-    if(typeof data==='number'&&data!==0) throw new Error('exit '+data);
-    if(!data||typeof data!=='object') return;
-    const code=data.code??data.exitCode??data.status??data.errno;
-    if(data.success===false||(code!==undefined&&Number(code)!==0)) throw new Error('exec failed');
+  function normalizeExecResult(result,depth){
+    const level=depth||0;
+    if(result==null) return {code:undefined,stdout:'',stderr:''};
+    if(typeof result==='number') return {code:result,stdout:'',stderr:''};
+    if(typeof result==='string'){
+      try{
+        const parsed=JSON.parse(result);
+        if(parsed!==result) return normalizeExecResult(parsed,level+1);
+      }catch(error){}
+      return {code:undefined,stdout:result,stderr:''};
+    }
+    if(typeof result!=='object') return {code:undefined,stdout:String(result),stderr:''};
+    let code=result.code??result.exitCode??result.status??result.errno;
+    if(result.success===false&&code===undefined) code=1;
+    let stdout=result.stdout??result.out??result.output;
+    let stderr=result.stderr??result.err??'';
+    if(stdout===undefined&&level<3){
+      const nested=result.result??result.data??result.value;
+      if(nested!==undefined&&nested!==result){
+        const normalized=normalizeExecResult(nested,level+1);
+        if(code===undefined) code=normalized.code;
+        stdout=normalized.stdout;
+        if(!stderr) stderr=normalized.stderr;
+      }
+    }
+    if(stdout===undefined&&result.message!==undefined) stdout=result.message;
+    return {code:code===undefined?undefined:Number(code),stdout:String(stdout??''),stderr:String(stderr??'')};
   }
-  function withTimeout(promise,ms){
+  function invokeRawBridge(bridge,command,timeoutMs){
     return new Promise((resolve,reject)=>{
-      const timer=setTimeout(()=>reject(new Error('timeout')),ms);
-      Promise.resolve(promise).then(value=>{clearTimeout(timer);resolve(value);},error=>{clearTimeout(timer);reject(error);});
+      let settled=false;
+      const callbackName='__a2h_exec_'+Date.now()+'_'+(++execSerial);
+      const cleanup=()=>{clearTimeout(timer);try{delete window[callbackName];}catch(error){window[callbackName]=undefined;}};
+      const finish=value=>{if(!settled){settled=true;cleanup();resolve(value);}};
+      const fail=error=>{if(!settled){settled=true;cleanup();reject(error);}};
+      const accept=returned=>{
+        if(returned&&typeof returned.then==='function') returned.then(finish,fail);
+        else if(returned!==undefined&&returned!==null) finish(returned);
+      };
+      const timer=setTimeout(()=>fail(new Error('timeout')),timeoutMs||8000);
+      window[callbackName]=(errno,stdout,stderr)=>finish({code:errno,stdout,stderr});
+      try{
+        accept(bridge.fn.call(bridge.owner,command,'{}',callbackName));
+      }catch(threeArgError){
+        try{
+          accept(bridge.fn.call(bridge.owner,command,callbackName));
+        }catch(twoArgError){
+          try{accept(bridge.fn.call(bridge.owner,command));}
+          catch(oneArgError){fail(oneArgError);}
+        }
+      }
+    });
+  }
+  function invokeGenericBridge(bridge,command,timeoutMs){
+    return new Promise((resolve,reject)=>{
+      let settled=false;
+      const timer=setTimeout(()=>fail(new Error('timeout')),timeoutMs||8000);
+      const finish=value=>{if(!settled){settled=true;clearTimeout(timer);resolve(value);}};
+      const fail=error=>{if(!settled){settled=true;clearTimeout(timer);reject(error);}};
+      const callback=(...args)=>args.length<=1?finish(args[0]):finish({code:args[0],stdout:args[1],stderr:args[2]});
+      try{
+        const returned=bridge.kind==='callback'?
+          bridge.fn.call(bridge.owner,command,callback):
+          bridge.fn.call(bridge.owner,command,{});
+        if(returned&&typeof returned.then==='function') returned.then(finish,fail);
+        else if(returned!==undefined&&returned!==null) finish(returned);
+        else if(bridge.kind==='promise') fail(new Error('missing-exec-result'));
+      }catch(error){fail(error);}
     });
   }
   async function execRoot(command,timeoutMs){
     const bridge=findExecBridge();
     if(!bridge) throw new Error('no-exec');
-    const result=await withTimeout(new Promise((resolve,reject)=>{
-      let settled=false;
-      const finish=value=>{if(!settled){settled=true;resolve(value);}};
-      const fail=error=>{if(!settled){settled=true;reject(error);}};
-      const callback=(...args)=>args.length<=1?finish(args[0]):finish({code:args[0],stdout:args[1],stderr:args[2]});
-      try{
-        const returned=bridge.fn.length>=2?bridge.fn.call(bridge.owner,command,callback):bridge.fn.call(bridge.owner,command);
-        if(returned&&typeof returned.then==='function') returned.then(finish,fail);
-        else if(returned!==undefined) finish(returned);
-        else if(bridge.fn.length<2) finish(null);
-      }catch(error){fail(error);}
-    }),timeoutMs||8000);
-    assertExecOk(result);
-    return result;
+    const rcMarker='__A2H_EXEC_RC_'+Date.now()+'_'+(++execSerial)+'__';
+    const wrapped='( '+command+'\n); a2h_exec_rc=$?; printf \'\\n'+rcMarker+'%s\\n\' "$a2h_exec_rc"; exit 0';
+    const raw=bridge.kind==='raw'?await invokeRawBridge(bridge,wrapped,timeoutMs):await invokeGenericBridge(bridge,wrapped,timeoutMs);
+    const result=normalizeExecResult(raw);
+    const markerAt=result.stdout.lastIndexOf(rcMarker);
+    if(markerAt<0){
+      if(result.code!==undefined&&result.code!==0) throw new Error('exit '+result.code);
+      throw new Error('missing-exec-status');
+    }
+    const rcMatch=result.stdout.slice(markerAt+rcMarker.length).match(/^(-?[0-9]+)/);
+    if(!rcMatch) throw new Error('invalid-exec-status');
+    const code=Number(rcMatch[1]);
+    const stdout=result.stdout.slice(0,markerAt).replace(/\r?\n$/,'');
+    if(code!==0) throw new Error('exit '+code+(result.stderr?': '+result.stderr:''));
+    return {code,stdout,stderr:result.stderr};
   }
   function extractStdout(result){
-    if(result==null) return '';
-    if(typeof result==='string'){
-      try{const data=JSON.parse(result);return String(data.stdout??data.out??data.output??data.message??result);}catch(error){return result;}
-    }
-    if(typeof result==='object') return String(result.stdout??result.out??result.output??result.message??'');
-    return String(result);
+    return normalizeExecResult(result).stdout;
   }
 
   async function openSystemLink(event){
@@ -372,41 +437,60 @@
     }
   }
 
-  function requestApply(reason){
+  function requestApply(reason,writePackages){
+    if(!deviceConfigReady){setNotice('正在读取设备配置','warn');return;}
     applyPending=true;
+    packageWritePending=packageWritePending||Boolean(writePackages);
     applyReason=reason||'配置已更新';
-    saveLocal();
-    if(applyTimer) clearTimeout(applyTimer);
-    applyTimer=setTimeout(()=>{applyTimer=0;drainApply();},APPLY_DELAY);
+    drainApply();
   }
   async function drainApply(){
     if(applyBusy) return;
     applyBusy=true;
+    renderMode();
     try{
       while(applyPending){
         applyPending=false;
+        const writePackages=packageWritePending;
+        packageWritePending=false;
         const data=snapshotConfig();
         const error=validationMessage(data);
         if(error){refreshValidation();setNotice(error,'err');continue;}
         const key=snapshotKey(data);
-        if(key===lastAppliedKey) continue;
+        if(key===lastAppliedKey&&!writePackages){saveLocal();continue;}
         const state=data.mode==='global'?'enabled':'disabled';
         setNotice('正在保存：'+applyReason,'',true);
         try{
-          await execRoot(buildWritePackagesCmd(data)+' && sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state),6000);
+          const command=(writePackages ? buildWritePackagesCmd(data)+' && ' : '')+
+            'sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state)+' && '+
+            buildReadDeviceCommand(writePackages);
+          const text=extractStdout(await execRoot(command,8000));
+          verifyDeviceConfig(text,data,writePackages);
           lastAppliedKey=key;
-          hideCommand();
-          setNotice('已保存并生效','ok');
+          if(snapshotKey(snapshotConfig())===key){
+            saveLocal();
+            hideCommand();
+            setNotice('已保存，正在后台应用','ok');
+          }
         }catch(error){
           console&&console.warn&&console.warn(error);
-          $('cmdText').textContent=buildCommand(state,data);
+          packageWritePending=packageWritePending||writePackages;
+          if(applyPending||snapshotKey(snapshotConfig())!==key){
+            setNotice('上一项保存失败，正在处理最新配置','warn');
+            continue;
+          }
+          $('cmdText').textContent=buildCommand(state,data,writePackages);
           $('cmdPanel').hidden=false;
-          setNotice('自动应用失败','warn');
+          setNotice('保存校验失败，正在恢复设备状态','warn',true);
+          const restored=await loadDeviceConfig({preserveNotice:true});
+          packageWritePending=false;
+          setNotice(restored?'保存失败，已恢复设备状态':'保存失败，设备状态读取失败','err');
         }
       }
     }finally{
       applyBusy=false;
-      if(applyPending&&!applyTimer) drainApply();
+      renderMode();
+      if(applyPending) drainApply();
     }
   }
 
@@ -415,6 +499,7 @@
     if(start<0) return null;
     const from=start+startMarker.length;
     const end=endMarker?text.indexOf(endMarker,from):-1;
+    if(endMarker&&end<0) return null;
     let value=end<0?text.slice(from):text.slice(from,end);
     if(value.startsWith('\r\n')) value=value.slice(2);
     else if(value.startsWith('\n')) value=value.slice(1);
@@ -422,40 +507,94 @@
     if(value.endsWith('\r')) value=value.slice(0,-1);
     return value;
   }
-  async function loadDeviceConfig(){
+  function buildReadDeviceCommand(includePackages){
+    const lines=[
+      "printf '%s\\n' "+shellQuote(DEVICE_MARKERS.state),
+      'cat /data/adb/modules/a2h_hook/config/state 2>/dev/null || exit 2'
+    ];
+    if(includePackages){
+      lines.push(
+        "printf '%s\\n' "+shellQuote(DEVICE_MARKERS.packages),
+        'cat /data/adb/modules/a2h_hook/config/packages.txt 2>/dev/null || exit 2',
+        "printf '%s\\n' "+shellQuote(DEVICE_MARKERS.states),
+        'cat /data/adb/modules/a2h_hook/config/package_states 2>/dev/null || true'
+      );
+    }
+    lines.push("printf '%s\\n' "+shellQuote(DEVICE_MARKERS.end));
+    return lines.join('; ');
+  }
+  function parseDeviceMode(text,endMarker){
+    const stateText=parseDeviceSection(text,DEVICE_MARKERS.state,endMarker||DEVICE_MARKERS.end);
+    if(stateText===null) throw new Error('missing-device-state');
+    const state=stateText.trim();
+    if(state!=='enabled'&&state!=='disabled') throw new Error('invalid-device-state');
+    return state==='enabled'?'global':'whitelist';
+  }
+  function parseDeviceConfig(text){
+    if(text.indexOf(DEVICE_MARKERS.end)<0) throw new Error('incomplete-device-config');
+    const packageText=parseDeviceSection(text,DEVICE_MARKERS.packages,DEVICE_MARKERS.states);
+    const stateText=parseDeviceSection(text,DEVICE_MARKERS.states,DEVICE_MARKERS.end);
+    if(packageText===null||stateText===null) throw new Error('invalid-device-config');
+    const packages=Array(10).fill('');
+    packageText.replace(/\r/g,'').split('\n').slice(0,10).forEach((line,index)=>{packages[index]=normalizeSlot(line);});
+    const rawStates=stateText.replace(/\r/g,'').split('\n').map(value=>value.trim());
+    return {mode:parseDeviceMode(text,DEVICE_MARKERS.packages),packages,enabled:cloneEnabled(rawStates,packages)};
+  }
+  function verifyDeviceConfig(text,expected,includePackages){
+    const actual=includePackages?parseDeviceConfig(text):{mode:parseDeviceMode(text)};
+    if(actual.mode!==expected.mode) throw new Error('device-mode-mismatch');
+    if(includePackages){
+      const expectedPackages=cloneSlots(expected.packages);
+      const expectedEnabled=cloneEnabled(expected.enabled,expectedPackages);
+      for(let index=0;index<10;index++){
+        if(actual.packages[index]!==expectedPackages[index]||actual.enabled[index]!==expectedEnabled[index]) throw new Error('device-config-mismatch');
+      }
+    }
+    return actual;
+  }
+  async function loadDeviceConfig(options){
+    const settings=options||{};
+    deviceConfigReady=false;
+    deviceConfigStatus='loading';
+    renderMode();
+    renderSlots();
     const startRevision=configRevision;
     try{
-      const command="cat /data/adb/modules/a2h_hook/config/state 2>/dev/null; printf '\\n__A2H_PACKAGES__\\n'; cat /data/adb/modules/a2h_hook/config/packages.txt 2>/dev/null || exit 2; printf '\\n__A2H_STATES__\\n'; cat /data/adb/modules/a2h_hook/config/package_states 2>/dev/null || true";
-      const text=extractStdout(await execRoot(command,5000));
-      if(configRevision!==startRevision){setNotice('保留当前编辑内容','warn');return;}
-      const packageMarker='__A2H_PACKAGES__';
-      const stateMarker='__A2H_STATES__';
-      const packageText=parseDeviceSection(text,packageMarker,stateMarker);
-      const stateText=text.slice(0,text.indexOf(packageMarker)).trim();
-      const stateLines=parseDeviceSection(text,stateMarker,null);
-      mode=stateText==='enabled'?'global':'whitelist';
-      if(packageText!==null){
-        const next=Array(10).fill('');
-        packageText.replace(/\r/g,'').split('\n').slice(0,10).forEach((line,index)=>{next[index]=normalizeSlot(line);});
-        slots=next;
-        const rawStates=stateLines===null?[]:stateLines.replace(/\r/g,'').split('\n').map(value=>value.trim());
-        slotEnabled=cloneEnabled(rawStates,slots);
+      const text=extractStdout(await execRoot(buildReadDeviceCommand(true),6000));
+      if(configRevision!==startRevision){
+        if(!settings.preserveNotice) setNotice('保留当前编辑内容','warn');
+        return false;
       }
+      const data=parseDeviceConfig(text);
+      mode=data.mode;
+      slots=data.packages;
+      slotEnabled=data.enabled;
+      deviceConfigReady=true;
+      deviceConfigStatus='ready';
       configRevision++;
       render();
+      saveLocal();
       lastAppliedKey=snapshotKey(snapshotConfig());
+      $('retry').hidden=true;
+      return true;
     }catch(error){
       console&&console.warn&&console.warn(error);
-      setNotice('已使用本地配置','warn');
+      deviceConfigReady=false;
+      deviceConfigStatus='error';
+      renderMode();
+      renderSlots();
+      $('retry').hidden=false;
+      if(!settings.preserveNotice) setNotice('设备配置读取失败','warn');
+      return false;
     }
   }
 
   $('globalMode').addEventListener('change',event=>{
+    if(!deviceConfigReady){event.target.checked=mode==='global';setNotice('设备配置尚未载入','warn');return;}
     mode=event.target.checked?'global':'whitelist';
     configRevision++;
     renderMode();
-    saveLocal();
-    requestApply(mode==='global'?'全局模式已开启':'白名单模式已开启');
+    requestApply(mode==='global'?'全局模式已开启':'白名单模式已开启',false);
   });
   $('theme').addEventListener('click',()=>{
     const root=document.documentElement;
@@ -464,12 +603,18 @@
     try{localStorage.setItem('a2h_theme',root.dataset.theme);}catch(error){}
   });
   $('reset').addEventListener('click',()=>{
+    if(!deviceConfigReady){setNotice('设备配置尚未载入','warn');return;}
     slots=DEFAULTS.slice();
     slotEnabled=[true,true,true,true,true,true,false,false,false,false];
     configRevision++;
     renderSlots();
     saveLocal();
-    requestApply('已恢复官方默认');
+    requestApply('已恢复官方默认',true);
+  });
+  $('retry').addEventListener('click',()=>{
+    $('retry').hidden=true;
+    setNotice('正在重新读取配置','',true);
+    loadDeviceConfig();
   });
   $('cmdClose').addEventListener('click',hideCommand);
   $('cmdPanel').addEventListener('click',event=>{if(event.target===$('cmdPanel')) hideCommand();});

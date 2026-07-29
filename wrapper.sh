@@ -1,12 +1,9 @@
 #!/system/bin/sh
 MODDIR=/data/adb/modules/a2h_hook
-PRELOAD="$MODDIR/zygisk/arm64-v8a/a2h_hook.so"
 REAL="/vendor/bin/hw/android.hardware.audio.service-aidl.mediatek"
 
-if [ -f "$PRELOAD" ] && [ -x "$REAL" ]; then
-  export LD_PRELOAD="$PRELOAD${LD_PRELOAD:+:$LD_PRELOAD}"
-fi
-
+# Compatibility pass-through for an old wrap property during an in-place
+# update. post-fs-data.sh removes the property on the next boot.
 if [ -x "$REAL" ]; then
   exec "$REAL" "$@"
 fi

@@ -24,7 +24,7 @@ jobs:
       - name: Install host tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build zip unzip
+          sudo apt-get install -y cmake ninja-build python3 unzip
 
       - name: Setup Android NDK
         run: |
@@ -59,5 +59,4 @@ jobs:
             bin/a2h_apply
             bin/a2h_patch
             bin/a2h_trigger
-            zygisk/arm64-v8a/a2h_hook.so
           retention-days: 90
