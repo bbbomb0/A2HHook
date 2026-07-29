@@ -152,7 +152,11 @@ main() {
         clean)
             info "Cleaning..."
             rm -rf "$BUILD_DIR"
-            find "$MODULE_DIR" -maxdepth 1 -name 'a2h_hook_*.zip' -type f -delete
+            MODULE_VERSION="$(sed -n 's/^version=//p' "$MODULE_DIR/module.prop" 2>/dev/null | head -n 1)"
+            case "$MODULE_VERSION" in
+                ''|*[!A-Za-z0-9._-]*) error "Invalid module version; refusing to clean release ZIPs" ;;
+            esac
+            rm -f "$MODULE_DIR/a2h_hook_${MODULE_VERSION}.zip"
             info "Done" ;;
         zip)    create_zip ;;
         ci)     ci_build ;;

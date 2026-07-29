@@ -308,6 +308,17 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     leaked = [item for item in forbidden if item in manifest_area]
     report.check(not leaked, "release manifest isolation", "tests and legacy injection excluded", f"forbidden manifest entries: {leaked}")
 
+    build_script = (root / "build.sh").read_text(encoding="utf-8")
+    clean_block = extract_function(build_script, "        clean)", "        zip)")
+    report.check(
+        "a2h_hook_*.zip" not in clean_block
+        and 'rm -f "$MODULE_DIR/a2h_hook_${MODULE_VERSION}.zip"' in clean_block
+        and "*[!A-Za-z0-9._-]*" in clean_block,
+        "release clean isolation",
+        "clean validates the version and removes only its ZIP while preserving historical releases",
+        "build.sh clean can delete historical release ZIPs or accepts an unsafe version path",
+    )
+
     installer = (root / "customize.sh").read_text(encoding="utf-8")
     report.check(
         '[ -f "$MODDIR/config/.package_baseline" ] &&' in installer

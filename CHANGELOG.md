@@ -3,6 +3,7 @@
 ## v1.5.5-fix2
 
 - 保留 `v1.5.5-fix` 第一代修复版的标签、Release 与下载资产；本版使用独立的 `v1.5.5-fix2` / `versionCode=1552`，作为第二代修复迭代。
+- 收紧 `build.sh clean` 的清理范围，只删除当前版本生成包，不再清理项目根目录中的第一代或其他历史模块包。
 - 修复 Root 文件管理器只修改 `packages.txt` 第 7～10 槽时，旧 `package_states` 校验值轻微漂移会阻止新包名自动启用、随后又被错误吸收到隐藏基线的问题。现在由“包名基线变化且 generation 未变化”识别单文件编辑，state 差异仅记录诊断。
 - watcher 优先通过系统 `inotifyd` 接收配置事件，仅在事件、debounce 或健康周期到达时计算签名；缺少 `inotifyd` 时自动退回 2 秒签名轮询。连续两次签名一致后才处理，HAL native live-check 始终保持约 30 秒周期；事件模式可减少空闲 checksum/awk，轮询回退也不会提高 ptrace 频率。
 - watcher 在配置、apply 或 queue worker 正忙时快速延后，减少锁等待、重复应用和 `lock-timeout` 噪声；失败重试仍保留约 50 秒起的有界指数退避。
