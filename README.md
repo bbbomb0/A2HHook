@@ -11,13 +11,13 @@ A2HHook 是面向 REDMI K80 Ultra / K80U 的音乐触感模块，目标是在 Ke
 - 模块栏 WebUI 入口；
 - 文件管理器直接修改 `config/packages.txt` 后自动热更新。
 
-当前公开版本：`v1.5.5`。
+当前版本：`v1.5.5-fix`。
 
 ## 下载安装
 
 请到 GitHub Releases 下载：
 
-- `a2h_hook_v1.5.5.zip`
+- `a2h_hook_v1.5.5-fix.zip`
 
 刷入方式：
 
@@ -44,9 +44,9 @@ com.kugou.android
 
 ## 兼容性说明
 
-- 已按 HyperOS 2.x / 3.x 差异做通用定位与回退处理；
-- 当前主线保留双写入与 I-cache flush 兼容保险；
-- 当前连接实机仅为 K80U / HyperOS 3.0.302；HyperOS 2.0.208 修复依据离线日志与 OS2.0.218 HAL 静态分析，仍需对应系统用户实测反馈；
+- 已按 HyperOS 2.x / 3.x 差异做通用定位与安全回退，并为 HyperOS 3.0.305 的已提供 HAL 加入严格识别；
+- 当前主线保留双写入、I-cache 同步与失败回滚等兼容保险；
+- 已连接实机仅为 K80U / HyperOS 3.0.302。HyperOS 3.0.305、2.0.218 与 2.0.208 仍需对应系统实机回归，不会把静态分析结果写成实机验证；
 - 模块不包含系统原厂音频库文件；
 - 不建议和其它同类音频 HAL 修改模块同时启用。
 
@@ -58,8 +58,9 @@ com.kugou.android
 
 - Android NDK r26 或更新版本；
 - CMake 3.18+；
-- `zip` 或 Python 3；Windows 使用 `zip` 时还需要 Python 3 规范 ZIP 权限元数据；
-- 仓库自带已验证的 Dobby 静态库；若你要替换版本，可自行重新编译。
+- Python 3（统一负责严格清单打包、CRC 和 Unix 权限校验）。
+
+默认构建和发布链只生成 native patcher / trigger，不编译或打包 Dobby、Zygisk 注入库和 LD_PRELOAD 包装链。仓库保留的 Dobby 代码与静态库仅供 `A2H_BUILD_LEGACY_INJECTION=ON` 的 legacy/诊断构建使用，不是模块正常运行依赖。
 
 Linux / macOS / MSYS2 Git Bash：
 
@@ -77,7 +78,7 @@ python package_module.py .
 构建完成后会生成：
 
 ```text
-a2h_hook_v1.5.5.zip
+a2h_hook_v1.5.5-fix.zip
 ```
 
 ## 仓库结构
@@ -99,8 +100,9 @@ a2h_hook_v1.5.5.zip
 
 ## 致谢
 
-- Dobby inline hook framework（仓库内带有已验证的静态库）；
-- KernelSU / Zygisk Next 生态。
+- KernelSU / ReKernelSU / ReSukiSU 等 Root 管理器生态；
+- Zygisk Next 生态；
+- Dobby inline hook framework（仅用于仓库内保留的 legacy/诊断构建，不进入默认发布包）。
 
 ## 开源协议
 

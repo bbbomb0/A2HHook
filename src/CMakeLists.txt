@@ -5,29 +5,30 @@ set(CMAKE_ANDROID_ARCH_ABI arm64-v8a)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(DOBBY_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/../libs/include" CACHE PATH "Dobby include directory")
-set(DOBBY_LIB_DIR "${CMAKE_SOURCE_DIR}/../libs" CACHE PATH "Dobby library directory")
-set(DOBBY_STATIC_LIB "${DOBBY_LIB_DIR}/libdobby.a")
+option(A2H_BUILD_LEGACY_INJECTION "Build retired Dobby preload/injector tools" OFF)
+if(A2H_BUILD_LEGACY_INJECTION)
+  set(DOBBY_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/../libs/include" CACHE PATH "Dobby include directory")
+  set(DOBBY_LIB_DIR "${CMAKE_SOURCE_DIR}/../libs" CACHE PATH "Dobby library directory")
+  set(DOBBY_STATIC_LIB "${DOBBY_LIB_DIR}/libdobby.a")
 
-add_library(a2h_preload SHARED a2h_hook.cpp)
-target_compile_options(a2h_preload PRIVATE -Os -fvisibility=hidden -Wall -Wextra)
-target_include_directories(a2h_preload PRIVATE
-    "${DOBBY_INCLUDE_DIR}"
-    "${CMAKE_SOURCE_DIR}")
-target_link_libraries(a2h_preload PRIVATE
-    "${DOBBY_STATIC_LIB}" dl log)
-set_target_properties(a2h_preload PROPERTIES
-    OUTPUT_NAME "a2h_hook"
-    PREFIX ""
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../zygisk/arm64-v8a"
-)
+  add_library(a2h_preload SHARED a2h_hook.cpp)
+  target_compile_options(a2h_preload PRIVATE -Os -fvisibility=hidden -Wall -Wextra)
+  target_include_directories(a2h_preload PRIVATE
+      "${DOBBY_INCLUDE_DIR}"
+      "${CMAKE_SOURCE_DIR}")
+  target_link_libraries(a2h_preload PRIVATE "${DOBBY_STATIC_LIB}" dl log)
+  set_target_properties(a2h_preload PROPERTIES
+      OUTPUT_NAME "a2h_hook"
+      PREFIX ""
+      LIBRARY_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../zygisk/arm64-v8a")
 
-add_executable(a2h_inject injector.c)
-target_compile_options(a2h_inject PRIVATE -Os -static -Wall -Wextra)
-target_link_options(a2h_inject PRIVATE -static)
-set_target_properties(a2h_inject PROPERTIES
-    OUTPUT_NAME "a2h_inject"
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../bin")
+  add_executable(a2h_inject injector.c)
+  target_compile_options(a2h_inject PRIVATE -Os -static -Wall -Wextra)
+  target_link_options(a2h_inject PRIVATE -static)
+  set_target_properties(a2h_inject PROPERTIES
+      OUTPUT_NAME "a2h_inject"
+      RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../bin")
+endif()
 
 # Runtime patcher (scans maps + process_vm_writev)
 add_executable(a2h_patch patcher_v3.c)

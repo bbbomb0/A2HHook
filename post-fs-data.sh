@@ -1,15 +1,16 @@
 #!/system/bin/sh
-# KSU early-init preload for the actual MediaTek audio HAL service.
+# Remove only this module's retired audio-service wrapper property. The native
+# patcher in service.sh is the single runtime path in v1.5.5-fix.
 MODDIR=${0%/*}
-REAL=/vendor/bin/hw/android.hardware.audio.service-aidl.mediatek
-PRELOAD="$MODDIR/zygisk/arm64-v8a/a2h_hook.so"
+WRAP_PROP=wrap.vendor.audio-hal-aidl
+current_wrap=$(getprop "$WRAP_PROP" 2>/dev/null)
 
-# The ptrace patcher remains the primary path. Only enable preload wrapping
-# when both the exact service binary and preload library are available.
-if [ -x "$REAL" ] && [ -f "$PRELOAD" ] && [ -x "$MODDIR/wrapper.sh" ]; then
+case "$current_wrap" in
+  /data/adb/modules/a2h_hook/wrapper.sh|/data/adb/modules_update/a2h_hook/wrapper.sh|"$MODDIR/wrapper.sh")
   if command -v resetprop >/dev/null 2>&1; then
-    resetprop -n wrap.vendor.audio-hal-aidl "$MODDIR/wrapper.sh"
+      resetprop --delete "$WRAP_PROP" 2>/dev/null || resetprop -n "$WRAP_PROP" '' 2>/dev/null
   else
-    setprop wrap.vendor.audio-hal-aidl "$MODDIR/wrapper.sh"
+      setprop "$WRAP_PROP" '' 2>/dev/null
   fi
-fi
+    ;;
+esac

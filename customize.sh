@@ -51,13 +51,11 @@ repair_backslash_entry "$MODDIR/bin\\a2h_trigger"
 repair_backslash_entry "$MODDIR/bin\\a2h_inject"
 repair_backslash_entry "$MODDIR/config\\packages.txt"
 repair_backslash_entry "$MODDIR/config\\state"
-repair_backslash_entry "$MODDIR/zygisk\\arm64-v8a\\a2h_hook.so"
 
 mkdir -p \
   "$MODDIR/bin" \
   "$MODDIR/config" \
-  "$MODDIR/webroot" \
-  "$MODDIR/zygisk/arm64-v8a" 2>/dev/null
+  "$MODDIR/webroot" 2>/dev/null
 
 # Preserve user configuration when the manager installs into modules_update.
 OLD_MODULE=/data/adb/modules/a2h_hook
@@ -78,11 +76,37 @@ if [ "$MODDIR" != "$OLD_MODULE" ] && [ -d "$OLD_MODULE/config" ]; then
   fi
 fi
 
-# A root-level action.sh creates the manager's Action button. v1.5.5 uses an
+# A root-level action.sh creates the manager's Action button. v1.5.5-fix uses an
 # internal command instead, so remove the legacy entry from both update paths.
 rm -f "$MODDIR/action.sh" 2>/dev/null
 rm -f "$MODDIR/share_logs.sh" "$MODDIR/config/.package_baseline" \
   "$MODDIR/config/config_generation" 2>/dev/null
+
+# v1.5.5-fix uses only the native patcher. Remove exact files from this
+# module's retired preload/inject paths; never use broad audio-module matches.
+for legacy_module in "$MODDIR" /data/adb/modules/a2h_hook /data/adb/modules_update/a2h_hook; do
+  [ -d "$legacy_module" ] || continue
+  rm -f \
+    "$legacy_module/bin/a2h_inject" \
+    "$legacy_module/zygisk/arm64-v8a.so" \
+    "$legacy_module/zygisk/arm64-v8a/a2h_hook.so" \
+    "$legacy_module/zygisk/libc++_shared.so" \
+    "$legacy_module/system/lib64/liba2h_hook.so" \
+    "$legacy_module/system/lib64/libc++_shared.so" 2>/dev/null
+done
+
+wrap_prop=wrap.vendor.audio-hal-aidl
+current_wrap=$(getprop "$wrap_prop" 2>/dev/null)
+case "$current_wrap" in
+  /data/adb/modules/a2h_hook/wrapper.sh|/data/adb/modules_update/a2h_hook/wrapper.sh|"$MODDIR/wrapper.sh")
+    if command -v resetprop >/dev/null 2>&1; then
+      resetprop --delete "$wrap_prop" 2>/dev/null || resetprop -n "$wrap_prop" '' 2>/dev/null
+    else
+      setprop "$wrap_prop" '' 2>/dev/null
+    fi
+    ;;
+esac
+
 for legacy_module in /data/adb/modules/a2h_hook /data/adb/modules_update/a2h_hook; do
   [ "$legacy_module" = "$MODDIR" ] && continue
   [ -d "$legacy_module" ] || continue
@@ -181,12 +205,13 @@ chmod 644 \
   "$MODDIR/config/package_states" \
   "$MODDIR/config/state" \
   "$MODDIR/webroot/index.html" \
-  "$MODDIR/webroot/coolapk.png" \
-  "$MODDIR/zygisk/arm64-v8a/a2h_hook.so" 2>/dev/null
+  "$MODDIR/webroot/coolapk.png" 2>/dev/null
 
 if [ -f "$MODDIR/webroot/index.html" ]; then
   ui_print "- WebUI 已就绪，请在 KernelSU / 模块栏直接打开"
 else
   ui_print "! WebUI 缺失: webroot/index.html"
 fi
-  ui_print "- A2HHook v1.5.5 安装完成"
+installed_version=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n 1)
+[ -n "$installed_version" ] || installed_version=unknown
+ui_print "- A2HHook $installed_version 安装完成"

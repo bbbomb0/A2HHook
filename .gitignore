@@ -19,7 +19,7 @@
 /碎/
 /dobby/
 
-# Commit the tested Dobby static lib only; ignore everything else in libs/
+# Commit the tested Dobby static lib only for optional legacy/diagnostic builds.
 /libs/*
 !/libs/include/
 !/libs/include/dobby.h
