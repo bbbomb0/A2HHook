@@ -2,6 +2,7 @@
 /build/
 /build_*/
 /.analysis/
+/compatibility_archive/
 /bin/*
 !/bin/a2h_apply
 /zygisk/
@@ -38,6 +39,10 @@
 *.tmp
 *.bak
 *.bak_*
+
+# Python caches
+__pycache__/
+*.py[cod]
 
 # IDE
 .vs/
