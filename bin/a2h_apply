@@ -12,6 +12,8 @@ CFG_DIR="$MODDIR/config"
 CFG_STATE="$CFG_DIR/state"
 CFG_PKGS="$CFG_DIR/packages.txt"
 CFG_STATES="$CFG_DIR/package_states"
+CFG_GENERATION="$CFG_DIR/config_generation"
+CFG_BASELINE="$CFG_DIR/.package_baseline"
 CFG_SNAPSHOT="$CFG_DIR/config_snapshot"
 CFG_REVISION="$CFG_DIR/revision"
 APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
@@ -133,6 +135,7 @@ restore_default_config_unlocked() {
   }
   commit_tmp "$restore_pkg_tmp" "$CFG_PKGS" 0644 || return 1
   commit_tmp "$restore_states_tmp" "$CFG_STATES" 0644 || return 1
+  rm -f "$CFG_BASELINE" 2>/dev/null
   CONFIG_RECOVERED=1
   log "config recovered defaults reason=$restore_reason"
   return 0
@@ -158,7 +161,10 @@ normalize_package_config() {
   norm_pkg_tmp="$CFG_DIR/.packages.$$"
   norm_states_raw="$CFG_DIR/.package_states.raw.$$"
   norm_states_tmp="$CFG_DIR/.package_states.$$"
-  rm -f "$norm_pkg_tmp" "$norm_states_raw" "$norm_states_tmp" 2>/dev/null
+  norm_prev_pkg_tmp="$CFG_DIR/.packages.previous.$$"
+  norm_baseline_tmp="$CFG_DIR/.package_baseline.$$"
+  rm -f "$norm_pkg_tmp" "$norm_states_raw" "$norm_states_tmp" \
+    "$norm_prev_pkg_tmp" "$norm_baseline_tmp" 2>/dev/null
   : > "$norm_pkg_tmp" || return 1
 
   norm_bad=0
@@ -253,9 +259,47 @@ normalize_package_config() {
   fi
 
   if [ "$norm_state_bad" != "0" ]; then
-    rm -f "$norm_pkg_tmp" "$norm_states_raw" "$norm_states_tmp" 2>/dev/null
+    rm -f "$norm_pkg_tmp" "$norm_states_raw" "$norm_states_tmp" \
+      "$norm_prev_pkg_tmp" "$norm_baseline_tmp" 2>/dev/null
     restore_default_config_unlocked "$norm_reason"
     return $?
+  fi
+
+  # WebUI commits names and switches together and advances config_generation.
+  # A root file manager normally changes only packages.txt. The hidden baseline
+  # lets us distinguish those paths without relying on mtimes or editor style.
+  norm_generation=$(cat "$CFG_GENERATION" 2>/dev/null | tr -d '\r' | head -n 1)
+  case "$norm_generation" in
+    ''|*[!0-9]*) norm_generation=0 ;;
+  esac
+  norm_state_signature=$(cksum < "$norm_states_raw" 2>/dev/null | awk '{print $1 ":" $2}')
+  norm_external_names=0
+  norm_baseline_available=0
+  if [ "$norm_states_missing" = "0" ] && [ -f "$CFG_BASELINE" ]; then
+    norm_baseline_lines=$(wc -l < "$CFG_BASELINE" 2>/dev/null | tr -d ' ')
+    norm_baseline_state=$(sed -n '11s/^states=//p' "$CFG_BASELINE" 2>/dev/null)
+    norm_baseline_generation=$(sed -n '12s/^generation=//p' "$CFG_BASELINE" 2>/dev/null)
+    case "$norm_baseline_state" in
+      *:*) ;;
+      *) norm_baseline_state=invalid ;;
+    esac
+    case "$norm_baseline_generation" in
+      ''|*[!0-9]*) norm_baseline_generation=invalid ;;
+    esac
+    if [ "$norm_baseline_lines" = "12" ] &&
+       [ "$norm_baseline_state" != "invalid" ] &&
+       [ "$norm_baseline_generation" != "invalid" ]; then
+      sed -n '1,10p' "$CFG_BASELINE" > "$norm_prev_pkg_tmp" 2>/dev/null || true
+      if [ "$(wc -l < "$norm_prev_pkg_tmp" 2>/dev/null | tr -d ' ')" = "10" ]; then
+        norm_baseline_available=1
+      fi
+    fi
+  fi
+  if [ "$norm_baseline_available" = "1" ] &&
+     ! cmp -s "$norm_pkg_tmp" "$norm_prev_pkg_tmp" 2>/dev/null &&
+     [ "$norm_state_signature" = "$norm_baseline_state" ] &&
+     [ "$norm_generation" = "$norm_baseline_generation" ]; then
+    norm_external_names=1
   fi
 
   # Normalize the state table and validate only enabled slots.  A disabled
@@ -269,8 +313,13 @@ normalize_package_config() {
   }
   norm_seen='|'
   norm_active=0
+  norm_external_changed=0
+  norm_external_enabled=0
   exec 3< "$norm_pkg_tmp"
   exec 4< "$norm_states_raw"
+  if [ "$norm_external_names" = "1" ]; then
+    exec 5< "$norm_prev_pkg_tmp"
+  fi
   norm_i=0
   while [ "$norm_i" -lt 10 ]; do
     IFS= read -r norm_pkg_line <&3 || norm_pkg_line=
@@ -280,6 +329,20 @@ normalize_package_config() {
       IFS= read -r norm_enabled <&4 || {
         [ -n "$norm_pkg_line" ] && norm_enabled=1 || norm_enabled=0
       }
+    fi
+    if [ "$norm_external_names" = "1" ]; then
+      IFS= read -r norm_previous_pkg <&5 || norm_previous_pkg=
+      if [ "$norm_pkg_line" != "$norm_previous_pkg" ]; then
+        norm_external_changed=$((norm_external_changed + 1))
+        norm_enabled=0
+        if [ -n "$norm_pkg_line" ] && valid_package "$norm_pkg_line"; then
+          norm_occurrences=$(awk -v package="$norm_pkg_line" '$0 == package { count++ } END { print count + 0 }' "$norm_pkg_tmp" 2>/dev/null)
+          if [ "$norm_occurrences" = "1" ]; then
+            norm_enabled=1
+            norm_external_enabled=$((norm_external_enabled + 1))
+          fi
+        fi
+      fi
     fi
     [ -n "$norm_pkg_line" ] || norm_enabled=0
     if [ "$norm_enabled" = "1" ]; then
@@ -304,16 +367,32 @@ normalize_package_config() {
   done
   exec 3<&-
   exec 4<&-
+  [ "$norm_external_names" = "1" ] && exec 5<&-
   rm -f "$norm_states_raw" 2>/dev/null
 
   if [ "$norm_state_bad" != "0" ]; then
-    rm -f "$norm_pkg_tmp" "$norm_states_tmp" 2>/dev/null
+    rm -f "$norm_pkg_tmp" "$norm_states_tmp" "$norm_prev_pkg_tmp" \
+      "$norm_baseline_tmp" 2>/dev/null
     restore_default_config_unlocked "$norm_reason"
     return $?
   fi
 
   commit_tmp "$norm_pkg_tmp" "$CFG_PKGS" 0644 || return 1
   commit_tmp "$norm_states_tmp" "$CFG_STATES" 0644 || return 1
+  norm_final_state_signature=$(cksum < "$CFG_STATES" 2>/dev/null | awk '{print $1 ":" $2}')
+  {
+    cat "$CFG_PKGS"
+    printf 'states=%s\n' "$norm_final_state_signature"
+    printf 'generation=%s\n' "$norm_generation"
+  } > "$norm_baseline_tmp" || {
+    rm -f "$norm_baseline_tmp" "$norm_prev_pkg_tmp" 2>/dev/null
+    return 1
+  }
+  commit_tmp "$norm_baseline_tmp" "$CFG_BASELINE" 0600 || return 1
+  rm -f "$norm_prev_pkg_tmp" 2>/dev/null
+  if [ "$norm_external_names" = "1" ]; then
+    log "external packages synchronized changed=$norm_external_changed enabled=$norm_external_enabled"
+  fi
   if [ "${A2H_QUIET_PREPARE:-0}" != "1" ]; then
     log "config normalized active=$norm_active total_nonempty=$norm_nonempty states_missing=$norm_states_missing"
   fi

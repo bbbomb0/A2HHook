@@ -6,11 +6,16 @@
 <meta name="color-scheme" content="light dark">
 <title>A2HHook</title>
 <style>
-:root{--bg:#f4f6f8;--surface:#ffffff;--surface2:#f8fafb;--line:#dfe5ea;--text:#15202b;--muted:#64707c;--accent:#0b7a59;--accent-soft:#e2f3ed;--danger:#c2413b;--warn:#946200;--shadow:0 10px 24px rgba(20,35,45,.07)}
-[data-theme=dark]{--bg:#101416;--surface:#171c1f;--surface2:#1f2529;--line:#2f383e;--text:#edf3f5;--muted:#9ba8af;--accent:#52d0a3;--accent-soft:#173930;--danger:#ff7f72;--warn:#f0bc63;--shadow:0 10px 28px rgba(0,0,0,.24)}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:16px;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}button,input{font:inherit}button{appearance:none}
-.shell{max-width:760px;margin:0 auto}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:2px 2px 14px}.brand{display:flex;align-items:center;gap:10px;min-width:0}.mark{width:38px;height:38px;border-radius:10px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:800;font-size:15px;flex:none}.brand-copy{min-width:0}.title{font-size:20px;font-weight:760;line-height:1.1;letter-spacing:0}.sub{font-size:12px;color:var(--muted);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.icon{width:38px;height:38px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--text);cursor:pointer;flex:none}.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:15px;margin-bottom:12px;box-shadow:var(--shadow)}.card h2{font-size:15px;line-height:1.2;margin:0 0 4px}.card p{margin:0;color:var(--muted);font-size:12px}.mode-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.seg{border:1px solid var(--line);border-radius:10px;background:var(--surface2);padding:10px 10px 11px;color:var(--muted);cursor:pointer;text-align:left;min-height:48px}.seg strong{display:block;font-size:14px;color:inherit}.seg small{display:block;margin-top:2px;font-size:11px;line-height:1.35}.seg.active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}.status{min-height:20px;margin-top:10px;font-size:12px;color:var(--muted)}.status.ok{color:var(--accent)}.status.err{color:var(--danger)}.status.warn{color:var(--warn)}.toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:15px 0 10px;flex-wrap:wrap}.count{font-size:12px;color:var(--muted)}.ghost{border:0;background:transparent;color:var(--accent);font-size:12px;cursor:pointer;padding:4px 0}.slots{display:grid;gap:8px}.slot{display:grid;grid-template-columns:34px minmax(0,1fr) 42px;gap:8px;align-items:center}.slot-num{color:var(--muted);font-size:12px;text-align:right;font-variant-numeric:tabular-nums}.slot-wrap{position:relative;min-width:0}.slot-input{width:100%;height:40px;padding:0 11px;border:1px solid var(--line);background:var(--surface2);border-radius:8px;color:var(--text);font:13px ui-monospace,SFMono-Regular,Menlo,monospace;outline:0}.slot-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}.slot-input.official{border-left:3px solid var(--accent)}.slot-input.invalid{border-color:var(--danger)}.slot-input.dup{border-color:var(--warn)}.slot-tag{position:absolute;right:8px;top:50%;transform:translateY(-50%);font-size:10px;color:var(--muted);pointer-events:none}.slot-toggle{position:relative;display:inline-flex;width:42px;height:26px;align-items:center;justify-content:center;cursor:pointer}.slot-toggle input{position:absolute;width:1px;height:1px;opacity:0}.toggle-track{position:relative;width:38px;height:22px;border:1px solid var(--line);border-radius:11px;background:var(--surface2);transition:background .16s ease,border-color .16s ease}.toggle-track:after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:transform .16s ease,background .16s ease}.slot-toggle input:checked+.toggle-track{border-color:var(--accent);background:var(--accent-soft)}.slot-toggle input:checked+.toggle-track:after{transform:translateX(16px);background:var(--accent)}.slot-toggle input:focus-visible+.toggle-track{box-shadow:0 0 0 3px var(--accent-soft)}.slot-toggle input:disabled+.toggle-track{opacity:.42}.slot-toggle:has(input:disabled){cursor:not-allowed}.actions{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:14px}.btn{height:42px;border-radius:9px;border:1px solid var(--line);background:var(--surface2);color:var(--text);font-weight:650;cursor:pointer}.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.btn:disabled{opacity:.55;cursor:wait}.cmd{display:none;margin-top:10px;padding:10px;border:1px dashed var(--line);border-radius:8px;background:var(--surface2)}.cmd.show{display:block}.cmd code{display:block;white-space:pre-wrap;word-break:break-all;font:11px/1.45 ui-monospace,monospace;color:var(--muted);max-height:120px;overflow:auto}.cmd button{margin-top:8px;width:100%;height:34px;border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:7px}.split{display:grid;grid-template-columns:1fr 1fr;gap:8px}.status-bar{display:flex;align-items:center;justify-content:space-between;gap:10px}.status-bar .status{flex:1;min-width:0;margin:0}.status-bar .btn{flex:none;height:36px;padding:0 12px;font-size:12px;white-space:nowrap}.status-bar .btn:disabled{opacity:.55;cursor:wait}.foot{text-align:center;color:var(--muted);font-size:11px;padding:8px 0 18px}
-@media(max-width:520px){body{padding:12px}.top{margin-bottom:12px}.title{font-size:18px}.card{padding:13px}.mode-row,.actions,.split{grid-template-columns:1fr}.slot{grid-template-columns:28px minmax(0,1fr) 42px}.slot-num{text-align:center}}
+:root{--bg:#f3f5f6;--surface:#fff;--field:#f7f9fa;--line:#dce2e6;--text:#172027;--muted:#68757d;--accent:#08775a;--soft:#e1f2ec;--danger:#bd3f39;--warn:#916100;--shadow:0 8px 20px rgba(25,38,45,.07)}
+[data-theme=dark]{--bg:#101416;--surface:#181d20;--field:#20262a;--line:#30383d;--text:#edf2f4;--muted:#9aa6ac;--accent:#53cfa5;--soft:#17392f;--danger:#ff8177;--warn:#efbc66;--shadow:0 8px 24px rgba(0,0,0,.24)}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;padding:8px;background:var(--bg);color:var(--text);font:13px/1.35 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}button,input{font:inherit}button{appearance:none}[hidden]{display:none!important}
+.shell{width:min(100%,620px);margin:0 auto}.top{height:42px;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;padding:0 2px}.brand{display:flex;align-items:center;gap:8px;min-width:0}.mark{width:34px;height:34px;border-radius:7px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:800;flex:none}.brand-copy{min-width:0}.title{font-size:17px;font-weight:750;line-height:1.05}.sub{margin-top:2px;color:var(--muted);font-size:10px;white-space:nowrap}.top-actions{display:flex;align-items:center;gap:6px}.version{color:var(--muted);font-size:10px}.icon{width:34px;height:34px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--text);display:grid;place-items:center;cursor:pointer;font-size:17px}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px;box-shadow:var(--shadow)}.mode{height:38px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 4px 7px;border-bottom:1px solid var(--line)}.mode-copy{display:flex;align-items:baseline;gap:7px;min-width:0}.mode-title{font-size:14px;font-weight:700}.mode-value{color:var(--muted);font-size:11px}.switch{position:relative;display:inline-flex;width:42px;height:26px;align-items:center;justify-content:center;cursor:pointer;flex:none}.switch input{position:absolute;width:1px;height:1px;opacity:0}.track{position:relative;width:40px;height:24px;border:1px solid var(--line);border-radius:12px;background:var(--field);pointer-events:none;transition:background .16s ease,border-color .16s ease}.track:after{content:"";position:absolute;left:2px;top:2px;width:18px;height:18px;border-radius:50%;background:var(--muted);transition:transform .16s ease,background .16s ease}.switch input:checked+.track{border-color:var(--accent);background:var(--soft)}.switch input:checked+.track:after{transform:translateX(16px);background:var(--accent)}.switch input:focus-visible+.track{box-shadow:0 0 0 3px var(--soft)}
+.toolbar{height:34px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 1px}.list-title{font-size:12px;font-weight:650}.count{margin-left:6px;color:var(--muted);font-size:10px}.reset{width:30px;height:28px;border:0;border-radius:6px;background:transparent;color:var(--accent);font-size:18px;cursor:pointer}.slots{display:grid;gap:4px}.slot{height:34px;display:grid;grid-template-columns:20px minmax(0,1fr) 40px;gap:4px;align-items:center}.slot-num{color:var(--muted);font-size:10px;text-align:center;font-variant-numeric:tabular-nums}.slot-wrap{position:relative;min-width:0}.slot-input{width:100%;height:32px;padding:0 8px;border:1px solid var(--line);border-radius:6px;background:var(--field);color:var(--text);font:12px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0;outline:0}.slot-input.official{border-left:3px solid var(--accent);padding-right:30px}.slot-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--soft)}.slot-input.invalid{border-color:var(--danger)}.slot-input.dup{border-color:var(--warn)}.slot-tag{position:absolute;right:7px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:9px;pointer-events:none}.slot-switch{width:40px;height:26px}.slot-switch .track{width:36px;height:22px}.slot-switch .track:after{width:16px;height:16px}.slot-switch input:checked+.track:after{transform:translateX(14px)}.slot-switch input:disabled+.track{opacity:.4}.slot-switch input:disabled{cursor:not-allowed}
+.author{height:34px;display:flex;align-items:center;justify-content:center;gap:10px;margin-top:4px;color:var(--muted)}.author-mark{font-size:10px;white-space:nowrap}.socials{display:flex;align-items:center;gap:3px}.social-link{width:28px;height:28px;display:grid;place-items:center;border-radius:6px;color:var(--muted);text-decoration:none;transition:color .16s ease,background .16s ease}.social-link:hover,.social-link:focus-visible{color:var(--accent);background:var(--soft);outline:0}.social-link svg{width:17px;height:17px;fill:currentColor}.coolapk-icon{width:19px;height:19px;display:block}
+.toast{position:fixed;z-index:20;left:50%;bottom:max(14px,env(safe-area-inset-bottom));transform:translate(-50%,12px);width:min(calc(100% - 24px),520px);padding:9px 12px;border:1px solid var(--line);border-radius:7px;background:var(--surface);box-shadow:0 10px 28px rgba(0,0,0,.18);color:var(--text);font-size:12px;text-align:center;opacity:0;visibility:hidden;transition:opacity .16s ease,transform .16s ease}.toast.show{opacity:1;visibility:visible;transform:translate(-50%,0)}.toast.ok{color:var(--accent)}.toast.err{color:var(--danger)}.toast.warn{color:var(--warn)}
+.cmd-panel{position:fixed;z-index:30;inset:0;padding:20px;background:rgba(0,0,0,.42);display:grid;place-items:center}.cmd-box{width:min(100%,520px);max-height:75vh;padding:12px;border-radius:8px;background:var(--surface);border:1px solid var(--line)}.cmd-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-weight:700}.cmd-close{width:30px;height:30px;border:0;background:transparent;color:var(--muted);font-size:20px;cursor:pointer}.cmd-box code{display:block;max-height:45vh;overflow:auto;padding:9px;border-radius:6px;background:var(--field);color:var(--muted);font:10px/1.4 ui-monospace,monospace;white-space:pre-wrap;word-break:break-all}.cmd-copy{width:100%;height:34px;margin-top:8px;border:0;border-radius:6px;background:var(--accent);color:#fff;font-weight:650;cursor:pointer}
+@media(max-height:580px){body{padding:5px}.top{height:36px;margin-bottom:4px}.mark,.icon{width:30px;height:30px}.panel{padding:6px}.mode{height:34px}.toolbar{height:30px}.slots{gap:2px}.slot{height:30px}.slot-input{height:29px}}
 </style>
 </head>
 <body>
@@ -23,45 +28,51 @@
         <div class="sub">A2HHook · REDMI K80 Ultra</div>
       </div>
     </div>
-    <button class="icon" id="theme" title="切换主题">◐</button>
+    <div class="top-actions">
+      <span class="version">v1.5.5</span>
+      <button class="icon" id="theme" type="button" title="切换主题" aria-label="切换主题">☼</button>
+    </div>
   </header>
 
-  <section class="card">
-    <h2>工作模式</h2>
-    <p>全局模式覆盖所有应用；白名单模式只对下面 10 个包名生效。</p>
-    <div class="mode-row" role="tablist" aria-label="模式切换">
-      <button class="seg" id="globalBtn" type="button"><strong>全局触感</strong><small>所有应用直接启用</small></button>
-      <button class="seg" id="listBtn" type="button"><strong>白名单</strong><small>仅匹配选中应用</small></button>
+  <section class="panel">
+    <div class="mode">
+      <div class="mode-copy">
+        <span class="mode-title">全局模式</span>
+        <span class="mode-value" id="modeValue">关闭 · 白名单</span>
+      </div>
+      <label class="switch" title="全局模式">
+        <input id="globalMode" type="checkbox" role="switch" aria-label="全局模式">
+        <span class="track"></span>
+      </label>
     </div>
-    <div class="status" id="status"></div>
-  </section>
-
-  <section class="card">
-    <h2>白名单包名</h2>
-    <p>默认包含官方 6 个包名；10 个槽位都可按需修改。空行表示停用该槽位。</p>
     <div class="toolbar">
-      <span class="count" id="count"></span>
-      <button class="ghost" id="reset" type="button">恢复官方默认</button>
+      <div><span class="list-title">应用白名单</span><span class="count" id="count"></span></div>
+      <button class="reset" id="reset" type="button" title="恢复官方默认" aria-label="恢复官方默认">↺</button>
     </div>
     <div class="slots" id="slots"></div>
-    <div class="actions">
-      <button class="btn" id="backup" type="button">导出备份</button>
-      <button class="btn" id="restore" type="button">导入备份</button>
-    </div>
-    <input class="file" type="file" id="file" accept="application/json,.json" hidden>
-    <div class="cmd" id="cmd"><code id="cmdText"></code><button id="copy" type="button">复制命令</button></div>
   </section>
-
-  <section class="card">
-    <h2>状态</h2>
-    <div class="status-bar">
-      <div class="status" id="runtime">等待读取配置</div>
-      <button class="btn" id="shareLogs" type="button">分享日志</button>
-    </div>
-  </section>
-
-  <div class="foot">A2HHook v1.5.4</div>
+  <footer class="author">
+    <span class="author-mark">© 2026 @bb_bomb</span>
+    <nav class="socials" aria-label="作者链接">
+      <a class="social-link" href="https://www.coolapk.com/u/21330825" data-intent-uri="coolmarket://www.coolapk.com/u/21330825" target="_blank" rel="noopener noreferrer" title="酷安主页" aria-label="打开作者酷安主页"><img class="coolapk-icon" src="coolapk.png" alt="" width="19" height="19" draggable="false"></a>
+      <a class="social-link" href="https://github.com/bbbomb0/A2HHook" target="_blank" rel="noopener noreferrer" title="bbbomb0/A2HHook" aria-label="打开 bbbomb0/A2HHook GitHub 项目">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg>
+      </a>
+      <a class="social-link" href="https://qm.qq.com/q/5YefpzJGsE" data-intent-uri="mqqapi://card/show_pslcard?src_type=internal&amp;version=1&amp;uin=778505328&amp;card_type=group&amp;source=external" target="_blank" rel="noopener noreferrer" title="QQ群 778505328" aria-label="加入 QQ群 778505328">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.395 15.035a40 40 0 0 0-.803-2.264l-1.079-2.695c.001-.032.014-.562.014-.836C19.526 4.632 17.351 0 12 0S4.474 4.632 4.474 9.241c0 .274.013.804.014.836l-1.08 2.695a39 39 0 0 0-.802 2.264c-1.021 3.283-.69 4.643-.438 4.673.54.065 2.103-2.472 2.103-2.472 0 1.469.756 3.387 2.394 4.771-.612.188-1.363.479-1.845.835-.434.32-.379.646-.301.778.343.578 5.883.369 7.482.189 1.6.18 7.14.389 7.483-.189.078-.132.132-.458-.301-.778-.483-.356-1.233-.646-1.846-.836 1.637-1.384 2.393-3.302 2.393-4.771 0 0 1.563 2.537 2.103 2.472.251-.03.581-1.39-.438-4.673"/></svg>
+      </a>
+    </nav>
+  </footer>
 </main>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<section class="cmd-panel" id="cmdPanel" hidden>
+  <div class="cmd-box">
+    <div class="cmd-head"><span>手动应用命令</span><button class="cmd-close" id="cmdClose" type="button" title="关闭" aria-label="关闭">×</button></div>
+    <code id="cmdText"></code>
+    <button class="cmd-copy" id="copy" type="button">复制命令</button>
+  </div>
+</section>
 
 <script>
 (function(){
@@ -69,371 +80,296 @@
   const OFFICIAL=['com.kugou.android','com.tencent.qqmusic','com.netease.cloudmusic','cn.kuwo.player','com.miui.player','com.luna.music'];
   const DEFAULTS=OFFICIAL.concat(['','','','']);
   const LABELS=['酷狗音乐','QQ音乐','网易云音乐','酷我音乐','小米音乐','Luna音乐','自定义 1','自定义 2','自定义 3','自定义 4'];
-  const LIMITS=[63,63,63,63,63,63,63,63,63,63];
-  const STORAGE_KEY='a2h_config_v4';
-  const LEGACY_STORAGE_KEY='a2h_config_v3';
-  const BACKUP_FORMAT='a2hhook-backup';
-  const APPLY_DELAY=200;
+  const STORAGE_KEY='a2h_config_v5';
+  const LEGACY_STORAGE_KEY='a2h_config_v4';
+  const APPLY_DELAY=180;
   let mode='whitelist';
   let slots=DEFAULTS.slice();
   let slotEnabled=[true,true,true,true,true,true,false,false,false,false];
+  let configRevision=0;
   let applyTimer=0;
   let applyPending=false;
   let applyBusy=false;
   let applyReason='';
-  let shareBusy=false;
-  let configRevision=0;
   let lastAppliedKey='';
+  let toastTimer=0;
   const $=id=>document.getElementById(id);
 
   function normalizeSlot(value){return String(value||'').trim();}
-  function cloneSlots(arr){
-    const out=DEFAULTS.slice();
-    (Array.isArray(arr)?arr:[]).slice(0,10).forEach((value,index)=>{out[index]=normalizeSlot(value);});
-    return out;
+  function cloneSlots(values){
+    const result=DEFAULTS.slice();
+    (Array.isArray(values)?values:[]).slice(0,10).forEach((value,index)=>{result[index]=normalizeSlot(value);});
+    return result;
   }
-  function cloneEnabled(arr, values){
-    const source=Array.isArray(values)?values:slots;
-    const out=source.slice(0,10).map(value=>Boolean(normalizeSlot(value)));
-    while(out.length<10) out.push(false);
-    if(!Array.isArray(arr)) return out;
-    arr.slice(0,10).forEach((value,index)=>{
-      if(value===true || value===1 || value==='1' || value==='true') out[index]=true;
-      else if(value===false || value===0 || value==='0' || value==='false') out[index]=false;
+  function cloneEnabled(values,names){
+    const packages=Array.isArray(names)?names:slots;
+    const result=packages.slice(0,10).map(value=>Boolean(normalizeSlot(value)));
+    while(result.length<10) result.push(false);
+    if(!Array.isArray(values)) return result;
+    values.slice(0,10).forEach((value,index)=>{
+      if(value===true || value===1 || value==='1' || value==='true') result[index]=true;
+      else if(value===false || value===0 || value==='0' || value==='false') result[index]=false;
     });
-    return out;
+    return result;
   }
-  function isValidPackage(value){return /^[A-Za-z][A-Za-z0-9_.]*\.[A-Za-z0-9_.]+$/.test(value) && value.length < 64;}
+  function isValidPackage(value){return value.length<64 && /^[A-Za-z][A-Za-z0-9_.]*\.[A-Za-z0-9_.]+$/.test(value);}
 
   function loadLocal(){
     try{
-      const raw=localStorage.getItem(STORAGE_KEY) || localStorage.getItem(LEGACY_STORAGE_KEY);
+      const raw=localStorage.getItem(STORAGE_KEY)||localStorage.getItem(LEGACY_STORAGE_KEY);
       if(!raw) return;
       const data=JSON.parse(raw);
-      if(data && Array.isArray(data.packages)){
+      if(data&&Array.isArray(data.packages)){
         slots=cloneSlots(data.packages);
         slotEnabled=cloneEnabled(data.enabled,slots);
       }
-      mode=data && data.mode==='global' ? 'global' : 'whitelist';
-    }catch(e){}
+      mode=data&&data.mode==='global'?'global':'whitelist';
+    }catch(error){}
   }
-
   function saveLocal(){
-    try{localStorage.setItem(STORAGE_KEY,JSON.stringify({version:4,mode,packages:slots,enabled:slotEnabled,updatedAt:new Date().toISOString()}));}catch(e){}
+    try{localStorage.setItem(STORAGE_KEY,JSON.stringify({version:5,mode,packages:slots,enabled:slotEnabled}));}catch(error){}
   }
-
-  function setNotice(text, kind){
-    const node=$('status');
-    node.className='status'+(kind?' '+kind:'');
-    node.textContent=text;
+  function setNotice(text,kind,sticky){
+    const toast=$('toast');
+    if(toastTimer) clearTimeout(toastTimer);
+    toast.className='toast show'+(kind?' '+kind:'');
+    toast.textContent=text;
+    if(!sticky) toastTimer=setTimeout(()=>{toast.className='toast';},kind==='err'?4200:2200);
   }
+  function hideCommand(){ $('cmdPanel').hidden=true; }
 
-  function render(){
-    $('globalBtn').classList.toggle('active',mode==='global');
-    $('listBtn').classList.toggle('active',mode==='whitelist');
-    const root=$('slots');
-    root.innerHTML='';
+  function renderMode(){
+    const global=mode==='global';
+    $('globalMode').checked=global;
+    $('modeValue').textContent=global?'开启 · 全局':'关闭 · 白名单';
+  }
+  function updateCount(){
+    let active=0;
+    slots.forEach((value,index)=>{if(slotEnabled[index]&&normalizeSlot(value)) active++;});
+    $('count').textContent=active+' / 10';
+  }
+  function refreshValidation(){
+    const values=slots.map(normalizeSlot);
+    const counts={};
+    values.forEach((value,index)=>{if(value&&slotEnabled[index]) counts[value]=(counts[value]||0)+1;});
+    document.querySelectorAll('.slot-input').forEach((input,index)=>{
+      const value=normalizeSlot(input.value);
+      const invalid=Boolean(value)&&!isValidPackage(value);
+      const duplicate=Boolean(value)&&slotEnabled[index]&&counts[value]>1;
+      input.classList.toggle('invalid',invalid);
+      input.classList.toggle('dup',!invalid&&duplicate);
+    });
+  }
+  function renderSlots(){
     slots=cloneSlots(slots);
     slotEnabled=cloneEnabled(slotEnabled,slots);
-    slots.forEach((value, index)=>{
+    const root=$('slots');
+    root.innerHTML='';
+    slots.forEach((value,index)=>{
       const row=document.createElement('div');
       row.className='slot';
-      const num=document.createElement('span');
-      num.className='slot-num';
-      num.textContent=String(index+1).padStart(2,'0');
+      const number=document.createElement('span');
+      number.className='slot-num';
+      number.textContent=String(index+1).padStart(2,'0');
       const wrap=document.createElement('div');
       wrap.className='slot-wrap';
       const input=document.createElement('input');
       input.className='slot-input'+(index<6?' official':'');
       input.value=value;
-      input.placeholder=LABELS[index]+' · '+LIMITS[index]+' 字符';
+      input.placeholder=LABELS[index];
+      input.title=LABELS[index];
       input.autocomplete='off';
       input.spellcheck=false;
-      input.maxLength=LIMITS[index];
-      let committedValue=value;
+      input.maxLength=63;
+      let committed=value;
+      const toggle=document.createElement('input');
       input.addEventListener('input',()=>{
         slots[index]=normalizeSlot(input.value);
-        if(!slots[index]) slotEnabled[index]=false;
+        if(!slots[index]){
+          slotEnabled[index]=false;
+          toggle.checked=false;
+        }
         toggle.disabled=!slots[index];
-        if(!slots[index]) toggle.checked=false;
         updateCount();
         refreshValidation();
-        $('cmd').classList.remove('show');
+        hideCommand();
       });
       const commitInput=()=>{
         const next=normalizeSlot(input.value);
-        if(next===committedValue) return;
-        committedValue=next;
+        if(next===committed) return;
+        committed=next;
         slots[index]=next;
-        if(!next){
-          slotEnabled[index]=false;
-          toggle.checked=false;
-          toggle.disabled=true;
-        }else{
-          toggle.disabled=false;
-        }
+        if(!next){slotEnabled[index]=false;toggle.checked=false;toggle.disabled=true;}
+        else toggle.disabled=false;
         configRevision++;
         saveLocal();
         updateCount();
         refreshValidation();
-        $('cmd').classList.remove('show');
         requestApply('包名已更新');
       };
       input.addEventListener('change',commitInput);
       input.addEventListener('blur',commitInput);
-      input.addEventListener('keydown',event=>{
-        if(event.key==='Enter'){
-          event.preventDefault();
-          input.blur();
-        }
-      });
+      input.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();input.blur();}});
       const toggleLabel=document.createElement('label');
-      toggleLabel.className='slot-toggle';
-      toggleLabel.title='启用此槽位';
-      const toggle=document.createElement('input');
+      toggleLabel.className='switch slot-switch';
+      toggleLabel.title='启用 '+LABELS[index];
       toggle.type='checkbox';
       toggle.setAttribute('role','switch');
       toggle.setAttribute('aria-label',LABELS[index]+'开关');
-      toggle.checked=Boolean(slotEnabled[index] && value);
+      toggle.checked=Boolean(slotEnabled[index]&&value);
       toggle.disabled=!value;
       toggle.addEventListener('change',()=>{
         const current=normalizeSlot(input.value);
-        if(!current){
-          toggle.checked=false;
-          slotEnabled[index]=false;
-          updateCount();
-          return;
+        if(!current){toggle.checked=false;slotEnabled[index]=false;return;}
+        if(toggle.checked&&!isValidPackage(current)){
+          toggle.checked=false;slotEnabled[index]=false;refreshValidation();setNotice('请先填写有效包名','err');return;
         }
-        if(toggle.checked && !isValidPackage(current)){
-          toggle.checked=false;
-          slotEnabled[index]=false;
-          refreshValidation();
-          setNotice('请先填写有效的包名，再开启该槽位。','err');
-          return;
-        }
-        if(toggle.checked && slotEnabled.some((enabled, other)=>
-          other!==index && enabled && normalizeSlot(slots[other])===current)){
-          toggle.checked=false;
-          slotEnabled[index]=false;
-          refreshValidation();
-          setNotice('启用槽位不能使用重复包名，请先修改。','err');
-          return;
+        if(toggle.checked&&slotEnabled.some((enabled,other)=>other!==index&&enabled&&normalizeSlot(slots[other])===current)){
+          toggle.checked=false;slotEnabled[index]=false;refreshValidation();setNotice('启用槽位不能重复','err');return;
         }
         slotEnabled[index]=toggle.checked;
         configRevision++;
         saveLocal();
         updateCount();
         refreshValidation();
-        $('cmd').classList.remove('show');
+        hideCommand();
         requestApply('槽位 '+String(index+1)+' 已更新');
       });
-      toggleLabel.appendChild(toggle);
       const track=document.createElement('span');
-      track.className='toggle-track';
-      toggleLabel.appendChild(track);
-      const tag=document.createElement('span');
-      tag.className='slot-tag';
-      tag.textContent=index<6?'官方':'';
+      track.className='track';
+      toggleLabel.append(toggle,track);
       wrap.appendChild(input);
-      wrap.appendChild(tag);
-      row.appendChild(num);
-      row.appendChild(wrap);
-      row.appendChild(toggleLabel);
+      if(index<6){
+        const tag=document.createElement('span');
+        tag.className='slot-tag';
+        tag.textContent='官';
+        wrap.appendChild(tag);
+      }
+      row.append(number,wrap,toggleLabel);
       root.appendChild(row);
     });
     updateCount();
-    saveLocal();
     refreshValidation();
   }
+  function render(){renderMode();renderSlots();saveLocal();}
 
-  function updateCount(){
-    let count=0;
-    slots.forEach((value,index)=>{if(slotEnabled[index] && normalizeSlot(value)) count++;});
-    $('count').textContent=count+' / 10 已启用';
+  function shellQuote(value){return "'"+String(value).replace(/'/g,"'\"'\"'")+"'";}
+  function snapshotConfig(){
+    const packages=cloneSlots(slots);
+    return {mode:mode==='global'?'global':'whitelist',packages,enabled:cloneEnabled(slotEnabled,packages),generation:String(Date.now())};
+  }
+  function snapshotKey(data){return JSON.stringify({mode:data.mode,packages:data.packages,enabled:data.enabled});}
+  function validationMessage(data){
+    const seen=new Set();
+    for(let index=0;index<10;index++){
+      const value=normalizeSlot(data.packages[index]);
+      if(!data.enabled[index]||!value) continue;
+      if(!isValidPackage(value)) return '第 '+String(index+1)+' 槽包名无效';
+      if(seen.has(value)) return '启用槽位不能重复';
+      seen.add(value);
+    }
+    return '';
   }
 
-  function refreshValidation(){
-    const values=slots.map(normalizeSlot);
-    const count={};
-    values.forEach((v,index)=>{
-      if(v && slotEnabled[index]) count[v]=(count[v]||0)+1;
-    });
-    [...document.querySelectorAll('.slot-input')].forEach((input, index)=>{
-      const value=normalizeSlot(input.value);
-      const nonempty=Boolean(value);
-      const invalid=nonempty && (!isValidPackage(value) || value.length > LIMITS[index]);
-      const dup=nonempty && slotEnabled[index] && count[value] > 1;
-      input.classList.toggle('invalid', invalid);
-      input.classList.toggle('dup', !invalid && dup);
-    });
-  }
-
-  function shellQuote(s){
-    return "'" + String(s).replace(/'/g, "'\"'\"'") + "'";
-  }
-
-  // Keep persistent names and switch states separate from the effective runtime list.
-  // The short-lived config lock is shared with a2h_apply so readers never see
-  // packages, switches and mode from different revisions.
-  function buildWritePackagesCmd(snapshot, readable){
-    const data=snapshot || snapshotConfig();
-    const values=data.packages.slice(0,10).map(v=>normalizeSlot(v));
-    const states=data.enabled.slice(0,10).map(v=>v?'1':'0');
+  function buildWritePackagesCmd(snapshot,readable){
+    const data=snapshot||snapshotConfig();
+    const values=data.packages.slice(0,10).map(normalizeSlot);
+    const states=data.enabled.slice(0,10).map(value=>value?'1':'0');
     while(values.length<10) values.push('');
     while(states.length<10) states.push('0');
     const names=values.map(shellQuote).join(' ');
     const flags=states.map(shellQuote).join(' ');
     const lines=[
-      "umask 077;",
-      "cfg=/data/adb/modules/a2h_hook/config; cfg_lock=/data/local/tmp/a2h_config.lock;",
-      "mkdir -p \"$cfg\" /data/local/tmp || exit 74;",
-      "tag=$$; pkg_tmp=\"$cfg/.packages.$tag\"; state_tmp=\"$cfg/.package_states.$tag\"; mode_tmp=\"$cfg/.state.$tag\";",
-      "cfg_lock_alive() { cfg_owner=$(cat \"$cfg_lock/pid\" 2>/dev/null); case \"$cfg_owner\" in ''|*[!0-9]*) return 1 ;; esac; kill -0 \"$cfg_owner\" 2>/dev/null; };",
-      "cfg_cleanup() { rm -f \"$pkg_tmp\" \"$state_tmp\" \"$mode_tmp\" 2>/dev/null; };",
-      "cfg_release() { cfg_owner=$(cat \"$cfg_lock/pid\" 2>/dev/null); [ \"$cfg_owner\" = \"$$\" ] || return 1; rm -f \"$cfg_lock/pid\" 2>/dev/null; rmdir \"$cfg_lock\" 2>/dev/null || true; return 0; };",
-      "cfg_abort() { cfg_owner=$(cat \"$cfg_lock/pid\" 2>/dev/null); if [ \"$cfg_owner\" = \"$$\" ]; then rm -f \"$cfg_lock/pid\" 2>/dev/null; rmdir \"$cfg_lock\" 2>/dev/null; fi; cfg_cleanup; };",
+      'umask 077;',
+      'cfg=/data/adb/modules/a2h_hook/config; cfg_lock=/data/local/tmp/a2h_config.lock;',
+      'mkdir -p "$cfg" /data/local/tmp || exit 74;',
+      'tag=$$; pkg_tmp="$cfg/.packages.$tag"; state_tmp="$cfg/.package_states.$tag"; mode_tmp="$cfg/.state.$tag"; gen_tmp="$cfg/.generation.$tag";',
+      'cfg_lock_alive() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); case "$cfg_owner" in \'\'|*[!0-9]*) return 1 ;; esac; kill -0 "$cfg_owner" 2>/dev/null; };',
+      'cfg_cleanup() { rm -f "$pkg_tmp" "$state_tmp" "$mode_tmp" "$gen_tmp" 2>/dev/null; };',
+      'cfg_release() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); [ "$cfg_owner" = "$$" ] || return 1; rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null || true; };',
+      'cfg_abort() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); if [ "$cfg_owner" = "$$" ]; then rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; fi; cfg_cleanup; };',
       "trap 'cfg_abort' 0 1 2 15;",
-      "printf '%s\\n' "+names+" > \"$pkg_tmp\" || exit 74;",
-      "printf '%s\\n' "+flags+" > \"$state_tmp\" || exit 74;",
-      "printf '%s\\n' "+shellQuote(data.mode==='global'?'enabled':'disabled')+" > \"$mode_tmp\" || exit 74;",
-      "chmod 600 \"$pkg_tmp\" \"$state_tmp\" \"$mode_tmp\" || exit 74;",
-      "cfg_wait=0; while ! mkdir \"$cfg_lock\" 2>/dev/null; do if cfg_lock_alive; then cfg_wait=$((cfg_wait + 1)); [ \"$cfg_wait\" -lt 6 ] || exit 75; sleep 1; continue; fi; sleep 1; cfg_lock_alive && continue; sleep 1; cfg_lock_alive && continue; rm -f \"$cfg_lock/pid\" 2>/dev/null; rmdir \"$cfg_lock\" 2>/dev/null || true; cfg_wait=$((cfg_wait + 1)); [ \"$cfg_wait\" -lt 6 ] || exit 75; done;",
-      "printf '%s\\n' \"$$\" > \"$cfg_lock/pid\" 2>/dev/null || { rm -f \"$cfg_lock/pid\" 2>/dev/null; rmdir \"$cfg_lock\" 2>/dev/null; exit 75; };",
-      "cfg_owner=$(cat \"$cfg_lock/pid\" 2>/dev/null); [ \"$cfg_owner\" = \"$$\" ] || { rm -f \"$cfg_lock/pid\" 2>/dev/null; rmdir \"$cfg_lock\" 2>/dev/null; exit 75; };",
-      "mv -f \"$pkg_tmp\" \"$cfg/packages.txt\" || exit 74;",
-      "mv -f \"$state_tmp\" \"$cfg/package_states\" || exit 74;",
-      "mv -f \"$mode_tmp\" \"$cfg/state\" || exit 74;",
-      "cfg_release || exit 75; trap - 0 1 2 15;"
+      "printf '%s\\n' "+names+' > "$pkg_tmp" || exit 74;',
+      "printf '%s\\n' "+flags+' > "$state_tmp" || exit 74;',
+      "printf '%s\\n' "+shellQuote(data.mode==='global'?'enabled':'disabled')+' > "$mode_tmp" || exit 74;',
+      "printf '%s\\n' "+shellQuote(data.generation)+' > "$gen_tmp" || exit 74;',
+      'chmod 600 "$pkg_tmp" "$state_tmp" "$mode_tmp" "$gen_tmp" || exit 74;',
+      'cfg_wait=0; while ! mkdir "$cfg_lock" 2>/dev/null; do if cfg_lock_alive; then cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -lt 6 ] || exit 75; sleep 1; continue; fi; sleep 1; cfg_lock_alive && continue; sleep 1; cfg_lock_alive && continue; rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null || true; cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -lt 6 ] || exit 75; done;',
+      'printf \'%s\\n\' "$$" > "$cfg_lock/pid" 2>/dev/null || { rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; exit 75; };',
+      'cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); [ "$cfg_owner" = "$$" ] || { rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; exit 75; };',
+      'mv -f "$gen_tmp" "$cfg/config_generation" || exit 74;',
+      'mv -f "$pkg_tmp" "$cfg/packages.txt" || exit 74;',
+      'mv -f "$state_tmp" "$cfg/package_states" || exit 74;',
+      'mv -f "$mode_tmp" "$cfg/state" || exit 74;',
+      'cfg_release || exit 75; trap - 0 1 2 15;'
     ];
-    return readable ? '(\n  '+lines.join('\n  ')+'\n)' : '( '+lines.join(' ')+' )';
+    return readable?'(\n  '+lines.join('\n  ')+'\n)':'( '+lines.join(' ')+' )';
   }
-
   function buildCommand(state,snapshot){
-    const data=snapshot || snapshotConfig();
-    const next=Object.assign({},data,{mode:state==='enabled'?'global':'whitelist'});
-    return [
-      '# A2HHook apply command',
-      buildWritePackagesCmd(next,true),
-      'sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state)
-    ].join('\n');
+    const data=snapshot||snapshotConfig();
+    data.mode=state==='enabled'?'global':'whitelist';
+    return ['# A2HHook apply command',buildWritePackagesCmd(data,true),'sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state)].join('\n');
   }
 
   function findExecBridge(){
-    if(window.KSU && typeof window.KSU.exec==='function') return {owner:window.KSU, fn:window.KSU.exec};
-    if(window.ksu && typeof window.ksu.exec==='function') return {owner:window.ksu, fn:window.ksu.exec};
-    if(typeof window.exec==='function') return {owner:window, fn:window.exec};
+    if(window.KSU&&typeof window.KSU.exec==='function') return {owner:window.KSU,fn:window.KSU.exec};
+    if(window.ksu&&typeof window.ksu.exec==='function') return {owner:window.ksu,fn:window.ksu.exec};
+    if(typeof window.exec==='function') return {owner:window,fn:window.exec};
     return null;
   }
-
   function assertExecOk(result){
     let data=result;
-    if(typeof data==='string'){
-      try{data=JSON.parse(data);}catch(e){return;}
-    }
-    if(typeof data==='number' && data!==0) throw new Error('exit '+data);
-    if(!data || typeof data!=='object') return;
-    const code=data.code ?? data.exitCode ?? data.status ?? data.errno;
-    if(data.success===false) throw new Error('exec failed');
-    if(code !== undefined && Number(code)!==0) throw new Error('exit '+code);
+    if(typeof data==='string'){try{data=JSON.parse(data);}catch(error){return;}}
+    if(typeof data==='number'&&data!==0) throw new Error('exit '+data);
+    if(!data||typeof data!=='object') return;
+    const code=data.code??data.exitCode??data.status??data.errno;
+    if(data.success===false||(code!==undefined&&Number(code)!==0)) throw new Error('exec failed');
   }
-
-  function withTimeout(promise, ms){
-    return new Promise((resolve, reject)=>{
-      const t=setTimeout(()=>reject(new Error('timeout '+ms+'ms')), ms);
-      Promise.resolve(promise).then(v=>{clearTimeout(t);resolve(v);}, e=>{clearTimeout(t);reject(e);});
+  function withTimeout(promise,ms){
+    return new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>reject(new Error('timeout')),ms);
+      Promise.resolve(promise).then(value=>{clearTimeout(timer);resolve(value);},error=>{clearTimeout(timer);reject(error);});
     });
   }
-
-
-  
-  function extractStdout(result){
-    if(result == null) return '';
-    if(typeof result === 'string'){
+  async function execRoot(command,timeoutMs){
+    const bridge=findExecBridge();
+    if(!bridge) throw new Error('no-exec');
+    const result=await withTimeout(new Promise((resolve,reject)=>{
+      let settled=false;
+      const finish=value=>{if(!settled){settled=true;resolve(value);}};
+      const fail=error=>{if(!settled){settled=true;reject(error);}};
+      const callback=(...args)=>args.length<=1?finish(args[0]):finish({code:args[0],stdout:args[1],stderr:args[2]});
       try{
-        const obj=JSON.parse(result);
-        if(obj && typeof obj === 'object'){
-          return String(obj.stdout ?? obj.out ?? obj.output ?? obj.message ?? result);
-        }
-      }catch(e){}
-      return result;
+        const returned=bridge.fn.length>=2?bridge.fn.call(bridge.owner,command,callback):bridge.fn.call(bridge.owner,command);
+        if(returned&&typeof returned.then==='function') returned.then(finish,fail);
+        else if(returned!==undefined) finish(returned);
+        else if(bridge.fn.length<2) finish(null);
+      }catch(error){fail(error);}
+    }),timeoutMs||8000);
+    assertExecOk(result);
+    return result;
+  }
+  function extractStdout(result){
+    if(result==null) return '';
+    if(typeof result==='string'){
+      try{const data=JSON.parse(result);return String(data.stdout??data.out??data.output??data.message??result);}catch(error){return result;}
     }
-    if(typeof result === 'object'){
-      return String(result.stdout ?? result.out ?? result.output ?? result.message ?? '');
-    }
+    if(typeof result==='object') return String(result.stdout??result.out??result.output??result.message??'');
     return String(result);
   }
 
-  async function shareLogs(){
-    if(shareBusy){
-      setNotice('正在处理其他操作，请稍候…','warn');
-      return;
-    }
-    const btn=$('shareLogs');
-    shareBusy=true;
-    if(btn) btn.disabled=true;
-    setNotice('正在快速打包日志并打开分享…');
+  async function openSystemLink(event){
+    const link=event.currentTarget;
+    const fallback=link.href;
+    const uri=link.dataset.intentUri||fallback;
+    event.preventDefault();
     try{
-      const result = await execRoot('sh /data/adb/modules/a2h_hook/share_logs.sh', 12000);
-      const out = extractStdout(result);
-      const m = out.match(/ZIP_PATH\s+(\S+)/);
-      const zipPath = m ? m[1] : '';
-      if(/ZIP_FAIL/.test(out)) throw new Error('zip-failed');
-      if(/SHARE_OK/.test(out)){
-        // Keep/delete is handled by share_logs.sh watcher:
-        // cancel => keep in Download; successful send => auto delete.
-        setNotice(zipPath ? ('已打开分享，请选择应用发送。发送成功后自动删除压缩包；取消分享则保留：'+zipPath) : '已打开分享，请选择应用发送。','ok');
-        if(zipPath) $('runtime').textContent='日志包：'+zipPath+'（发送后删除 / 取消保留）';
-      }else if(/SHARE_FALLBACK/.test(out) && zipPath){
-        setNotice('日志已生成：'+zipPath+'。系统分享未完全拉起，请到“下载”目录手动发送。','warn');
-        $('runtime').textContent='日志包：'+zipPath;
-      }else if(zipPath){
-        setNotice('日志已生成：'+zipPath,'ok');
-        $('runtime').textContent='日志包：'+zipPath;
-      }else{
-        setNotice('日志打包完成。','ok');
-      }
-    }catch(e){
-      console && console.warn && console.warn(e);
-      setNotice('分享日志失败：请确认 Root 权限，或手动复制模块目录日志。','err');
-    }finally{
-      shareBusy=false;
-      if(btn) btn.disabled=false;
+      await execRoot('am start --user 0 -a android.intent.action.VIEW -d '+shellQuote(uri),3500);
+    }catch(error){
+      console&&console.warn&&console.warn(error);
+      const opened=window.open(fallback,'_blank','noopener,noreferrer');
+      if(!opened) window.location.href=fallback;
     }
-  }
-
-
-  /*
-   * v4 configuration path. Keep all runtime configuration in this single
-   * implementation so rapid WebUI changes are serialized predictably.
-   */
-  function snapshotConfig(){
-    const packages=cloneSlots(slots);
-    return {
-      mode:mode==='global'?'global':'whitelist',
-      packages:packages,
-      enabled:cloneEnabled(slotEnabled,packages),
-      revision:configRevision
-    };
-  }
-
-  function snapshotKey(data){
-    return JSON.stringify({mode:data.mode,packages:data.packages,enabled:data.enabled});
-  }
-
-  function validationMessage(data){
-    const seen=new Map();
-    for(let index=0;index<10;index++){
-      const value=normalizeSlot(data.packages[index]);
-      const enabled=Boolean(data.enabled[index] && value);
-      if(!enabled) continue;
-      if(!isValidPackage(value) || value.length>LIMITS[index]){
-        return '第 '+String(index+1)+' 槽包名格式或长度无效。';
-      }
-      const count=(seen.get(value)||0)+1;
-      seen.set(value,count);
-       if(count>1) return '槽位存在重复包名，请先修改。';
-    }
-    return '';
   }
 
   function requestApply(reason){
@@ -441,12 +377,8 @@
     applyReason=reason||'配置已更新';
     saveLocal();
     if(applyTimer) clearTimeout(applyTimer);
-    applyTimer=setTimeout(()=>{
-      applyTimer=0;
-      drainApply();
-    },APPLY_DELAY);
+    applyTimer=setTimeout(()=>{applyTimer=0;drainApply();},APPLY_DELAY);
   }
-
   async function drainApply(){
     if(applyBusy) return;
     applyBusy=true;
@@ -455,174 +387,103 @@
         applyPending=false;
         const data=snapshotConfig();
         const error=validationMessage(data);
-        if(error){
-          refreshValidation();
-          setNotice(error,'err');
-          continue;
-        }
+        if(error){refreshValidation();setNotice(error,'err');continue;}
         const key=snapshotKey(data);
         if(key===lastAppliedKey) continue;
         const state=data.mode==='global'?'enabled':'disabled';
-        const manual=buildCommand(state,data);
-        setNotice('正在自动保存并生效：'+applyReason+'…');
+        setNotice('正在保存：'+applyReason,'',true);
         try{
-          const command=buildWritePackagesCmd(data)+' && sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state);
-          await execRoot(command,6000);
+          await execRoot(buildWritePackagesCmd(data)+' && sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state),6000);
           lastAppliedKey=key;
-          $('cmd').classList.remove('show');
-          $('runtime').textContent='最近一次应用：'+new Date().toLocaleString()+'（后台执行中）';
-          setNotice('已保存并排队生效。','ok');
+          hideCommand();
+          setNotice('已保存并生效','ok');
         }catch(error){
-          console && console.warn && console.warn(error);
-          $('cmdText').textContent=manual;
-          $('cmd').classList.add('show');
-          setNotice('配置已尝试写入，但后台应用失败；可复制命令手动运行。','warn');
+          console&&console.warn&&console.warn(error);
+          $('cmdText').textContent=buildCommand(state,data);
+          $('cmdPanel').hidden=false;
+          setNotice('自动应用失败','warn');
         }
       }
     }finally{
       applyBusy=false;
-      if(applyPending && !applyTimer) drainApply();
+      if(applyPending&&!applyTimer) drainApply();
     }
-  }
-
-  async function execRoot(cmd,timeoutMs){
-    const bridge=findExecBridge();
-    if(!bridge) throw new Error('no-exec');
-    const ms=timeoutMs||8000;
-    const result=await withTimeout(new Promise((resolve,reject)=>{
-      let settled=false;
-      const finish=value=>{if(!settled){settled=true;resolve(value);}};
-      const fail=error=>{if(!settled){settled=true;reject(error);}};
-      const callback=(...args)=>{
-        if(args.length<=1) finish(args[0]);
-        else finish({code:args[0],stdout:args[1],stderr:args[2]});
-      };
-      try{
-        const returned=bridge.fn.length>=2
-          ? bridge.fn.call(bridge.owner,cmd,callback)
-          : bridge.fn.call(bridge.owner,cmd);
-        if(returned && typeof returned.then==='function') returned.then(finish,fail);
-        else if(returned!==undefined) finish(returned);
-        else if(bridge.fn.length<2) finish(null);
-      }catch(error){fail(error);}
-    }),ms);
-    assertExecOk(result);
-    return result;
-  }
-
-  function backup(){
-    const data=JSON.stringify({
-      format:BACKUP_FORMAT,
-      version:4,
-      mode:mode,
-      packages:cloneSlots(slots),
-      enabled:cloneEnabled(slotEnabled,slots),
-      createdAt:new Date().toISOString()
-    },null,2);
-    const blob=new Blob([data],{type:'application/json'});
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url;
-    a.download='a2hhook-backup.json';
-    a.click();
-    setTimeout(()=>URL.revokeObjectURL(url),1000);
-    setNotice('备份已导出。','ok');
-  }
-
-  function restoreFromText(text){
-    const data=JSON.parse(text);
-    if(!data || data.format!==BACKUP_FORMAT || !Array.isArray(data.packages)) throw new Error('invalid-backup');
-    slots=cloneSlots(data.packages);
-    slotEnabled=cloneEnabled(data.enabled,slots);
-    mode=data.mode==='global'?'global':'whitelist';
-    configRevision++;
-    render();
-    requestApply('备份已恢复');
   }
 
   function parseDeviceSection(text,startMarker,endMarker){
     const start=text.indexOf(startMarker);
     if(start<0) return null;
     const from=start+startMarker.length;
-    const end=endMarker ? text.indexOf(endMarker,from) : -1;
+    const end=endMarker?text.indexOf(endMarker,from):-1;
     let value=end<0?text.slice(from):text.slice(from,end);
-    if(value.charAt(0)==='\n') value=value.slice(1);
-    else if(value.slice(0,2)==='\r\n') value=value.slice(2);
+    if(value.startsWith('\r\n')) value=value.slice(2);
+    else if(value.startsWith('\n')) value=value.slice(1);
     if(value.endsWith('\n')) value=value.slice(0,-1);
     if(value.endsWith('\r')) value=value.slice(0,-1);
     return value;
   }
-
   async function loadDeviceConfig(){
     const startRevision=configRevision;
     try{
-      const command="cat /data/adb/modules/a2h_hook/config/state 2>/dev/null; printf '\\n__A2H_PACKAGES__\\n'; if [ -f /data/adb/modules/a2h_hook/config/packages.txt ]; then cat /data/adb/modules/a2h_hook/config/packages.txt; else exit 2; fi; printf '\\n__A2H_STATES__\\n'; cat /data/adb/modules/a2h_hook/config/package_states 2>/dev/null || true";
-      const result=await execRoot(command,5000);
-      const text=extractStdout(result);
-      if(configRevision!==startRevision){
-        $('runtime').textContent='检测到页面已有修改，保留当前编辑内容';
-        return;
-      }
-      const marker='__A2H_PACKAGES__';
-      const statesMarker='__A2H_STATES__';
-      const packageText=parseDeviceSection(text,marker,statesMarker);
-      const stateText=text.slice(0,text.indexOf(marker)).trim();
-      const stateLines=parseDeviceSection(text,statesMarker,null);
-      if(stateText==='enabled') mode='global';
-      else if(stateText==='disabled') mode='whitelist';
+      const command="cat /data/adb/modules/a2h_hook/config/state 2>/dev/null; printf '\\n__A2H_PACKAGES__\\n'; cat /data/adb/modules/a2h_hook/config/packages.txt 2>/dev/null || exit 2; printf '\\n__A2H_STATES__\\n'; cat /data/adb/modules/a2h_hook/config/package_states 2>/dev/null || true";
+      const text=extractStdout(await execRoot(command,5000));
+      if(configRevision!==startRevision){setNotice('保留当前编辑内容','warn');return;}
+      const packageMarker='__A2H_PACKAGES__';
+      const stateMarker='__A2H_STATES__';
+      const packageText=parseDeviceSection(text,packageMarker,stateMarker);
+      const stateText=text.slice(0,text.indexOf(packageMarker)).trim();
+      const stateLines=parseDeviceSection(text,stateMarker,null);
+      mode=stateText==='enabled'?'global':'whitelist';
       if(packageText!==null){
         const next=Array(10).fill('');
-        packageText.replace(/\r/g,'').split('\n').slice(0,10).forEach((line,index)=>{
-          next[index]=normalizeSlot(line);
-        });
+        packageText.replace(/\r/g,'').split('\n').slice(0,10).forEach((line,index)=>{next[index]=normalizeSlot(line);});
         slots=next;
-        const rawStates=stateLines===null?[]:stateLines.replace(/\r/g,'').split('\n').map(v=>v.trim());
+        const rawStates=stateLines===null?[]:stateLines.replace(/\r/g,'').split('\n').map(value=>value.trim());
         slotEnabled=cloneEnabled(rawStates,slots);
       }
       configRevision++;
-      saveLocal();
       render();
       lastAppliedKey=snapshotKey(snapshotConfig());
-      $('runtime').textContent=stateLines===null?'已从设备配置加载（旧格式）':'已从设备配置加载';
     }catch(error){
-      console && console.warn && console.warn(error);
-      $('runtime').textContent='配置已加载（本地缓存）';
+      console&&console.warn&&console.warn(error);
+      setNotice('已使用本地配置','warn');
     }
   }
 
-  $('globalBtn').onclick=()=>{
-    if(mode==='global') return;
-    mode='global';
+  $('globalMode').addEventListener('change',event=>{
+    mode=event.target.checked?'global':'whitelist';
     configRevision++;
-    render();
-    requestApply('已切换为全局触感');
-  };
-  $('listBtn').onclick=()=>{
-    if(mode==='whitelist') return;
-    mode='whitelist';
-    configRevision++;
-    render();
-    requestApply('已切换为白名单模式');
-  };
-  $('theme').onclick=()=>{
+    renderMode();
+    saveLocal();
+    requestApply(mode==='global'?'全局模式已开启':'白名单模式已开启');
+  });
+  $('theme').addEventListener('click',()=>{
     const root=document.documentElement;
     root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';
-    try{localStorage.setItem('a2h_theme',root.dataset.theme);}catch(e){}
-  };
-  $('reset').onclick=()=>{
+    $('theme').textContent=root.dataset.theme==='dark'?'☾':'☼';
+    try{localStorage.setItem('a2h_theme',root.dataset.theme);}catch(error){}
+  });
+  $('reset').addEventListener('click',()=>{
     slots=DEFAULTS.slice();
     slotEnabled=[true,true,true,true,true,true,false,false,false,false];
     configRevision++;
-    render();
+    renderSlots();
+    saveLocal();
     requestApply('已恢复官方默认');
-  };
-  $('shareLogs').onclick=()=>{if(!shareBusy) shareLogs();};
-  $('backup').onclick=backup;
-  $('restore').onclick=()=>$('file').click();
-  $('file').onchange=e=>{const file=e.target.files&&e.target.files[0]; if(!file) return; const reader=new FileReader(); reader.onload=()=>{try{restoreFromText(String(reader.result||''));}catch(err){setNotice('备份格式无效。','err');}}; reader.readAsText(file); e.target.value='';};
-  $('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('cmdText').textContent); setNotice('命令已复制。','ok');}catch(e){setNotice('复制失败，请长按文本手动选择。','warn');}};
+  });
+  $('cmdClose').addEventListener('click',hideCommand);
+  $('cmdPanel').addEventListener('click',event=>{if(event.target===$('cmdPanel')) hideCommand();});
+  $('copy').addEventListener('click',async()=>{
+    try{await navigator.clipboard.writeText($('cmdText').textContent);setNotice('命令已复制','ok');hideCommand();}
+    catch(error){setNotice('请长按命令手动复制','warn');}
+  });
+  document.querySelectorAll('.social-link').forEach(link=>link.addEventListener('click',openSystemLink));
 
-  try{const theme=localStorage.getItem('a2h_theme'); if(theme) document.documentElement.dataset.theme=theme;}catch(e){}
+  try{
+    const theme=localStorage.getItem('a2h_theme');
+    if(theme==='dark') document.documentElement.dataset.theme='dark';
+    $('theme').textContent=document.documentElement.dataset.theme==='dark'?'☾':'☼';
+  }catch(error){}
   loadLocal();
   render();
   loadDeviceConfig();

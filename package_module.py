@@ -14,7 +14,6 @@ FILES = (
     "module.prop",
     "customize.sh",
     "service.sh",
-    "share_logs.sh",
     "webui.png",
     "bin/a2h_apply",
     "config/packages.txt",
@@ -25,13 +24,13 @@ FILES = (
     "post-fs-data.sh",
     "wrapper.sh",
     "webroot/index.html",
+    "webroot/coolapk.png",
     "zygisk/arm64-v8a/a2h_hook.so",
 )
 
 EXECUTABLE = {
     "customize.sh",
     "service.sh",
-    "share_logs.sh",
     "bin/a2h_apply",
     "bin/a2h_patch",
     "bin/a2h_trigger",
@@ -43,7 +42,6 @@ TEXT_FILES = {
     "module.prop",
     "customize.sh",
     "service.sh",
-    "share_logs.sh",
     "bin/a2h_apply",
     "config/packages.txt",
     "config/package_states",

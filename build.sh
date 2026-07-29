@@ -198,7 +198,6 @@ create_zip() {
     cp "$MODULE_DIR/service.sh"    "$TEMP_ZIP/"
     cp "$MODULE_DIR/post-fs-data.sh" "$TEMP_ZIP/"
     cp "$MODULE_DIR/wrapper.sh"    "$TEMP_ZIP/"
-    cp "$MODULE_DIR/share_logs.sh" "$TEMP_ZIP/"
     cp "$MODULE_DIR/webui.png"     "$TEMP_ZIP/"
     cp -r "$MODULE_DIR/config"    "$TEMP_ZIP/"
     cp -r "$MODULE_DIR/webroot"    "$TEMP_ZIP/"
@@ -208,7 +207,7 @@ create_zip() {
     cp "$OUTPUT_DIR/a2h_hook.so" "$TEMP_ZIP/zygisk/arm64-v8a/"
 
     cd "$TEMP_ZIP"
-    chmod 0755 customize.sh service.sh post-fs-data.sh wrapper.sh share_logs.sh bin/a2h_apply bin/a2h_patch bin/a2h_trigger 2>/dev/null || true
+    chmod 0755 customize.sh service.sh post-fs-data.sh wrapper.sh bin/a2h_apply bin/a2h_patch bin/a2h_trigger 2>/dev/null || true
     if command -v zip &>/dev/null; then
         zip -r "$ZIP_PATH" . -x "*.git*" -x "*__MACOSX*" -x "*.DS_Store"
         # NTFS/MSYS does not reliably preserve executable bits. Normalize the
@@ -237,7 +236,7 @@ os.close(fd)
 try:
     executable = {
         "customize.sh", "service.sh", "post-fs-data.sh", "wrapper.sh",
-        "share_logs.sh", "bin/a2h_apply", "bin/a2h_patch", "bin/a2h_trigger",
+        "bin/a2h_apply", "bin/a2h_patch", "bin/a2h_trigger",
     }
     with zipfile.ZipFile(source, "r") as zin, zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zout:
         for old in zin.infolist():
@@ -286,7 +285,7 @@ import zipfile
 zip_path = sys.argv[1]
 executable = {
     "customize.sh", "service.sh", "post-fs-data.sh", "wrapper.sh",
-    "share_logs.sh", "bin/a2h_apply", "bin/a2h_patch", "bin/a2h_trigger",
+    "bin/a2h_apply", "bin/a2h_patch", "bin/a2h_trigger",
 }
 with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
     for root, dirs, files in os.walk("."):

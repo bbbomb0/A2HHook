@@ -8,6 +8,9 @@ APPLIER="$MODDIR/bin/a2h_apply"
 PATCHER="$MODDIR/bin/a2h_patch"
 CFG_DIR="$MODDIR/config"
 CFG_STATE="$CFG_DIR/state"
+CFG_PKGS="$CFG_DIR/packages.txt"
+CFG_STATES="$CFG_DIR/package_states"
+CFG_GENERATION="$CFG_DIR/config_generation"
 CFG_SNAPSHOT="$CFG_DIR/config_snapshot"
 APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
 LAST_PID_FILE="$CFG_DIR/last_pid"
@@ -17,6 +20,19 @@ LOG="$MODDIR/a2h_patch.log"
 
 ts() { date '+%F %T'; }
 log() { printf '[%s] %s\n' "$(ts)" "$*" >> "$LOG" 2>/dev/null; }
+
+raw_config_signature() {
+  {
+    for raw_config_file in "$CFG_STATE" "$CFG_PKGS" "$CFG_STATES" "$CFG_GENERATION"; do
+      if [ -f "$raw_config_file" ]; then
+        printf '%s\n' "${raw_config_file##*/}"
+        cksum < "$raw_config_file" 2>/dev/null
+      else
+        printf '%s\nmissing\n' "${raw_config_file##*/}"
+      fi
+    done
+  } | cksum 2>/dev/null | awk '{print $1 ":" $2}'
+}
 
 find_hal_pid() {
   service_pid=$(pidof android.hardware.audio.service-aidl.mediatek 2>/dev/null | awk '{print $1}')
@@ -61,7 +77,7 @@ notification_text() {
       printf '开机自动加载成功：白名单音乐触感已通过运行状态校验，当前启用 %s 个应用。\n' "$notification_active"
     fi
   else
-    printf '%s\n' '开机自动加载失败：未通过运行状态校验，请打开模块 WebUI 查看状态并分享日志。'
+    printf '%s\n' '开机自动加载失败：未通过运行状态校验，请检查模块目录中的 a2h_patch.log 与 action.log。'
   fi
 }
 
@@ -197,14 +213,28 @@ else
 fi
 
 last_pid=$(cat "$LAST_PID_FILE" 2>/dev/null)
+last_raw_signature=$(raw_config_signature)
 watch_failures=0
 log "watcher start pid=${last_pid:-none}"
 
 while true; do
   sleep 25
 
+  raw_signature_before=$(raw_config_signature)
+  if [ "$raw_signature_before" != "$last_raw_signature" ]; then
+    sleep 1
+    raw_signature_after=$(raw_config_signature)
+    if [ "$raw_signature_before" != "$raw_signature_after" ]; then
+      log "watcher config write in progress; deferred before=${raw_signature_before:-none} after=${raw_signature_after:-none}"
+      last_raw_signature=$raw_signature_after
+      continue
+    fi
+    log "watcher stable config edit detected signature=$raw_signature_after"
+  fi
+
   current_snapshot=$(A2H_QUIET_PREPARE=1 sh "$APPLIER" snapshot 2>/dev/null)
   snapshot_rc=$?
+  last_raw_signature=$(raw_config_signature)
   current_pid=$(find_hal_pid)
   applied_snapshot=$(cat "$APPLIED_SNAPSHOT" 2>/dev/null)
   need_apply=0
