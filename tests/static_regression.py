@@ -633,11 +633,17 @@ def check_webui_writer_transaction(root: Path, report: Report, use_adb: bool) ->
 
     writer_command = writer_command.replace(
         "cfg=/data/adb/modules/a2h_hook/config", 'cfg="$base/config"'
-    ).replace("cfg_lock=/data/local/tmp/a2h_config.lock", 'cfg_lock="$base/lock"')
+    ).replace(
+        "cfg_lock=/data/local/tmp/a2h_config.lock", 'cfg_lock="$base/lock"'
+    ).replace(
+        'mkdir -p "$cfg" /data/local/tmp', 'mkdir -p "$cfg" "$base/runtime"'
+    )
     combined_command = combined_command.replace(
         "cfg=/data/adb/modules/a2h_hook/config", 'cfg="$base/config"'
     ).replace(
         "cfg_lock=/data/local/tmp/a2h_config.lock", 'cfg_lock="$base/lock"'
+    ).replace(
+        'mkdir -p "$cfg" /data/local/tmp', 'mkdir -p "$cfg" "$base/runtime"'
     ).replace(
         "sh /data/adb/modules/a2h_hook/bin/a2h_apply queue", 'sh "$base/a2h_apply" queue'
     )
