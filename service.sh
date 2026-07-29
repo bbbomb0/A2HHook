@@ -4,6 +4,18 @@
 # delegated to bin/a2h_apply so the module does not need a root action.sh.
 
 MODDIR=${0%/*}
+CONFIG_EVENT_MARKER=/data/local/tmp/a2h_config.changed
+if [ "${A2H_INOTIFY_CALLBACK:-0}" = "1" ]; then
+  # inotifyd invokes: PROG EVENTS WATCHED_PATH [DIRECTORY_ENTRY].
+  config_event_name=${3:-${2##*/}}
+  case "$config_event_name" in
+    state|packages.txt|package_states|config_generation)
+      : > "$CONFIG_EVENT_MARKER" 2>/dev/null
+      ;;
+  esac
+  exit $?
+fi
+
 APPLIER="$MODDIR/bin/a2h_apply"
 PATCHER="$MODDIR/bin/a2h_patch"
 CFG_DIR="$MODDIR/config"
@@ -36,6 +48,42 @@ raw_config_signature() {
   } | cksum 2>/dev/null | awk '{print $1 ":" $2}'
 }
 
+start_config_inotify() {
+  config_inotify_enabled=0
+  config_inotify_pid=
+  command -v inotifyd >/dev/null 2>&1 || return 1
+  A2H_INOTIFY_CALLBACK=1 inotifyd "$MODDIR/service.sh" \
+    "$CFG_DIR:mnyd" "$CFG_STATE:w" "$CFG_PKGS:w" \
+    "$CFG_STATES:w" "$CFG_GENERATION:w" >/dev/null 2>&1 &
+  config_inotify_pid=$!
+  if kill -0 "$config_inotify_pid" 2>/dev/null; then
+    config_inotify_enabled=1
+    return 0
+  fi
+  config_inotify_pid=
+  return 1
+}
+
+stop_config_inotify() {
+  if [ -n "$config_inotify_pid" ]; then
+    kill "$config_inotify_pid" 2>/dev/null || true
+    wait "$config_inotify_pid" 2>/dev/null || true
+  fi
+  config_inotify_pid=
+  config_inotify_enabled=0
+}
+
+refresh_config_inotify() {
+  stop_config_inotify
+  rm -f "$CONFIG_EVENT_MARKER" 2>/dev/null
+  start_config_inotify || true
+}
+
+service_cleanup() {
+  stop_config_inotify
+  rm -f "$CONFIG_EVENT_MARKER" 2>/dev/null
+}
+
 find_hal_pid() {
   service_pid=$(pidof android.hardware.audio.service-aidl.mediatek 2>/dev/null | awk '{print $1}')
   [ -n "$service_pid" ] && { printf '%s\n' "$service_pid"; return 0; }
@@ -65,6 +113,10 @@ find_hal_pid() {
 apply_once() {
   service_reason=$1
   A2H_REASON="$service_reason" A2H_APPLY_ATTEMPTS=1 sh "$APPLIER" apply >> "$LOG" 2>&1
+}
+
+applier_busy() {
+  sh "$APPLIER" busy >/dev/null 2>&1
 }
 
 notification_text() {
@@ -263,45 +315,135 @@ else
   post_boot_notification failure &
 fi
 
+config_inotify_pid=
+config_inotify_enabled=0
+rm -f "$CONFIG_EVENT_MARKER" 2>/dev/null
+if start_config_inotify; then
+  log "watcher config events=inotifyd pid=$config_inotify_pid"
+else
+  log "watcher config events=polling fallback=${watch_tick_seconds:-2}s"
+fi
+trap 'exit 0' INT TERM HUP
+trap service_cleanup EXIT
+
 last_pid=$(cat "$LAST_PID_FILE" 2>/dev/null)
 last_raw_signature=$(raw_config_signature)
 watch_failures=0
 watch_cycle=0
 failed_key=
-failure_delay_cycles=1
+failure_delay_ticks=25
 failure_retry_cycle=0
-log "watcher start pid=${last_pid:-none}"
+pending_raw_signature=
+pending_stable_ticks=0
+pending_busy_logged=0
+watch_tick_seconds=2
+watch_stable_ticks=2
+watch_health_ticks=15
+next_health_cycle=$watch_health_ticks
+log "watcher start pid=${last_pid:-none} tick=${watch_tick_seconds}s stable_ticks=$watch_stable_ticks health_interval=$((watch_tick_seconds * watch_health_ticks))s"
 
 while true; do
-  sleep 25
+  sleep "$watch_tick_seconds"
   watch_cycle=$((watch_cycle + 1))
 
-  raw_signature_before=$(raw_config_signature)
-  if [ "$raw_signature_before" != "$last_raw_signature" ]; then
-    sleep 1
-    raw_signature_after=$(raw_config_signature)
-    if [ "$raw_signature_before" != "$raw_signature_after" ]; then
-      log "watcher config write in progress; deferred before=${raw_signature_before:-none} after=${raw_signature_after:-none}"
-      last_raw_signature=$raw_signature_after
-      continue
-    fi
-    log "watcher stable config edit detected signature=$raw_signature_after"
+  health_due=0
+  [ "$watch_cycle" -ge "$next_health_cycle" ] && health_due=1
+  if [ "$config_inotify_enabled" = "1" ] &&
+     ! kill -0 "$config_inotify_pid" 2>/dev/null; then
+    config_inotify_enabled=0
+    config_inotify_pid=
+    log "watcher inotifyd exited; using signature polling fallback"
   fi
 
-  current_snapshot=$(A2H_QUIET_PREPARE=1 sh "$APPLIER" snapshot 2>/dev/null)
-  snapshot_rc=$?
-  last_raw_signature=$(raw_config_signature)
-  current_pid=$(find_hal_pid)
-  applied_snapshot=$(cat "$APPLIED_SNAPSHOT" 2>/dev/null)
-  need_apply=0
-  apply_reason=
+  signature_needed=0
+  [ "$config_inotify_enabled" = "0" ] && signature_needed=1
+  [ -n "$pending_raw_signature" ] && signature_needed=1
+  [ "$health_due" = "1" ] && signature_needed=1
+  if [ -f "$CONFIG_EVENT_MARKER" ]; then
+    signature_needed=1
+    refresh_config_inotify
+  fi
+  if [ "$signature_needed" = "1" ]; then
+    raw_signature_now=$(raw_config_signature)
+  else
+    raw_signature_now=$last_raw_signature
+  fi
 
-  if [ "$snapshot_rc" -ne 0 ] || [ -z "$current_snapshot" ]; then
+  config_ready=0
+  if [ "$raw_signature_now" = "$last_raw_signature" ]; then
+    pending_raw_signature=
+    pending_stable_ticks=0
+    pending_busy_logged=0
+  else
+    if [ "$raw_signature_now" != "$pending_raw_signature" ]; then
+      pending_raw_signature=$raw_signature_now
+      pending_stable_ticks=1
+      pending_busy_logged=0
+      log "watcher config edit observed signature=${raw_signature_now:-none}"
+    else
+      pending_stable_ticks=$((pending_stable_ticks + 1))
+    fi
+    if [ "$pending_stable_ticks" -ge "$watch_stable_ticks" ]; then
+      if applier_busy; then
+        if [ "$pending_busy_logged" = "0" ]; then
+          log "watcher stable config deferred while applier is busy signature=$pending_raw_signature"
+          pending_busy_logged=1
+        fi
+      else
+        config_ready=1
+        log "watcher stable config edit detected signature=$pending_raw_signature stable_ticks=$pending_stable_ticks"
+      fi
+    fi
+  fi
+
+  # Never let the slower health path normalize a file manager's partial save.
+  if [ -n "$pending_raw_signature" ] && [ "$config_ready" = "0" ]; then
+    continue
+  fi
+
+  if [ "$config_ready" = "0" ] && [ "$health_due" = "0" ]; then
+    continue
+  fi
+  if [ "$config_ready" = "0" ] && applier_busy; then
+    continue
+  fi
+
+  snapshot_state=$(A2H_QUIET_PREPARE=1 sh "$APPLIER" snapshot-state 2>/dev/null)
+  snapshot_rc=$?
+  case "$snapshot_state" in
+    *'|'*)
+      current_snapshot=${snapshot_state%%|*}
+      prepared_raw_signature=${snapshot_state#*|}
+      ;;
+    *)
+      current_snapshot=
+      prepared_raw_signature=
+      ;;
+  esac
+  if [ "$snapshot_rc" -ne 0 ] || [ -z "$current_snapshot" ] || [ -z "$prepared_raw_signature" ]; then
     watch_failures=$((watch_failures + 1))
     [ $((watch_failures % 6)) -eq 0 ] && log "watcher config prepare failed x$watch_failures"
     set_runtime_status failure
     continue
   fi
+
+  last_raw_signature=$prepared_raw_signature
+  raw_signature_after=$(raw_config_signature)
+  if [ "$raw_signature_after" != "$prepared_raw_signature" ]; then
+    pending_raw_signature=$raw_signature_after
+    pending_stable_ticks=1
+    pending_busy_logged=0
+    log "watcher config changed across snapshot; retrying after quiet window processed=$prepared_raw_signature latest=$raw_signature_after"
+    continue
+  fi
+  pending_raw_signature=
+  pending_stable_ticks=0
+  pending_busy_logged=0
+  next_health_cycle=$((watch_cycle + watch_health_ticks))
+  current_pid=$(find_hal_pid)
+  applied_snapshot=$(cat "$APPLIED_SNAPSHOT" 2>/dev/null)
+  need_apply=0
+  apply_reason=
 
   if [ -z "$current_pid" ]; then
     watch_failures=$((watch_failures + 1))
@@ -312,6 +454,12 @@ while true; do
 
   attempt_key="$current_pid|$current_snapshot"
   if [ "$attempt_key" = "$failed_key" ] && [ "$watch_cycle" -lt "$failure_retry_cycle" ]; then
+    next_failure_probe=$((watch_cycle + watch_health_ticks))
+    if [ "$failure_retry_cycle" -lt "$next_failure_probe" ]; then
+      next_health_cycle=$failure_retry_cycle
+    else
+      next_health_cycle=$next_failure_probe
+    fi
     set_runtime_status failure
     continue
   fi
@@ -332,7 +480,7 @@ while true; do
     log "watcher config changed applied=${applied_snapshot:-none} current=$current_snapshot"
   fi
 
-  if [ "$need_apply" = "0" ]; then
+  if [ "$need_apply" = "0" ] && [ "$health_due" = "1" ]; then
     watch_mode=$(cat "$CFG_STATE" 2>/dev/null | tr -d '\r' | head -n 1)
     watch_want=whitelist
     [ "$watch_mode" = "enabled" ] && watch_want=global
@@ -348,21 +496,21 @@ while true; do
       last_pid=$(cat "$LAST_PID_FILE" 2>/dev/null)
       watch_failures=0
       failed_key=
-      failure_delay_cycles=1
+      failure_delay_ticks=25
       failure_retry_cycle=0
       log "watcher apply verified reason=$apply_reason pid=${last_pid:-unknown}"
       set_runtime_status success
     else
       watch_failures=$((watch_failures + 1))
       if [ "$failed_key" = "$attempt_key" ]; then
-        failure_delay_cycles=$((failure_delay_cycles * 2))
+        failure_delay_ticks=$((failure_delay_ticks * 2))
       else
-        failure_delay_cycles=2
+        failure_delay_ticks=25
       fi
-      [ "$failure_delay_cycles" -le 24 ] || failure_delay_cycles=24
+      [ "$failure_delay_ticks" -le 300 ] || failure_delay_ticks=300
       failed_key=$attempt_key
-      failure_retry_cycle=$((watch_cycle + failure_delay_cycles))
-      failure_delay_seconds=$((failure_delay_cycles * 25))
+      failure_retry_cycle=$((watch_cycle + failure_delay_ticks))
+      failure_delay_seconds=$((failure_delay_ticks * watch_tick_seconds))
       log "watcher apply FAIL reason=$apply_reason failures=$watch_failures retry_in=${failure_delay_seconds}s key=$failed_key"
       set_runtime_status failure
     fi
@@ -370,7 +518,7 @@ while true; do
     last_pid=$current_pid
     watch_failures=0
     failed_key=
-    failure_delay_cycles=1
+    failure_delay_ticks=25
     failure_retry_cycle=0
     set_runtime_status success
   fi

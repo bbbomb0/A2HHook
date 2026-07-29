@@ -83,7 +83,7 @@ def elf_program_headers(data: bytes) -> list[tuple[int, int, int]]:
     return values
 
 
-def validate(path: Path) -> None:
+def validate(path: Path, expected_version: str | None = None, expected_code: str | None = None) -> None:
     with zipfile.ZipFile(path, "r") as archive:
         infos = archive.infolist()
         names = [item.filename for item in infos]
@@ -115,8 +115,15 @@ def validate(path: Path) -> None:
         if not required <= prop.keys() or prop.get("id") != "a2h_hook":
             raise ValueError("invalid module metadata")
         version = prop.get("version", "")
+        version_code = prop.get("versionCode", "")
         if re.fullmatch(r"v[0-9A-Za-z][0-9A-Za-z._-]*", version) is None:
             raise ValueError(f"invalid module version: {version!r}")
+        if re.fullmatch(r"[1-9][0-9]*", version_code) is None:
+            raise ValueError(f"invalid module versionCode: {version_code!r}")
+        if expected_version is not None and version != expected_version:
+            raise ValueError(f"module version {version!r} does not match expected {expected_version!r}")
+        if expected_code is not None and version_code != expected_code:
+            raise ValueError(f"module versionCode {version_code!r} does not match expected {expected_code!r}")
         if path.name != f"a2h_hook_{version}.zip":
             raise ValueError(f"ZIP filename does not match module version {version}")
 
@@ -147,9 +154,15 @@ def validate(path: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("zip", type=Path)
+    parser.add_argument("--expected-version")
+    parser.add_argument("--expected-code")
     args = parser.parse_args()
     try:
-        validate(args.zip.resolve(strict=True))
+        validate(
+            args.zip.resolve(strict=True),
+            expected_version=args.expected_version,
+            expected_code=args.expected_code,
+        )
     except (OSError, UnicodeError, ValueError, zipfile.BadZipFile, struct.error) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1

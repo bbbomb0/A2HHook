@@ -34,6 +34,7 @@ SELF="$MODDIR/bin/a2h_apply"
 CURRENT_MODE=disabled
 CURRENT_SNAPSHOT=
 CURRENT_REVISION=0
+CURRENT_RAW_SIGNATURE=
 ACTIVE_COUNT=0
 CONFIG_RECOVERED=0
 PATCHER_SUPPORTS_PACKAGES=
@@ -273,8 +274,13 @@ normalize_package_config() {
   esac
   norm_state_signature=$(cksum < "$norm_states_raw" 2>/dev/null | awk '{print $1 ":" $2}')
   norm_external_names=0
+  norm_external_state_drift=0
   norm_baseline_available=0
+  norm_baseline_reason=missing
+  norm_baseline_state=invalid
+  norm_baseline_generation=invalid
   if [ "$norm_states_missing" = "0" ] && [ -f "$CFG_BASELINE" ]; then
+    norm_baseline_reason=invalid
     norm_baseline_lines=$(wc -l < "$CFG_BASELINE" 2>/dev/null | tr -d ' ')
     norm_baseline_state=$(sed -n '11s/^states=//p' "$CFG_BASELINE" 2>/dev/null)
     norm_baseline_generation=$(sed -n '12s/^generation=//p' "$CFG_BASELINE" 2>/dev/null)
@@ -291,14 +297,20 @@ normalize_package_config() {
       sed -n '1,10p' "$CFG_BASELINE" > "$norm_prev_pkg_tmp" 2>/dev/null || true
       if [ "$(wc -l < "$norm_prev_pkg_tmp" 2>/dev/null | tr -d ' ')" = "10" ]; then
         norm_baseline_available=1
+        norm_baseline_reason=ok
       fi
     fi
   fi
+  norm_packages_changed=0
   if [ "$norm_baseline_available" = "1" ] &&
-     ! cmp -s "$norm_pkg_tmp" "$norm_prev_pkg_tmp" 2>/dev/null &&
-     [ "$norm_state_signature" = "$norm_baseline_state" ] &&
+     ! cmp -s "$norm_pkg_tmp" "$norm_prev_pkg_tmp" 2>/dev/null; then
+    norm_packages_changed=1
+  fi
+  if [ "$norm_baseline_available" = "1" ] &&
+     [ "$norm_packages_changed" = "1" ] &&
      [ "$norm_generation" = "$norm_baseline_generation" ]; then
     norm_external_names=1
+    [ "$norm_state_signature" = "$norm_baseline_state" ] || norm_external_state_drift=1
   fi
 
   # Normalize the state table and validate only enabled slots.  A disabled
@@ -390,7 +402,11 @@ normalize_package_config() {
   commit_tmp "$norm_baseline_tmp" "$CFG_BASELINE" 0600 || return 1
   rm -f "$norm_prev_pkg_tmp" 2>/dev/null
   if [ "$norm_external_names" = "1" ]; then
-    log "external packages synchronized changed=$norm_external_changed enabled=$norm_external_enabled"
+    log "external packages synchronized changed=$norm_external_changed enabled=$norm_external_enabled state_drift=$norm_external_state_drift generation=$norm_generation"
+  elif [ "$norm_baseline_available" != "1" ]; then
+    log "package baseline rebuilt reason=$norm_baseline_reason generation=$norm_generation"
+  elif [ "$norm_packages_changed" = "1" ]; then
+    log "grouped package config synchronized generation=$norm_baseline_generation->$norm_generation"
   fi
   if [ "${A2H_QUIET_PREPARE:-0}" != "1" ]; then
     log "config normalized active=$norm_active total_nonempty=$norm_nonempty states_missing=$norm_states_missing"
@@ -449,6 +465,22 @@ compute_snapshot() {
   [ -n "$CURRENT_SNAPSHOT" ]
 }
 
+compute_raw_config_signature() {
+  CURRENT_RAW_SIGNATURE=$(
+    {
+      for signature_file in "$CFG_STATE" "$CFG_PKGS" "$CFG_STATES" "$CFG_GENERATION"; do
+        if [ -f "$signature_file" ]; then
+          printf '%s\n' "${signature_file##*/}"
+          cksum < "$signature_file" 2>/dev/null
+        else
+          printf '%s\nmissing\n' "${signature_file##*/}"
+        fi
+      done
+    } | cksum 2>/dev/null | awk '{print $1 ":" $2}'
+  )
+  [ -n "$CURRENT_RAW_SIGNATURE" ]
+}
+
 record_revision() {
   revision_old_snapshot=$(cat "$CFG_SNAPSHOT" 2>/dev/null)
   revision_old=$(cat "$CFG_REVISION" 2>/dev/null | tr -d '\r' | head -n 1)
@@ -469,12 +501,31 @@ record_revision() {
 
 prepare_config_unlocked() {
   CONFIG_RECOVERED=0
-  normalize_mode || return 1
-  normalize_package_config || return 1
-  generate_runtime_config || return 1
-  compute_snapshot || return 1
-  record_revision || return 1
-  return 0
+  prepare_pass=1
+  while [ "$prepare_pass" -le 4 ]; do
+    compute_raw_config_signature || return 1
+    prepare_input_signature=$CURRENT_RAW_SIGNATURE
+    normalize_mode || return 1
+    normalize_package_config || return 1
+    compute_raw_config_signature || return 1
+    prepare_normalized_signature=$CURRENT_RAW_SIGNATURE
+    if [ "$prepare_input_signature" != "$prepare_normalized_signature" ]; then
+      prepare_pass=$((prepare_pass + 1))
+      continue
+    fi
+
+    generate_runtime_config || return 1
+    compute_snapshot || return 1
+    record_revision || return 1
+    compute_raw_config_signature || return 1
+    if [ "$CURRENT_RAW_SIGNATURE" = "$prepare_normalized_signature" ]; then
+      return 0
+    fi
+    log "config changed during prepare pass=$prepare_pass before=$prepare_normalized_signature after=$CURRENT_RAW_SIGNATURE"
+    prepare_pass=$((prepare_pass + 1))
+  done
+  log "config prepare FAIL error=unstable passes=4 latest=$CURRENT_RAW_SIGNATURE"
+  return 75
 }
 
 set_mode_unlocked() {
@@ -969,6 +1020,16 @@ release_worker_lock() {
   release_pid_lock "$WORKER_LOCK"
 }
 
+runtime_busy() {
+  for busy_lock in "$CONFIG_LOCK" "$APPLY_LOCK" "$WORKER_LOCK"; do
+    if lock_owner_alive "$busy_lock"; then
+      printf 'BUSY lock=%s owner=%s\n' "${busy_lock##*/}" "$LOCK_OWNER_TOKEN"
+      return 0
+    fi
+  done
+  return 1
+}
+
 start_worker() {
   start_try=0
   while [ "$start_try" -lt 2 ]; do
@@ -1054,6 +1115,10 @@ worker_main() {
       fi
       log "queue worker paused after stable failure marker=$worker_marker; service watcher owns recovery"
       release_worker_lock
+      if [ -f "$PENDING_FILE" ] && claim_worker_lock; then
+        log "queue worker retained pending request after failure"
+        continue
+      fi
       return 1
     fi
 
@@ -1146,6 +1211,11 @@ snapshot_current() {
   printf '%s\n' "$CURRENT_SNAPSHOT"
 }
 
+snapshot_state_current() {
+  A2H_QUIET_PREPARE=1 prepare_config || return 2
+  printf '%s|%s\n' "$CURRENT_SNAPSHOT" "$CURRENT_RAW_SIGNATURE"
+}
+
 chmod 755 "$PATCHER" "$SELF" 2>/dev/null
 mkdir -p "$CFG_DIR" /data/local/tmp 2>/dev/null
 touch "$ACTION_LOG" "$MAIN_LOG" 2>/dev/null
@@ -1188,12 +1258,20 @@ case "$command_name" in
     snapshot_current
     exit $?
     ;;
+  snapshot-state)
+    snapshot_state_current
+    exit $?
+    ;;
+  busy)
+    runtime_busy
+    exit $?
+    ;;
   __worker)
     worker_main
     exit $?
     ;;
   *)
-    printf '%s\n' 'usage: a2h_apply [queue [enabled|disabled]|apply|enable|disable|show|status|check [global|whitelist]|snapshot]' >&2
+    printf '%s\n' 'usage: a2h_apply [queue [enabled|disabled]|apply|enable|disable|show|status|check [global|whitelist]|snapshot|snapshot-state|busy]' >&2
     exit 2
     ;;
 esac

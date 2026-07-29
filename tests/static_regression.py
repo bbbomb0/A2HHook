@@ -25,6 +25,8 @@ OFFICIAL = (
     "com.luna.music",
 )
 
+EXPECTED_RELEASE = ("v1.5.5-fix2", "1552")
+
 HAL_CASES = {
     "OS2.0.218.0.VONCNXM": {
         "relative": "devices/25060RK16C__dali/OS2.0.218.0.VONCNXM/originals/hal/audio.primary.mediatek(os2.0.218).so",
@@ -161,6 +163,12 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         f"id=a2h_hook version={version}",
         f"invalid id/version: {props.get('id')!r} {version!r}",
     )
+    report.check(
+        (version, props.get("versionCode", "")) == EXPECTED_RELEASE,
+        "release version pair",
+        f"version={EXPECTED_RELEASE[0]} versionCode={EXPECTED_RELEASE[1]}",
+        f"expected={EXPECTED_RELEASE!r} actual={(version, props.get('versionCode', ''))!r}",
+    )
 
     bad_text: list[str] = []
     for relative in TEXT_RELEASE_FILES:
@@ -232,12 +240,82 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "immediate dispatch, string callback, strict readback, and failure restore present",
         "mode persistence safeguards are incomplete or page debounce returned",
     )
+    writer = extract_function(
+        webui, "function buildWritePackagesCmd(snapshot,readable){", "function buildCommand("
+    )
+    packages_commit = writer.find('mv -f "$pkg_tmp" "$cfg/packages.txt"')
+    states_commit = writer.find('mv -f "$state_tmp" "$cfg/package_states"')
+    generation_commit = writer.find('mv -f "$gen_tmp" "$cfg/config_generation"')
+    rollback_contract = (
+        'cfg_backed_up=0' in writer
+        and 'cfg_committed=0' in writer
+        and 'cfg_restore()' in writer
+        and 'cfg_signal_abort()' in writer
+        and 'cfg_backed_up=1' in writer
+        and 'cfg_committed=1' in writer
+        and 'trap - 0 1 2 15; cfg_abort; exit 130' in writer
+        and 'cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -le 8 ]' in writer
+        and 'execRoot(command,15000)' in webui
+    )
+    report.check(
+        0 <= packages_commit < states_commit < generation_commit,
+        "WebUI grouped commit marker order",
+        "packages and states commit before generation",
+        f"commit indexes packages={packages_commit} states={states_commit} generation={generation_commit}",
+    )
+    report.check(
+        rollback_contract,
+        "WebUI grouped commit rollback contract",
+        "old files are restored on failure/signal and lock waiting is bounded below the bridge timeout",
+        "backup, rollback, signal exit, bounded wait, or timeout headroom is incomplete",
+    )
+
+    service = (root / "service.sh").read_text(encoding="utf-8")
+    watcher = extract_function(service, "last_pid=$(cat", "done\n")
+    watcher_contract = (
+        "watch_tick_seconds=2" in watcher
+        and "watch_stable_ticks=2" in watcher
+        and "watch_health_ticks=15" in watcher
+        and "applier_busy" in watcher
+        and "snapshot-state" in watcher
+        and "changed across snapshot" in watcher
+        and "CONFIG_EVENT_MARKER" in service
+        and 'state|packages.txt|package_states|config_generation)' in service
+        and "inotifyd" in service
+        and "signature_needed" in watcher
+        and "sleep 25" not in watcher
+        and "Never let the slower health path" in watcher
+    )
+    report.check(
+        watcher_contract,
+        "file-manager watcher latency contract",
+        "2-second debounce is separated from 30-second HAL health checks",
+        "fast config debounce or slow health isolation is incomplete",
+    )
+
+    applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
+    report.check(
+        'queue worker retained pending request after failure' in applier
+        and 'release_worker_lock\n      if [ -f "$PENDING_FILE" ] && claim_worker_lock; then' in applier,
+        "queue worker failure handoff",
+        "a request arriving during a failed apply is reclaimed or left for a new worker",
+        "failed worker can release its lock while leaving an unconsumed pending request",
+    )
 
     packager = (root / "package_module.py").read_text(encoding="utf-8")
     forbidden = ("tests/", "zygisk/", "a2h_hook.so", "a2h_inject")
     manifest_area = extract_function(packager, "FILES = (", "EXECUTABLE =")
     leaked = [item for item in forbidden if item in manifest_area]
     report.check(not leaked, "release manifest isolation", "tests and legacy injection excluded", f"forbidden manifest entries: {leaked}")
+
+    installer = (root / "customize.sh").read_text(encoding="utf-8")
+    report.check(
+        '[ -f "$MODDIR/config/.package_baseline" ] &&' in installer
+        and 'wc -l < "$MODDIR/config/.package_baseline"' in installer,
+        "clean-install baseline guard",
+        "installer checks baseline existence before input redirection",
+        "first install can emit a missing .package_baseline redirection error",
+    )
 
     scripts = ["customize.sh", "service.sh", "post-fs-data.sh", "wrapper.sh", "bin/a2h_apply"]
     if use_adb:
@@ -365,6 +443,282 @@ printf 'PASS pid-starttime lock regression\n'
         rc == 0 and "PASS pid-starttime lock regression" in output,
         "PID lock runtime regression",
         "paired/reused/legacy/creating/release cases passed",
+        output.strip(),
+    )
+
+
+def check_config_hotupdate(root: Path, report: Report, use_adb: bool) -> None:
+    applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
+    config_block = extract_function(applier, "commit_tmp() {", "generate_runtime_config() {")
+    if not config_block:
+        report.add("FAIL", "configuration hot-update runtime regression", "normalizer block not found")
+        return
+    config_block = config_block.replace(
+        'mkdir -p "$CFG_DIR" /data/local/tmp', 'mkdir -p "$CFG_DIR" "$base/runtime"'
+    )
+
+    harness = config_block + r'''
+set -eu
+base=__CONFIG_TEST_BASE__/a2h_config_hotupdate_$$
+CFG_DIR="$base/config"
+CFG_STATE="$CFG_DIR/state"
+CFG_PKGS="$CFG_DIR/packages.txt"
+CFG_STATES="$CFG_DIR/package_states"
+CFG_GENERATION="$CFG_DIR/config_generation"
+CFG_BASELINE="$CFG_DIR/.package_baseline"
+TEST_LOG="$base/test.log"
+CONFIG_RECOVERED=0
+A2H_QUIET_PREPARE=1
+
+fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
+log() { printf '%s\n' "$*" >> "$TEST_LOG"; }
+lock_owned_by_self() { return 0; }
+cleanup() { rm -rf "$base"; }
+trap cleanup 0 1 2 15
+mkdir -p "$CFG_DIR"
+
+write_packages() {
+  package8=$1
+  cat > "$CFG_PKGS" <<EOF
+com.kugou.android
+com.tencent.qqmusic
+com.netease.cloudmusic
+cn.kuwo.player
+com.miui.player
+com.luna.music
+
+$package8
+
+
+EOF
+}
+
+write_states() {
+  state1=$1
+  state8=$2
+  printf '%s\n' "$state1" 1 1 1 1 1 0 "$state8" 0 0 > "$CFG_STATES"
+}
+
+reset_case() {
+  rm -rf "$CFG_DIR"
+  mkdir -p "$CFG_DIR"
+  : > "$TEST_LOG"
+  printf 'disabled\n' > "$CFG_STATE"
+  write_packages com.example.old
+  write_states 1 0
+  printf '100\n' > "$CFG_GENERATION"
+  normalize_package_config || fail baseline-normalize
+  [ "$(sed -n '8p' "$CFG_STATES")" = 0 ] || fail baseline-state8
+  [ -f "$CFG_BASELINE" ] || fail baseline-missing
+}
+
+reset_case
+write_packages com.example.new
+normalize_package_config || fail external-normalize
+[ "$(sed -n '8p' "$CFG_STATES")" = 1 ] || fail external-state8-not-enabled
+[ "$(sed -n '8p' "$CFG_BASELINE")" = com.example.new ] || fail external-baseline
+first_states=$(cksum < "$CFG_STATES")
+first_baseline=$(cksum < "$CFG_BASELINE")
+normalize_package_config || fail external-idempotent-normalize
+[ "$(cksum < "$CFG_STATES")" = "$first_states" ] || fail external-idempotent-states
+[ "$(cksum < "$CFG_BASELINE")" = "$first_baseline" ] || fail external-idempotent-baseline
+
+write_packages ''
+normalize_package_config || fail clear-normalize
+[ "$(sed -n '8p' "$CFG_STATES")" = 0 ] || fail clear-state8-not-disabled
+
+reset_case
+write_packages com.example.drift
+write_states 0 0
+normalize_package_config || fail drift-normalize
+[ "$(sed -n '1p' "$CFG_STATES")" = 0 ] || fail drift-unmodified-state-not-preserved
+[ "$(sed -n '8p' "$CFG_STATES")" = 1 ] || fail drift-state8-not-enabled
+grep -q 'state_drift=1' "$TEST_LOG" || fail drift-diagnostic-missing
+
+reset_case
+write_packages com.example.grouped
+write_states 1 0
+printf '101\n' > "$CFG_GENERATION"
+normalize_package_config || fail grouped-normalize
+[ "$(sed -n '8p' "$CFG_STATES")" = 0 ] || fail grouped-explicit-off-overridden
+[ "$(sed -n '12s/^generation=//p' "$CFG_BASELINE")" = 101 ] || fail grouped-generation
+
+reset_case
+rm -f "$CFG_BASELINE"
+write_packages com.example.recovered
+normalize_package_config || fail missing-baseline-normalize
+[ "$(sed -n '8p' "$CFG_STATES")" = 0 ] || fail missing-baseline-guessed-state
+grep -q 'package baseline rebuilt reason=missing' "$TEST_LOG" || fail missing-baseline-diagnostic
+
+printf 'PASS configuration hot-update runtime regression\n'
+'''
+
+    if use_adb:
+        adb = shutil.which("adb")
+        if not adb:
+            report.add("FAIL", "configuration hot-update runtime regression", "adb requested but not found")
+            return
+        command = [adb, "shell", "sh", "-s"]
+        test_base = "/data/local/tmp"
+    else:
+        shell = shutil.which("sh")
+        if not shell:
+            report.gap("configuration hot-update runtime regression", "rerun with --adb or on a POSIX host")
+            return
+        command = [shell, "-s"]
+        test_base = "${TMPDIR:-/tmp}"
+
+    payload = harness.replace("__CONFIG_TEST_BASE__", test_base).encode("utf-8")
+    rc, output = run_command(command, root, payload)
+    report.check(
+        rc == 0 and "PASS configuration hot-update runtime regression" in output,
+        "configuration hot-update runtime regression",
+        "slot 8 edit, state drift, grouped commit, clear, baseline recovery, and idempotence passed",
+        output.strip(),
+    )
+
+
+def check_webui_writer_transaction(root: Path, report: Report, use_adb: bool) -> None:
+    node = shutil.which("node")
+    if not node:
+        report.gap("WebUI writer transaction regression", "node is required to generate the production writer command")
+        return
+
+    webui = (root / "webroot/index.html").read_text(encoding="utf-8")
+    normalizer = extract_function(webui, "function normalizeSlot", "function cloneSlots")
+    quoter = extract_function(webui, "function shellQuote", "function snapshotConfig")
+    writer = extract_function(
+        webui, "function buildWritePackagesCmd(snapshot,readable){", "function buildCommand("
+    )
+    builder = extract_function(webui, "function buildCommand(", "function findExecBridge")
+    if not normalizer or not quoter or not writer or not builder:
+        report.add("FAIL", "WebUI writer transaction regression", "production writer functions could not be extracted")
+        return
+
+    snapshot = {
+        "packages": [*OFFICIAL, "com.example.slot7", "com.example.slot8", "", ""],
+        "enabled": [True, True, True, True, True, True, True, True, False, False],
+        "generation": "4242",
+    }
+    javascript = "\n".join(
+        (
+            "'use strict';",
+            normalizer,
+            quoter,
+            writer,
+            f"const snapshot={json.dumps(snapshot, separators=(',', ':'))};",
+            "process.stdout.write(buildWritePackagesCmd(snapshot,true));",
+        )
+    )
+    node_rc, writer_command = run_command([node, "-e", javascript], root)
+    if node_rc != 0 or not writer_command.strip():
+        report.add("FAIL", "WebUI writer transaction regression", writer_command.strip() or f"node rc={node_rc}")
+        return
+
+    combined_javascript = "\n".join(
+        (
+            "'use strict';",
+            normalizer,
+            quoter,
+            writer,
+            builder,
+            f"const snapshot={json.dumps(snapshot, separators=(',', ':'))};",
+            "process.stdout.write(buildCommand('disabled',snapshot,true));",
+        )
+    )
+    node_rc, combined_command = run_command([node, "-e", combined_javascript], root)
+    if node_rc != 0 or not combined_command.strip():
+        report.add("FAIL", "WebUI writer/apply transaction regression", combined_command.strip() or f"node rc={node_rc}")
+        return
+
+    writer_command = writer_command.replace(
+        "cfg=/data/adb/modules/a2h_hook/config", 'cfg="$base/config"'
+    ).replace("cfg_lock=/data/local/tmp/a2h_config.lock", 'cfg_lock="$base/lock"')
+    combined_command = combined_command.replace(
+        "cfg=/data/adb/modules/a2h_hook/config", 'cfg="$base/config"'
+    ).replace(
+        "cfg_lock=/data/local/tmp/a2h_config.lock", 'cfg_lock="$base/lock"'
+    ).replace(
+        "sh /data/adb/modules/a2h_hook/bin/a2h_apply queue", 'sh "$base/a2h_apply" queue'
+    )
+    harness = r'''
+set -u
+base=__WRITER_TEST_BASE__/a2h_webui_writer_$$
+cleanup() { rm -rf "$base"; }
+trap cleanup 0 1 2 15
+mkdir -p "$base/config"
+printf 'old packages\n' > "$base/config/packages.txt"
+printf 'old states\n' > "$base/config/package_states"
+printf '41\n' > "$base/config/config_generation"
+old_packages=$(cksum < "$base/config/packages.txt")
+old_states=$(cksum < "$base/config/package_states")
+old_generation=$(cksum < "$base/config/config_generation")
+
+writer_mv_count=0
+A2H_FAIL_MV=2
+mv() {
+  writer_mv_count=$((writer_mv_count + 1))
+  [ "$writer_mv_count" != "$A2H_FAIL_MV" ] || return 70
+  command mv "$@"
+}
+__WRITER_COMMAND__
+writer_rc=$?
+[ "$writer_rc" -ne 0 ] || { printf 'FAIL: injected writer failure returned success\n'; exit 1; }
+[ "$(cksum < "$base/config/packages.txt")" = "$old_packages" ] || { printf 'FAIL: packages rollback\n'; exit 1; }
+[ "$(cksum < "$base/config/package_states")" = "$old_states" ] || { printf 'FAIL: states rollback\n'; exit 1; }
+[ "$(cksum < "$base/config/config_generation")" = "$old_generation" ] || { printf 'FAIL: generation rollback\n'; exit 1; }
+[ ! -e "$base/lock" ] || { printf 'FAIL: writer lock leaked after rollback\n'; exit 1; }
+
+printf '%s\n' '#!/system/bin/sh' 'printf "%s\n" "$*" > "$A2H_TEST_BASE/queue_called"' > "$base/a2h_apply"
+export A2H_TEST_BASE="$base"
+rm -f "$base/queue_called"
+writer_mv_count=0
+A2H_FAIL_MV=2
+__COMBINED_COMMAND__
+combined_rc=$?
+[ "$combined_rc" -ne 0 ] || { printf 'FAIL: combined writer failure returned success\n'; exit 1; }
+[ ! -e "$base/queue_called" ] || { printf 'FAIL: queue ran after writer rollback\n'; exit 1; }
+[ "$(cksum < "$base/config/packages.txt")" = "$old_packages" ] || { printf 'FAIL: combined packages rollback\n'; exit 1; }
+[ "$(cksum < "$base/config/package_states")" = "$old_states" ] || { printf 'FAIL: combined states rollback\n'; exit 1; }
+[ "$(cksum < "$base/config/config_generation")" = "$old_generation" ] || { printf 'FAIL: combined generation rollback\n'; exit 1; }
+[ ! -e "$base/lock" ] || { printf 'FAIL: combined writer lock leaked after rollback\n'; exit 1; }
+
+writer_mv_count=0
+A2H_FAIL_MV=0
+__COMBINED_COMMAND__
+[ "$?" -eq 0 ] || { printf 'FAIL: combined writer success path\n'; exit 1; }
+[ "$(cat "$base/queue_called")" = "queue disabled" ] || { printf 'FAIL: queue missing after writer commit\n'; exit 1; }
+[ "$(wc -l < "$base/config/packages.txt" | tr -d ' ')" = 10 ] || { printf 'FAIL: package line count\n'; exit 1; }
+[ "$(sed -n '8p' "$base/config/packages.txt")" = com.example.slot8 ] || { printf 'FAIL: slot 8 package\n'; exit 1; }
+[ "$(sed -n '8p' "$base/config/package_states")" = 1 ] || { printf 'FAIL: slot 8 state\n'; exit 1; }
+[ "$(cat "$base/config/config_generation")" = 4242 ] || { printf 'FAIL: generation commit\n'; exit 1; }
+[ ! -e "$base/lock" ] || { printf 'FAIL: writer lock leaked after commit\n'; exit 1; }
+printf 'PASS WebUI writer/apply transaction regression\n'
+'''
+
+    if use_adb:
+        adb = shutil.which("adb")
+        if not adb:
+            report.add("FAIL", "WebUI writer transaction regression", "adb requested but not found")
+            return
+        command = [adb, "shell", "sh", "-s"]
+        test_base = "/data/local/tmp"
+    else:
+        shell = shutil.which("sh")
+        if not shell:
+            report.gap("WebUI writer transaction regression", "rerun with --adb or on a POSIX host")
+            return
+        command = [shell, "-s"]
+        test_base = "${TMPDIR:-/tmp}"
+
+    payload = harness.replace("__WRITER_TEST_BASE__", test_base).replace(
+        "__WRITER_COMMAND__", writer_command
+    ).replace("__COMBINED_COMMAND__", combined_command).encode("utf-8")
+    rc, output = run_command(command, root, payload)
+    report.check(
+        rc == 0 and "PASS WebUI writer/apply transaction regression" in output,
+        "WebUI writer/apply transaction regression",
+        "production writer rolls back partial commits, gates queue on success, and commits all three files",
         output.strip(),
     )
 
@@ -620,6 +974,8 @@ def main() -> int:
     report = Report()
     check_release_tree(root, report, args.adb)
     check_lock_protocol(root, report, args.adb)
+    check_config_hotupdate(root, report, args.adb)
+    check_webui_writer_transaction(root, report, args.adb)
     check_source_contracts(root, report)
     check_ndk(root, report, args.ndk)
     check_hal_fixtures(root, report, archive)

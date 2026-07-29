@@ -1,6 +1,6 @@
 #!/system/bin/sh
 # Remove only this module's retired audio-service wrapper property. The native
-# patcher in service.sh is the single runtime path in v1.5.5-fix.
+# patcher in service.sh is the single runtime path in current releases.
 MODDIR=${0%/*}
 WRAP_PROP=wrap.vendor.audio-hal-aidl
 current_wrap=$(getprop "$WRAP_PROP" 2>/dev/null)
