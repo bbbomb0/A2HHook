@@ -39,10 +39,24 @@ jobs:
         run: |
           bash ./build.sh ci
           VERSION="$(sed -n 's/^version=//p' module.prop | head -n 1)"
+          VERSION_CODE="$(sed -n 's/^versionCode=//p' module.prop | head -n 1)"
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            test "$GITHUB_REF_NAME" = "$VERSION"
+          fi
           ZIP_NAME="a2h_hook_${VERSION}.zip"
           test -f "$ZIP_NAME"
           unzip -t "$ZIP_NAME"
           echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+          echo "MODULE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "MODULE_VERSION_CODE=$VERSION_CODE" >> "$GITHUB_ENV"
+
+      - name: Run source and package regressions
+        run: |
+          node --version
+          python3 tests/static_regression.py --ndk "$ANDROID_NDK_HOME"
+          python3 tests/verify_module_zip.py "$ZIP_NAME" \
+            --expected-version "$MODULE_VERSION" \
+            --expected-code "$MODULE_VERSION_CODE"
 
       - name: Upload module ZIP
         uses: actions/upload-artifact@v4

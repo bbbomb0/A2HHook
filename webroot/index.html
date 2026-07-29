@@ -30,7 +30,7 @@
       </div>
     </div>
     <div class="top-actions">
-      <span class="version">v1.5.5-fix</span>
+      <span class="version">v1.5.5-fix2</span>
       <button class="icon" id="theme" type="button" title="切换主题" aria-label="切换主题">☼</button>
     </div>
   </header>
@@ -293,25 +293,30 @@
       'umask 077;',
       'cfg=/data/adb/modules/a2h_hook/config; cfg_lock=/data/local/tmp/a2h_config.lock;',
       'mkdir -p "$cfg" /data/local/tmp || exit 74;',
-      'tag=$$; pkg_tmp="$cfg/.packages.$tag"; state_tmp="$cfg/.package_states.$tag"; gen_tmp="$cfg/.generation.$tag";',
+      'tag=$$; pkg_tmp="$cfg/.packages.$tag"; state_tmp="$cfg/.package_states.$tag"; gen_tmp="$cfg/.generation.$tag"; pkg_old="$cfg/.packages.old.$tag"; state_old="$cfg/.package_states.old.$tag"; gen_old="$cfg/.generation.old.$tag"; cfg_token=; cfg_backed_up=0; cfg_committed=0; pkg_had=0; state_had=0; gen_had=0;',
       'cfg_proc_start() { cfg_pid=$1; case "$cfg_pid" in \'\'|*[!0-9]*) return 1 ;; esac; cfg_stat=$(cat "/proc/$cfg_pid/stat" 2>/dev/null) || return 1; cfg_tail=${cfg_stat##*) }; [ "$cfg_tail" != "$cfg_stat" ] || return 1; set -- $cfg_tail; [ "$#" -ge 20 ] || return 1; shift 19; case "$1" in \'\'|*[!0-9]*) return 1 ;; esac; printf \'%s\\n\' "$1"; };',
       'cfg_lock_alive() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null) || return 1; set -- $cfg_owner; case "$#" in 1) cfg_pid=$1; case "$cfg_pid" in \'\'|*[!0-9]*) return 1 ;; esac; kill -0 "$cfg_pid" 2>/dev/null || return 1; grep -a -F -q \'a2h_apply\' "/proc/$cfg_pid/cmdline" 2>/dev/null || grep -a -F -q \'a2h_config.lock\' "/proc/$cfg_pid/cmdline" 2>/dev/null ;; 2) cfg_pid=$1; cfg_saved_start=$2; case "$cfg_pid:$cfg_saved_start" in *[!0-9:]*) return 1 ;; esac; cfg_live_start=$(cfg_proc_start "$cfg_pid") || return 1; [ "$cfg_live_start" = "$cfg_saved_start" ] ;; *) return 1 ;; esac; };',
-      'cfg_cleanup() { rm -f "$pkg_tmp" "$state_tmp" "$gen_tmp" 2>/dev/null; };',
+      'cfg_cleanup() { rm -f "$pkg_tmp" "$state_tmp" "$gen_tmp" "$pkg_old" "$state_old" "$gen_old" 2>/dev/null; };',
       'cfg_release() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); [ "$cfg_owner" = "$cfg_token" ] || return 1; rm -f "$cfg_lock/pid" 2>/dev/null || return 1; rmdir "$cfg_lock" 2>/dev/null; };',
-      'cfg_abort() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); if [ "$cfg_owner" = "$cfg_token" ]; then rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; fi; cfg_cleanup; };',
-      "trap 'cfg_abort' 0 1 2 15;",
+      'cfg_restore_one() { cfg_restore_dest=$1; cfg_restore_old=$2; cfg_restore_had=$3; if [ "$cfg_restore_had" = 1 ]; then cp -f "$cfg_restore_old" "$cfg_restore_dest" 2>/dev/null && chmod 644 "$cfg_restore_dest" 2>/dev/null; else rm -f "$cfg_restore_dest" 2>/dev/null; fi; };',
+      'cfg_restore() { [ "$cfg_backed_up" = 1 ] && [ "$cfg_committed" = 0 ] || return 0; cfg_restore_rc=0; cfg_restore_one "$cfg/packages.txt" "$pkg_old" "$pkg_had" || cfg_restore_rc=1; cfg_restore_one "$cfg/package_states" "$state_old" "$state_had" || cfg_restore_rc=1; cfg_restore_one "$cfg/config_generation" "$gen_old" "$gen_had" || cfg_restore_rc=1; return "$cfg_restore_rc"; };',
+      'cfg_abort() { cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); if [ -n "$cfg_token" ] && [ "$cfg_owner" = "$cfg_token" ]; then cfg_restore || true; rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; fi; cfg_cleanup; };',
+      'cfg_signal_abort() { trap - 0 1 2 15; cfg_abort; exit 130; };',
+      "trap 'cfg_abort' 0; trap 'cfg_signal_abort' 1 2 15;",
       "printf '%s\\n' "+names+' > "$pkg_tmp" || exit 74;',
       "printf '%s\\n' "+flags+' > "$state_tmp" || exit 74;',
       "printf '%s\\n' "+shellQuote(data.generation)+' > "$gen_tmp" || exit 74;',
       'chmod 600 "$pkg_tmp" "$state_tmp" "$gen_tmp" || exit 74;',
-      'cfg_wait=0; while ! mkdir "$cfg_lock" 2>/dev/null; do if cfg_lock_alive; then cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -lt 6 ] || exit 75; sleep 1; continue; fi; cfg_old=$(cat "$cfg_lock/pid" 2>/dev/null || printf \'(missing)\'); sleep 1; cfg_lock_alive && continue; cfg_mid=$(cat "$cfg_lock/pid" 2>/dev/null || printf \'(missing)\'); [ "$cfg_old" = "$cfg_mid" ] || continue; sleep 1; cfg_lock_alive && continue; cfg_now=$(cat "$cfg_lock/pid" 2>/dev/null || printf \'(missing)\'); [ "$cfg_mid" = "$cfg_now" ] || continue; rm -f "$cfg_lock/pid" 2>/dev/null || exit 75; rmdir "$cfg_lock" 2>/dev/null || true; cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -lt 6 ] || exit 75; done;',
+      'cfg_wait=0; while ! mkdir "$cfg_lock" 2>/dev/null; do cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -le 8 ] || exit 75; if cfg_lock_alive; then sleep 1; continue; fi; cfg_old=$(cat "$cfg_lock/pid" 2>/dev/null || printf \'(missing)\'); sleep 1; cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -le 8 ] || exit 75; cfg_lock_alive && continue; cfg_mid=$(cat "$cfg_lock/pid" 2>/dev/null || printf \'(missing)\'); [ "$cfg_old" = "$cfg_mid" ] || continue; sleep 1; cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -le 8 ] || exit 75; cfg_lock_alive && continue; cfg_now=$(cat "$cfg_lock/pid" 2>/dev/null || printf \'(missing)\'); [ "$cfg_mid" = "$cfg_now" ] || continue; rm -f "$cfg_lock/pid" 2>/dev/null || exit 75; rmdir "$cfg_lock" 2>/dev/null || true; done;',
       'cfg_start=$(cfg_proc_start "$$") || { rmdir "$cfg_lock" 2>/dev/null; exit 75; }; cfg_token="$$ $cfg_start";',
       'printf \'%s\\n\' "$cfg_token" > "$cfg_lock/pid" 2>/dev/null || { rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; exit 75; };',
       'cfg_owner=$(cat "$cfg_lock/pid" 2>/dev/null); [ "$cfg_owner" = "$cfg_token" ] || { rm -f "$cfg_lock/pid" 2>/dev/null; rmdir "$cfg_lock" 2>/dev/null; exit 75; };',
-      'mv -f "$gen_tmp" "$cfg/config_generation" || exit 74;',
+      '[ ! -e "$cfg/packages.txt" ] || [ -f "$cfg/packages.txt" ] || exit 74; [ ! -e "$cfg/package_states" ] || [ -f "$cfg/package_states" ] || exit 74; [ ! -e "$cfg/config_generation" ] || [ -f "$cfg/config_generation" ] || exit 74;',
+      'if [ -f "$cfg/packages.txt" ]; then cp -f "$cfg/packages.txt" "$pkg_old" || exit 74; pkg_had=1; fi; if [ -f "$cfg/package_states" ]; then cp -f "$cfg/package_states" "$state_old" || exit 74; state_had=1; fi; if [ -f "$cfg/config_generation" ]; then cp -f "$cfg/config_generation" "$gen_old" || exit 74; gen_had=1; fi; cfg_backed_up=1;',
       'mv -f "$pkg_tmp" "$cfg/packages.txt" || exit 74;',
       'mv -f "$state_tmp" "$cfg/package_states" || exit 74;',
-      'cfg_release || exit 75; trap - 0 1 2 15;'
+      'mv -f "$gen_tmp" "$cfg/config_generation" || exit 74;',
+      'cfg_committed=1; cfg_cleanup; cfg_release || exit 75; trap - 0 1 2 15;'
     ];
     return readable?'(\n  '+lines.join('\n  ')+'\n)':'( '+lines.join(' ')+' )';
   }
@@ -319,7 +324,7 @@
     const data=snapshot||snapshotConfig();
     data.mode=state==='enabled'?'global':'whitelist';
     const commands=['# A2HHook apply command'];
-    if(writePackages) commands.push(buildWritePackagesCmd(data,true));
+    if(writePackages) commands.push(buildWritePackagesCmd(data,true)+' &&');
     commands.push('sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state));
     return commands.join('\n');
   }
@@ -464,7 +469,7 @@
           const command=(writePackages ? buildWritePackagesCmd(data)+' && ' : '')+
             'sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state)+' && '+
             buildReadDeviceCommand(writePackages);
-          const text=extractStdout(await execRoot(command,8000));
+          const text=extractStdout(await execRoot(command,15000));
           verifyDeviceConfig(text,data,writePackages);
           lastAppliedKey=key;
           if(snapshotKey(snapshotConfig())===key){

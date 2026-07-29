@@ -64,7 +64,7 @@ old_states_present=0
 if [ "$MODDIR" != "$OLD_MODULE" ] && [ -d "$OLD_MODULE/config" ]; then
   [ -f "$OLD_MODULE/config/packages.txt" ] && old_packages_present=1
   [ -f "$OLD_MODULE/config/package_states" ] && old_states_present=1
-  for name in state packages.txt package_states; do
+  for name in state packages.txt package_states config_generation .package_baseline; do
     [ -f "$OLD_MODULE/config/$name" ] || continue
     cp -f "$OLD_MODULE/config/$name" "$MODDIR/config/$name" 2>/dev/null
   done
@@ -76,13 +76,12 @@ if [ "$MODDIR" != "$OLD_MODULE" ] && [ -d "$OLD_MODULE/config" ]; then
   fi
 fi
 
-# A root-level action.sh creates the manager's Action button. v1.5.5-fix uses an
+# A root-level action.sh creates the manager's Action button. Current releases use an
 # internal command instead, so remove the legacy entry from both update paths.
 rm -f "$MODDIR/action.sh" 2>/dev/null
-rm -f "$MODDIR/share_logs.sh" "$MODDIR/config/.package_baseline" \
-  "$MODDIR/config/config_generation" 2>/dev/null
+rm -f "$MODDIR/share_logs.sh" 2>/dev/null
 
-# v1.5.5-fix uses only the native patcher. Remove exact files from this
+# Current releases use only the native patcher. Remove exact files from this
 # module's retired preload/inject paths; never use broad audio-module matches.
 for legacy_module in "$MODDIR" /data/adb/modules/a2h_hook /data/adb/modules_update/a2h_hook; do
   [ -d "$legacy_module" ] || continue
@@ -181,13 +180,63 @@ if [ ! -f "$MODDIR/config/package_states" ]; then
 fi
 
 # Strip UTF-8 BOM from critical text files if any
-for f in "$MODDIR/module.prop" "$MODDIR/config/packages.txt" "$MODDIR/config/package_states" "$MODDIR/config/state" "$MODDIR/webroot/index.html"; do
+for f in "$MODDIR/module.prop" "$MODDIR/config/packages.txt" "$MODDIR/config/package_states" "$MODDIR/config/config_generation" "$MODDIR/config/.package_baseline" "$MODDIR/config/state" "$MODDIR/webroot/index.html"; do
   [ -f "$f" ] || continue
   # remove BOM if present
   if [ "$(dd if="$f" bs=1 count=3 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
     tail -c +4 "$f" > "$f.nobom" 2>/dev/null && mv "$f.nobom" "$f" 2>/dev/null
   fi
 done
+
+# Preserve a valid migrated baseline, or build one when the table is already
+# complete. This closes the window before the first service normalize.
+generation_value=$(cat "$MODDIR/config/config_generation" 2>/dev/null | tr -d '\r' | head -n 1)
+case "$generation_value" in
+  ''|*[!0-9]*)
+    generation_value=$(sed -n '12s/^generation=//p' "$MODDIR/config/.package_baseline" 2>/dev/null)
+    case "$generation_value" in
+      ''|*[!0-9]*) generation_value=0 ;;
+    esac
+    ;;
+esac
+generation_tmp="$MODDIR/config/.generation.install.$$"
+printf '%s\n' "$generation_value" > "$generation_tmp" 2>/dev/null &&
+  chmod 0644 "$generation_tmp" 2>/dev/null &&
+  mv -f "$generation_tmp" "$MODDIR/config/config_generation" 2>/dev/null
+rm -f "$generation_tmp" 2>/dev/null
+
+baseline_tmp="$MODDIR/config/.package_baseline.install.$$"
+rm -f "$baseline_tmp" 2>/dev/null
+baseline_valid=0
+if [ -f "$MODDIR/config/.package_baseline" ] &&
+   [ "$(wc -l < "$MODDIR/config/.package_baseline" 2>/dev/null | tr -d ' ')" = "12" ]; then
+  baseline_state=$(sed -n '11s/^states=//p' "$MODDIR/config/.package_baseline" 2>/dev/null)
+  baseline_generation=$(sed -n '12s/^generation=//p' "$MODDIR/config/.package_baseline" 2>/dev/null)
+  case "$baseline_state" in
+    *:*) ;;
+    *) baseline_state=invalid ;;
+  esac
+  case "$baseline_generation" in
+    ''|*[!0-9]*) baseline_generation=invalid ;;
+  esac
+  if [ "$baseline_state" != "invalid" ] && [ "$baseline_generation" != "invalid" ]; then
+    baseline_valid=1
+  fi
+fi
+if [ "$baseline_valid" = "0" ] &&
+   [ "$(wc -l < "$MODDIR/config/packages.txt" 2>/dev/null | tr -d ' ')" = "10" ] &&
+   [ "$(wc -l < "$MODDIR/config/package_states" 2>/dev/null | tr -d ' ')" = "10" ] &&
+   awk '($0 != "0" && $0 != "1") { bad=1 } END { exit bad ? 1 : 0 }' "$MODDIR/config/package_states" 2>/dev/null; then
+  install_state_signature=$(cksum < "$MODDIR/config/package_states" 2>/dev/null | awk '{print $1 ":" $2}')
+  {
+    sed -n '1,10p' "$MODDIR/config/packages.txt"
+    printf 'states=%s\n' "$install_state_signature"
+    printf 'generation=%s\n' "$generation_value"
+  } > "$baseline_tmp" 2>/dev/null &&
+    chmod 0600 "$baseline_tmp" 2>/dev/null &&
+    mv -f "$baseline_tmp" "$MODDIR/config/.package_baseline" 2>/dev/null
+fi
+rm -f "$baseline_tmp" 2>/dev/null
 
 chmod 755 \
   "$MODDIR/bin/a2h_patch" \
@@ -203,9 +252,12 @@ chmod 644 \
   "$MODDIR/webui.png" \
   "$MODDIR/config/packages.txt" \
   "$MODDIR/config/package_states" \
+  "$MODDIR/config/config_generation" \
   "$MODDIR/config/state" \
   "$MODDIR/webroot/index.html" \
   "$MODDIR/webroot/coolapk.png" 2>/dev/null
+
+chmod 600 "$MODDIR/config/.package_baseline" 2>/dev/null
 
 if [ -f "$MODDIR/webroot/index.html" ]; then
   ui_print "- WebUI 已就绪，请在 KernelSU / 模块栏直接打开"

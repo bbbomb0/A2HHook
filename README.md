@@ -11,13 +11,13 @@ A2HHook 是面向 REDMI K80 Ultra / K80U 的音乐触感模块，目标是在 Ke
 - 模块栏 WebUI 入口；
 - 文件管理器直接修改 `config/packages.txt` 后自动热更新。
 
-当前版本：`v1.5.5-fix`。
+当前版本：`v1.5.5-fix2`。`v1.5.5-fix` 作为第一代修复版继续保留，本版是后续第二代修复迭代。
 
 ## 下载安装
 
 请到 GitHub Releases 下载：
 
-- `a2h_hook_v1.5.5-fix.zip`
+- `a2h_hook_v1.5.5-fix2.zip`
 
 刷入方式：
 
@@ -40,7 +40,7 @@ com.kugou.android
 
 第 7～10 槽用于自定义包名。每个槽位都可单独关闭，关闭后包名仍会保留。
 
-也可以使用 Root 文件管理器直接编辑模块目录中的 `config/packages.txt`。保存稳定后，后台 watcher 会自动规范为 10 槽并热更新；新增或改名的有效唯一包名会自动启用，清空槽位会自动关闭。
+也可以使用 Root 文件管理器直接编辑模块目录中的 `config/packages.txt`。后台 watcher 优先使用系统文件事件，连续确认写入稳定后才规范为 10 槽并热更新；缺少事件工具时自动退回 2 秒轮询。新增或改名的有效唯一包名会自动启用，清空槽位会自动关闭。HAL 健康检查仍保持约 30 秒周期，不会因热更新提速而高频执行 native live-check。
 
 ## 兼容性说明
 
@@ -78,7 +78,7 @@ python package_module.py .
 构建完成后会生成：
 
 ```text
-a2h_hook_v1.5.5-fix.zip
+a2h_hook_v1.5.5-fix2.zip
 ```
 
 ## 仓库结构

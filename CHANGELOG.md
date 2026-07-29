@@ -1,5 +1,19 @@
 # 更新日志
 
+## v1.5.5-fix2
+
+- 保留 `v1.5.5-fix` 第一代修复版的标签、Release 与下载资产；本版使用独立的 `v1.5.5-fix2` / `versionCode=1552`，作为第二代修复迭代。
+- 收紧 `build.sh clean` 的清理范围，只删除当前版本生成包，不再清理项目根目录中的第一代或其他历史模块包。
+- 修复 Root 文件管理器只修改 `packages.txt` 第 7～10 槽时，旧 `package_states` 校验值轻微漂移会阻止新包名自动启用、随后又被错误吸收到隐藏基线的问题。现在由“包名基线变化且 generation 未变化”识别单文件编辑，state 差异仅记录诊断。
+- watcher 优先通过系统 `inotifyd` 接收配置事件，仅在事件、debounce 或健康周期到达时计算签名；缺少 `inotifyd` 时自动退回 2 秒签名轮询。连续两次签名一致后才处理，HAL native live-check 始终保持约 30 秒周期；事件模式可减少空闲 checksum/awk，轮询回退也不会提高 ptrace 频率。
+- watcher 在配置、apply 或 queue worker 正忙时快速延后，减少锁等待、重复应用和 `lock-timeout` 噪声；失败重试仍保留约 50 秒起的有界指数退避。
+- WebUI 成组提交顺序改为 `packages.txt`、`package_states`、`config_generation`，generation 最后落盘作为完整事务标记；提交前备份旧配置，普通写入失败或中断时在释放锁前完整回滚，并为 Root 命令设置严格等待上限和超时余量。
+- queue worker 在应用失败并释放锁后会重新接管并发到达的 pending 请求，避免极窄竞态下配置请求无人消费；`inotifyd` 回调只响应四个用户配置文件，忽略 baseline、revision 与临时文件事件。
+- 安装和覆盖升级时保留 generation 与有效旧 baseline；仅在 baseline 缺失或损坏且配置完整时重建，既关闭首次开机服务规范化前的识别空窗，也保留尚未处理的包名差异。
+- 修正干净首次安装时对尚不存在的隐藏 baseline 直接做输入重定向而产生的无害报错；现在先检查文件存在性，再验证或安静重建基线。
+- 新增生产 normalizer 运行回归，覆盖第 8 槽单文件改名、state CRC 漂移、清空槽位、WebUI 显式关闭、baseline 缺失恢复与幂等；OS3.0.302 设备脚本新增 watcher-only 第 8 槽验证并完整备份派生配置。
+- native HAL 定位、76 字节 matcher、页尾白名单表、补丁双写、两次 I-cache flush 与失败事务回滚保持不变。
+
 ## v1.5.5-fix
 
 - 针对已提供的 HyperOS 3.0.305 HAL 增加严格 profile 与 ELF / 运行时映射身份校验；遇到无法证明归属的外部跳板时安全拒绝，不按短函数头盲目覆盖。该系统仍标记为待对应实机验证。

@@ -39,7 +39,8 @@ does not attach to or modify the phone audio process.
 ## ZIP verification
 
 ```powershell
-python tests/verify_module_zip.py .\a2h_hook_v1.5.5-fix.zip
+python tests/verify_module_zip.py .\a2h_hook_v1.5.5-fix2.zip `
+  --expected-version v1.5.5-fix2 --expected-code 1552
 ```
 
 This independently checks the exact member list, duplicates, path portability,
@@ -52,7 +53,7 @@ Preflight only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.5-fix
+  -ExpectedVersion v1.5.5-fix2
 ```
 
 Full two-round test after the candidate module is installed and the phone has
@@ -60,14 +61,15 @@ rebooted:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.5-fix -Execute -AllowAudioRestart
+  -ExpectedVersion v1.5.5-fix2 -Execute -AllowAudioRestart
 ```
 
-The device case backs up and restores the four user configuration files. It
-tests global/whitelist round trips, official and custom slot counts, per-slot
-off/on, package-table preservation during mode changes, two audio-HAL PID
-restarts, watcher re-application, and the marker payload used by WebUI state
-loading. A final manual close/reopen of the ReSukiSU WebUI remains required,
+The device case waits for the apply queue to become idle, backs up persistent
+and derived configuration, and requires a verified native restore before it
+exits. It tests global/whitelist round trips, official and custom slot counts,
+per-slot off/on, package-table preservation, two audio-HAL PID restarts,
+watcher re-application, and atomic plus multi-stage slot-8 file-manager edits.
+A final manual close/reopen of the ReSukiSU WebUI remains required,
 because that manager exports only its main activity and has no stable direct
 intent for its internal module-WebUI route.
 

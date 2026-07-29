@@ -1,4 +1,4 @@
-// a2h_patch v1.5.5-fix - universal signature/ELF scan + 10-slot whitelist
+// a2h_patch v1.5.5-fix2 - universal signature/ELF scan + 10-slot whitelist
 #define _GNU_SOURCE
 #include <stdint.h>
 #include <stdio.h>
@@ -61,7 +61,7 @@
 #define PTRACE_POKETEXT 4
 #define PTRACE_POKEDATA 5
 #define MAX_SLOTS 10
-#define A2H_VERSION "1.5.5-fix"
+#define A2H_VERSION "1.5.5-fix2"
 #define WHITELIST_CAVE_BYTES (MAX_SLOTS * 64 + 16 + MAX_SLOTS * 8 + 32)
 #define WHITELIST_STUB_WORDS 19
 #define WHITELIST_STUB_BYTES (WHITELIST_STUB_WORDS * sizeof(uint32_t))
