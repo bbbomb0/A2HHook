@@ -1,5 +1,17 @@
 # 更新日志
 
+## v1.5.5-fix3
+
+- 修复 K80U / HyperOS 3.0.302 播放音频时约每 30 秒出现一次短暂卡顿的问题。根因是 watcher 的周期 `a2h_apply check` 会让 native patcher 通过 ptrace 暂停整个音频 HAL 线程组。
+- 保留约 30 秒的轻量健康探测，但稳态仅核对 HAL PID、配置快照、revision 与失败重试状态，不再进入 native check；通知状态确认也改用同一组非侵入式元数据，避免状态不一致时从间接路径重新触发 ptrace。
+- 修复 `inotifyd` 重建单文件监听时原子替换事件可能落入注册窗口、导致 `packages.txt` 热更新延迟到下一次 30 秒轻量探测的问题；监听重建后用短期签名轮询覆盖窗口，不触发 native check 或 ptrace。
+- 保留真实 apply 后的 native 验证、补丁双写、两次 I-cache 同步、完整 76 字节 matcher、页尾白名单表与失败回滚，不以削弱 OS2/OS3 兼容保护换取流畅度。
+- 新增生产 watcher 40 周期运行回归：稳定 PID 与配置下必须得到 `native=0`、`apply=0`，同时保持两次轻量 PID 探测；静态契约也禁止稳态 watcher 调用 check/status/show。
+- OS3.0.302 的 HAL 重启回归改为轮询 `last_pid`、applied snapshot 与 revision，确认 watcher 已完成恢复后只执行一次最终 native 验证，避免测试本身高频暂停音频 HAL。
+- 开机早期会清理 `/data/local/tmp` 中仅属于 A2HHook 的上次开机 pending、worker/apply/config 锁与临时配置；清理受 `sys.boot_completed != 1` 限制，系统启动后手动触发脚本不会干扰当前 worker。
+- 同 PID 且配置未变化时不再周期抢回被其他模块覆盖的补丁；这是避免实时音频中断的有意边界，发生冲突时应停用同类模块，或切换模式/重启后重新应用。
+- 版本独立迭代为 `v1.5.5-fix3` / `versionCode=1553`；`v1.5.5-fix` 与 `v1.5.5-fix2` 的历史标签、Release 和下载资产不覆盖、不删除。
+
 ## v1.5.5-fix2
 
 - 保留 `v1.5.5-fix` 第一代修复版的标签、Release 与下载资产；本版使用独立的 `v1.5.5-fix2` / `versionCode=1552`，作为第二代修复迭代。

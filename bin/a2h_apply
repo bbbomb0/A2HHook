@@ -483,18 +483,48 @@ compute_raw_config_signature() {
 
 record_revision() {
   revision_old_snapshot=$(cat "$CFG_SNAPSHOT" 2>/dev/null)
-  revision_old=$(cat "$CFG_REVISION" 2>/dev/null | tr -d '\r' | head -n 1)
+  revision_needs_repair=0
+  if [ -f "$CFG_REVISION" ]; then
+    if revision_raw=$(cat "$CFG_REVISION" 2>/dev/null); then
+      :
+    else
+      revision_raw=
+      revision_needs_repair=1
+    fi
+  else
+    revision_raw=
+    revision_needs_repair=1
+  fi
+  revision_old=$(printf '%s\n' "$revision_raw" | tr -d '\r' | head -n 1)
   case "$revision_old" in
-    ''|*[!0-9]*) revision_old=0 ;;
+    ''|*[!0-9]*)
+      revision_old=0
+      revision_needs_repair=1
+      ;;
+    *)
+      while [ "$revision_old" != "0" ] &&
+            [ "${revision_old#0}" != "$revision_old" ]; do
+        revision_old=${revision_old#0}
+      done
+      ;;
   esac
+  [ "$revision_raw" = "$revision_old" ] || revision_needs_repair=1
   if [ "$revision_old_snapshot" != "$CURRENT_SNAPSHOT" ]; then
     CURRENT_REVISION=$((revision_old + 1))
     [ "$CURRENT_REVISION" -gt 0 ] 2>/dev/null || CURRENT_REVISION=1
-    write_value_atomic "$CFG_SNAPSHOT" "$CURRENT_SNAPSHOT" 0644 || return 1
     write_value_atomic "$CFG_REVISION" "$CURRENT_REVISION" 0644 || return 1
+    write_value_atomic "$CFG_SNAPSHOT" "$CURRENT_SNAPSHOT" 0644 || return 1
     log "config revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT mode=$CURRENT_MODE"
   else
     CURRENT_REVISION=$revision_old
+    if ! [ "$CURRENT_REVISION" -gt 0 ] 2>/dev/null; then
+      CURRENT_REVISION=1
+      revision_needs_repair=1
+    fi
+    if [ "$revision_needs_repair" = "1" ]; then
+      write_value_atomic "$CFG_REVISION" "$CURRENT_REVISION" 0644 || return 1
+      log "config revision repaired revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT"
+    fi
   fi
   return 0
 }
@@ -932,7 +962,10 @@ apply_current() {
   fi
 
   if [ "$apply_rc" -eq 0 ] && [ "$check_rc" -eq 0 ]; then
-    write_value_atomic "$LAST_PID_FILE" "$HAL_PID" 0644 || true
+    if ! write_value_atomic "$LAST_PID_FILE" "$HAL_PID" 0644; then
+      log "apply FAIL reason=$apply_reason pid=$HAL_PID mode=$apply_want error=record-last-pid revision=$CURRENT_REVISION"
+      return 74
+    fi
     log "apply verified reason=$apply_reason pid=$HAL_PID mode=$apply_want revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT"
     return 0
   fi
@@ -973,6 +1006,10 @@ apply_stable() {
       stable_patch_rc=0
     else
       stable_patch_rc=$?
+    fi
+    if [ "$stable_patch_rc" -eq 74 ]; then
+      stable_rc=74
+      break
     fi
     if ! prepare_config; then
       log "apply FAIL reason=$stable_reason error=config-recheck attempt=$stable_try"

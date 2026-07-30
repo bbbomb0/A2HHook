@@ -24,7 +24,9 @@ CFG_PKGS="$CFG_DIR/packages.txt"
 CFG_STATES="$CFG_DIR/package_states"
 CFG_GENERATION="$CFG_DIR/config_generation"
 CFG_SNAPSHOT="$CFG_DIR/config_snapshot"
+CFG_REVISION="$CFG_DIR/revision"
 APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
+APPLIED_REVISION="$CFG_DIR/applied_revision"
 LAST_PID_FILE="$CFG_DIR/last_pid"
 NOTIFICATION_STATE_FILE="$CFG_DIR/notification_state"
 NOTIFICATION_RETRY_FILE="$CFG_DIR/notification_retry_state"
@@ -135,12 +137,23 @@ notification_text() {
   fi
 }
 
-notification_live_result() {
-  notification_mode=$(cat "$CFG_STATE" 2>/dev/null | tr -d '\r' | head -n 1)
-  notification_want=whitelist
-  [ "$notification_mode" = "enabled" ] && notification_want=global
-  if [ -f "$APPLIER" ] &&
-     A2H_QUIET_CHECK=1 A2H_QUIET_PREPARE=1 sh "$APPLIER" check "$notification_want" >/dev/null 2>&1; then
+notification_runtime_result() {
+  notification_pid=$(find_hal_pid)
+  notification_last_pid=$(cat "$LAST_PID_FILE" 2>/dev/null)
+  notification_snapshot_state=$(A2H_QUIET_PREPARE=1 sh "$APPLIER" snapshot-state 2>/dev/null)
+  case "$notification_snapshot_state" in
+    *'|'*) notification_snapshot=${notification_snapshot_state%%|*} ;;
+    *) notification_snapshot= ;;
+  esac
+  notification_revision=$(cat "$CFG_REVISION" 2>/dev/null)
+  notification_applied_snapshot=$(cat "$APPLIED_SNAPSHOT" 2>/dev/null)
+  notification_applied_revision=$(cat "$APPLIED_REVISION" 2>/dev/null)
+  if [ -n "$notification_pid" ] &&
+     [ "$notification_pid" = "$notification_last_pid" ] &&
+     [ -n "$notification_snapshot" ] &&
+     [ "$notification_snapshot" = "$notification_applied_snapshot" ] &&
+     [ -n "$notification_revision" ] &&
+     [ "$notification_revision" = "$notification_applied_revision" ]; then
     printf '%s\n' success
   else
     printf '%s\n' failure
@@ -198,7 +211,7 @@ post_boot_notification() {
     return 0
   fi
 
-  notification_result=$(notification_live_result)
+  notification_result=$(notification_runtime_result)
   [ -n "$notification_result" ] || notification_result=failure
   if [ "$notification_result" != "$notification_requested" ]; then
     log "notification state refreshed requested=$notification_requested actual=$notification_result"
@@ -289,9 +302,20 @@ log "boot auto-apply start"
 boot_ok=0
 boot_try=1
 boot_delay=1
+boot_attempts=0
+boot_failure_reason=retry-exhausted
 while [ "$boot_try" -le 8 ]; do
+  boot_attempts=$boot_try
+  boot_rc=0
   if apply_once "boot#$boot_try"; then
     boot_ok=1
+    break
+  else
+    boot_rc=$?
+  fi
+  if [ "$boot_rc" -eq 74 ]; then
+    boot_failure_reason=metadata-io
+    log "boot auto-apply metadata commit failed rc=$boot_rc; deferring to watcher bounded backoff"
     break
   fi
   log "boot auto-apply retry=$boot_try delay=${boot_delay}s"
@@ -310,7 +334,7 @@ if [ "$boot_ok" = "1" ]; then
   runtime_status=success
   post_boot_notification success &
 else
-  log "boot auto-apply TIMEOUT attempts=8; watcher will continue with bounded backoff"
+  log "boot auto-apply incomplete reason=$boot_failure_reason attempts=$boot_attempts; watcher will continue with bounded backoff"
   runtime_status=failure
   post_boot_notification failure &
 fi
@@ -339,6 +363,7 @@ pending_busy_logged=0
 watch_tick_seconds=2
 watch_stable_ticks=2
 watch_health_ticks=15
+config_poll_grace_ticks=0
 next_health_cycle=$watch_health_ticks
 log "watcher start pid=${last_pid:-none} tick=${watch_tick_seconds}s stable_ticks=$watch_stable_ticks health_interval=$((watch_tick_seconds * watch_health_ticks))s"
 
@@ -359,14 +384,22 @@ while true; do
   [ "$config_inotify_enabled" = "0" ] && signature_needed=1
   [ -n "$pending_raw_signature" ] && signature_needed=1
   [ "$health_due" = "1" ] && signature_needed=1
+  [ "$config_poll_grace_ticks" -gt 0 ] && signature_needed=1
   if [ -f "$CONFIG_EVENT_MARKER" ]; then
     signature_needed=1
     refresh_config_inotify
+    # inotifyd can be alive just before its replacement watches are registered.
+    # Poll through that short rearm window so an atomic file-manager save cannot
+    # disappear until the next 30-second health probe.
+    config_poll_grace_ticks=$((watch_stable_ticks + 1))
   fi
   if [ "$signature_needed" = "1" ]; then
     raw_signature_now=$(raw_config_signature)
   else
     raw_signature_now=$last_raw_signature
+  fi
+  if [ "$config_poll_grace_ticks" -gt 0 ]; then
+    config_poll_grace_ticks=$((config_poll_grace_ticks - 1))
   fi
 
   config_ready=0
@@ -441,7 +474,9 @@ while true; do
   pending_busy_logged=0
   next_health_cycle=$((watch_cycle + watch_health_ticks))
   current_pid=$(find_hal_pid)
+  current_revision=$(cat "$CFG_REVISION" 2>/dev/null)
   applied_snapshot=$(cat "$APPLIED_SNAPSHOT" 2>/dev/null)
+  applied_revision=$(cat "$APPLIED_REVISION" 2>/dev/null)
   need_apply=0
   apply_reason=
 
@@ -452,7 +487,7 @@ while true; do
     continue
   fi
 
-  attempt_key="$current_pid|$current_snapshot"
+  attempt_key="$current_pid|$current_revision|$current_snapshot"
   if [ "$attempt_key" = "$failed_key" ] && [ "$watch_cycle" -lt "$failure_retry_cycle" ]; then
     next_failure_probe=$((watch_cycle + watch_health_ticks))
     if [ "$failure_retry_cycle" -lt "$next_failure_probe" ]; then
@@ -470,26 +505,19 @@ while true; do
     log "watcher HAL pid changed ${last_pid:-none} -> $current_pid"
   fi
 
-  if [ "$current_snapshot" != "$applied_snapshot" ]; then
+  if [ "$current_snapshot" != "$applied_snapshot" ] ||
+     [ "$current_revision" != "$applied_revision" ]; then
     need_apply=1
     if [ -n "$apply_reason" ]; then
       apply_reason="$apply_reason,config-change"
     else
       apply_reason=config-change
     fi
-    log "watcher config changed applied=${applied_snapshot:-none} current=$current_snapshot"
+    log "watcher config changed applied=${applied_revision:-none}/${applied_snapshot:-none} current=${current_revision:-none}/$current_snapshot"
   fi
 
-  if [ "$need_apply" = "0" ] && [ "$health_due" = "1" ]; then
-    watch_mode=$(cat "$CFG_STATE" 2>/dev/null | tr -d '\r' | head -n 1)
-    watch_want=whitelist
-    [ "$watch_mode" = "enabled" ] && watch_want=global
-    if ! A2H_QUIET_CHECK=1 A2H_QUIET_PREPARE=1 sh "$APPLIER" check "$watch_want" >/dev/null 2>&1; then
-      need_apply=1
-      apply_reason=live-check
-      log "watcher live check failed pid=$current_pid mode=$watch_want"
-    fi
-  fi
+  # Stable health probes stop at PID and snapshot metadata. Native --check
+  # freezes every HAL thread, so it is reserved for real apply verification.
 
   if [ "$need_apply" = "1" ]; then
     if apply_once "watch:$apply_reason"; then
