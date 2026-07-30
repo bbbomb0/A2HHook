@@ -25,7 +25,7 @@ OFFICIAL = (
     "com.luna.music",
 )
 
-EXPECTED_RELEASE = ("v1.5.5-fix2", "1552")
+EXPECTED_RELEASE = ("v1.5.5-fix3", "1553")
 
 HAL_CASES = {
     "OS2.0.218.0.VONCNXM": {
@@ -133,6 +133,18 @@ def locate_ndk(explicit: Path | None) -> Path | None:
     for candidate in candidates:
         if (candidate / "build/cmake/android.toolchain.cmake").is_file():
             return candidate.resolve()
+    return None
+
+
+def locate_posix_shell() -> str | None:
+    git_shells = [
+        r"C:\Program Files\Git\bin\sh.exe",
+        r"C:\Program Files\Git\usr\bin\sh.exe",
+    ]
+    candidates = git_shells + [shutil.which("sh")] if os.name == "nt" else [shutil.which("sh")]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return str(candidate)
     return None
 
 
@@ -271,7 +283,11 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     )
 
     service = (root / "service.sh").read_text(encoding="utf-8")
-    watcher = extract_function(service, "last_pid=$(cat", "done\n")
+    watcher = extract_function(
+        service,
+        'last_pid=$(cat "$LAST_PID_FILE" 2>/dev/null)\nlast_raw_signature=$(raw_config_signature)',
+        "done\n",
+    )
     watcher_contract = (
         "watch_tick_seconds=2" in watcher
         and "watch_stable_ticks=2" in watcher
@@ -283,15 +299,71 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and 'state|packages.txt|package_states|config_generation)' in service
         and "inotifyd" in service
         and "signature_needed" in watcher
+        and "config_poll_grace_ticks" in watcher
+        and "watch_stable_ticks + 1" in watcher
         and "sleep 25" not in watcher
         and "Never let the slower health path" in watcher
+        and 'current_pid=$(find_hal_pid)' in watcher
+        and 'current_revision=$(cat "$CFG_REVISION"' in watcher
+        and 'applied_revision=$(cat "$APPLIED_REVISION"' in watcher
+        and 'if [ "$current_pid" != "$last_pid" ]; then' in watcher
+        and '[ "$current_snapshot" != "$applied_snapshot" ] ||' in watcher
+        and '[ "$current_revision" != "$applied_revision" ]' in watcher
+        and '"$APPLIER" check' not in watcher
+        and '"$APPLIER" status' not in watcher
+        and '"$APPLIER" show' not in watcher
+        and "apply_reason=live-check" not in watcher
+    )
+
+    notification = extract_function(
+        service, "notification_runtime_result() {", "record_notification_marker() {"
+    )
+    notification_contract = (
+        bool(notification)
+        and 'sh "$APPLIER" snapshot-state' in notification
+        and 'notification_pid=$(find_hal_pid)' in notification
+        and '"$notification_pid" = "$notification_last_pid"' in notification
+        and '"$notification_snapshot" = "$notification_applied_snapshot"' in notification
+        and '"$notification_revision" = "$notification_applied_revision"' in notification
+        and '"$APPLIER" check' not in service
+        and '"$APPLIER" status' not in service
+        and '"$APPLIER" show' not in service
+    )
+    report.check(
+        notification_contract,
+        "non-intrusive service notification contract",
+        "automatic notification and watcher paths use PID/config metadata without native inspection",
+        "service notification metadata checks are incomplete or an automatic native inspection returned",
     )
     report.check(
         watcher_contract,
-        "file-manager watcher latency contract",
-        "2-second debounce is separated from 30-second HAL health checks",
-        "fast config debounce or slow health isolation is incomplete",
+        "non-intrusive watcher health contract",
+        "2-second debounce and 30-second PID/config probes never launch a native inspection",
+        "watcher debounce/probes are incomplete or a periodic native inspection returned",
     )
+
+    shell = locate_posix_shell()
+    if not shell:
+        report.gap("watcher steady-state runtime regression", "POSIX sh is required")
+    else:
+        rc, output = run_command(
+            [shell, "tests/watcher_steady_state_harness.sh", "service.sh"], root
+        )
+        report.check(
+            rc == 0 and "WATCHER_STEADY_PASS" in output,
+            "watcher steady-state runtime regression",
+            output.strip(),
+            output.strip() or f"harness exited {rc}",
+        )
+        rc, output = run_command(
+            [shell, "tests/watcher_event_rearm_harness.sh", "service.sh"], root
+        )
+        report.check(
+            rc == 0 and "WATCHER_REARM_PASS" in output,
+            "watcher inotify rearm runtime regression",
+            output.strip(),
+            output.strip() or f"harness exited {rc}",
+        )
 
     applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
     report.check(
@@ -300,6 +372,25 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "queue worker failure handoff",
         "a request arriving during a failed apply is reclaimed or left for a new worker",
         "failed worker can release its lock while leaving an unconsumed pending request",
+    )
+
+    postfs = (root / "post-fs-data.sh").read_text(encoding="utf-8")
+    postfs_contract = (
+        'cleanup_stale_runtime /data/local/tmp' in postfs
+        and 'getprop sys.boot_completed' in postfs
+        and '!= "1"' in postfs
+        and "a2h_apply.pending" in postfs
+        and "a2h_apply.worker" in postfs
+        and "a2h_apply.lock" in postfs
+        and "a2h_config.lock" in postfs
+        and "a2h_packages.txt" in postfs
+        and "a2h_state" in postfs
+    )
+    report.check(
+        postfs_contract,
+        "previous-boot runtime cleanup contract",
+        "post-fs-data gates module-only pending/lock/temp cleanup before boot completion",
+        "early-boot guard or one of the module runtime artifacts is missing",
     )
 
     packager = (root / "package_module.py").read_text(encoding="utf-8")
@@ -586,6 +677,410 @@ printf 'PASS configuration hot-update runtime regression\n'
         "configuration hot-update runtime regression",
         "slot 8 edit, state drift, grouped commit, clear, baseline recovery, and idempotence passed",
         output.strip(),
+    )
+
+
+def check_revision_metadata_repair(root: Path, report: Report, use_adb: bool) -> None:
+    applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
+    atomic_block = extract_function(applier, "commit_tmp() {", "write_default_packages() {")
+    revision_block = extract_function(applier, "record_revision() {", "prepare_config_unlocked() {")
+    if not atomic_block or not revision_block:
+        report.add("FAIL", "revision metadata repair regression", "production atomic/revision functions not found")
+        return
+
+    harness = atomic_block + revision_block + r'''
+set -eu
+base=__METADATA_TEST_BASE__/a2h_revision_metadata_$$
+CFG_DIR="$base/config"
+CFG_SNAPSHOT="$CFG_DIR/config_snapshot"
+CFG_REVISION="$CFG_DIR/revision"
+TEST_LOG="$base/test.log"
+CURRENT_SNAPSHOT=314159:26
+CURRENT_REVISION=0
+ACTIVE_COUNT=6
+CURRENT_MODE=disabled
+metadata_mv_calls=0
+metadata_fail_snapshot=0
+METADATA_MV_LOG="$base/mv.log"
+
+fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
+log() { printf '%s\n' "$*" >> "$TEST_LOG"; }
+mv() {
+  metadata_mv_calls=$((metadata_mv_calls + 1))
+  case "${3:-}" in
+    "$CFG_REVISION") printf 'revision\n' >> "$METADATA_MV_LOG" ;;
+    "$CFG_SNAPSHOT")
+      printf 'snapshot\n' >> "$METADATA_MV_LOG"
+      [ "$metadata_fail_snapshot" != 1 ] || return 73
+      ;;
+  esac
+  command mv "$@"
+}
+cleanup() { rm -rf "$base"; }
+trap cleanup 0 1 2 15
+mkdir -p "$CFG_DIR"
+: > "$TEST_LOG"
+
+run_revision_case() {
+  case_label=$1
+  case_input=$2
+  case_expected=$3
+  rm -rf "$CFG_DIR"
+  mkdir -p "$CFG_DIR"
+  printf '%s\n' "$CURRENT_SNAPSHOT" > "$CFG_SNAPSHOT"
+  case "$case_input" in
+    missing) rm -f "$CFG_REVISION" ;;
+    invalid) printf 'not-a-number\n' > "$CFG_REVISION" ;;
+    # A trailing CR without LF remains observable under MSYS command
+    # substitution while exercising the same Android normalization path.
+    cr) printf '7\r' > "$CFG_REVISION" ;;
+    *) fail "$case_label-unknown-input" ;;
+  esac
+
+  snapshot_before=$(cksum < "$CFG_SNAPSHOT")
+  metadata_mv_calls=0
+  CURRENT_REVISION=999
+  record_revision || fail "$case_label-first-repair"
+  [ "$CURRENT_REVISION" = "$case_expected" ] || fail "$case_label-current-first"
+  printf '%s\n' "$case_expected" > "$base/expected-revision"
+  cmp -s "$base/expected-revision" "$CFG_REVISION" || fail "$case_label-canonical-file"
+  [ "$metadata_mv_calls" = 1 ] || fail "$case_label-not-atomic-moves-$metadata_mv_calls"
+  [ "$(cksum < "$CFG_SNAPSHOT")" = "$snapshot_before" ] || fail "$case_label-snapshot-rewritten"
+
+  revision_after_first=$(cksum < "$CFG_REVISION")
+  metadata_mv_calls=0
+  CURRENT_REVISION=999
+  record_revision || fail "$case_label-second-repair"
+  [ "$CURRENT_REVISION" = "$case_expected" ] || fail "$case_label-current-second"
+  [ "$(cksum < "$CFG_REVISION")" = "$revision_after_first" ] || fail "$case_label-second-content"
+  [ "$metadata_mv_calls" = 0 ] || fail "$case_label-second-not-idempotent"
+  [ "$(cksum < "$CFG_SNAPSHOT")" = "$snapshot_before" ] || fail "$case_label-second-snapshot"
+}
+
+run_revision_case missing missing 1
+run_revision_case nonnumeric invalid 1
+run_revision_case carriage-return cr 7
+
+# A changed snapshot is committed last. If that second atomic move fails, the
+# old snapshot remains visibly stale so a later prepare cannot accept an old
+# legal revision as current metadata.
+rm -rf "$CFG_DIR"
+mkdir -p "$CFG_DIR"
+CURRENT_SNAPSHOT=changed:200
+printf 'old:100\n' > "$CFG_SNAPSHOT"
+printf '7\n' > "$CFG_REVISION"
+: > "$METADATA_MV_LOG"
+metadata_mv_calls=0
+metadata_fail_snapshot=1
+if record_revision; then
+  fail changed-snapshot-failure-was-swallowed
+fi
+metadata_fail_snapshot=0
+[ "$metadata_mv_calls" = 2 ] || fail changed-first-move-count-$metadata_mv_calls
+printf 'revision\nsnapshot\n' > "$base/expected-mv-order"
+cmp -s "$base/expected-mv-order" "$METADATA_MV_LOG" || fail changed-unsafe-mv-order
+[ "$(cat "$CFG_SNAPSHOT")" = old:100 ] || fail changed-failed-snapshot-visible-as-current
+first_failed_revision=$(cat "$CFG_REVISION" 2>/dev/null || true)
+case "$first_failed_revision" in
+  ''|*[!0-9]*) fail changed-first-revision-invalid ;;
+esac
+[ "$first_failed_revision" -gt 7 ] || fail changed-first-revision-not-advanced
+[ ! "$(cat "$CFG_SNAPSHOT")" = "$CURRENT_SNAPSHOT" ] ||
+  [ ! "$first_failed_revision" = 7 ] || fail changed-old-revision-accepted
+
+: > "$METADATA_MV_LOG"
+metadata_mv_calls=0
+record_revision || fail changed-retry
+[ "$(cat "$CFG_SNAPSHOT")" = "$CURRENT_SNAPSHOT" ] || fail changed-retry-snapshot
+recovered_revision=$(cat "$CFG_REVISION")
+case "$recovered_revision" in
+  ''|*[!0-9]*) fail changed-retry-revision-invalid ;;
+esac
+[ "$recovered_revision" -gt 7 ] || fail changed-retry-revision-not-advanced
+[ "$CURRENT_REVISION" = "$recovered_revision" ] || fail changed-retry-current-revision
+
+recovered_revision_sum=$(cksum < "$CFG_REVISION")
+recovered_snapshot_sum=$(cksum < "$CFG_SNAPSHOT")
+: > "$METADATA_MV_LOG"
+metadata_mv_calls=0
+record_revision || fail changed-idempotent
+[ "$metadata_mv_calls" = 0 ] || fail changed-idempotent-moved-$metadata_mv_calls
+[ "$(cksum < "$CFG_REVISION")" = "$recovered_revision_sum" ] || fail changed-idempotent-revision
+[ "$(cksum < "$CFG_SNAPSHOT")" = "$recovered_snapshot_sum" ] || fail changed-idempotent-snapshot
+printf 'PASS revision metadata repair regression\n'
+'''
+
+    if use_adb:
+        adb = shutil.which("adb")
+        if not adb:
+            report.add("FAIL", "revision metadata repair regression", "adb requested but not found")
+            return
+        command = [adb, "shell", "sh", "-s"]
+        test_base = "/data/local/tmp"
+    else:
+        shell = locate_posix_shell()
+        if not shell:
+            report.gap("revision metadata repair regression", "POSIX sh is required")
+            return
+        command = [shell, "-s"]
+        test_base = "${TMPDIR:-/tmp}"
+
+    payload = harness.replace("__METADATA_TEST_BASE__", test_base).encode("utf-8")
+    rc, output = run_command(command, root, payload)
+    report.check(
+        rc == 0 and "PASS revision metadata repair regression" in output,
+        "revision metadata repair regression",
+        "matching snapshots canonically repair missing, invalid, and CR revisions exactly once",
+        output.strip() or f"harness exited {rc}",
+    )
+
+
+def check_last_pid_write_failure(root: Path, report: Report, use_adb: bool) -> None:
+    applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
+    atomic_block = extract_function(applier, "commit_tmp() {", "write_default_packages() {")
+    apply_block = extract_function(applier, "apply_current() {", "mark_pending() {")
+    if not atomic_block or not apply_block:
+        report.add("FAIL", "last-pid write failure regression", "production atomic/apply functions not found")
+        return
+
+    harness = atomic_block + apply_block + r'''
+set -eu
+base=__LAST_PID_TEST_BASE__/a2h_last_pid_failure_$$
+CFG_DIR="$base/config"
+LAST_PID_FILE="$CFG_DIR/last_pid"
+PATCHER="$base/patcher"
+PATCHER_CALL_LOG="$base/patcher.calls"
+MAIN_LOG="$base/main.log"
+TEST_LOG="$base/test.log"
+TMP_PKGS="$base/packages.txt"
+APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
+APPLIED_REVISION="$CFG_DIR/applied_revision"
+CURRENT_MODE=enabled
+CURRENT_REVISION=17
+CURRENT_SNAPSHOT=271828:18
+ACTIVE_COUNT=10
+HAL_PID=
+HAL_BASE=
+last_pid_failure_calls=0
+prepare_calls=0
+release_calls=0
+A2H_APPLY_ATTEMPTS=4
+
+fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
+log() { printf '%s\n' "$*" >> "$TEST_LOG"; }
+log_slots() { :; }
+resolve_hal() { HAL_PID=4242; HAL_BASE=; return 0; }
+patcher_supports_packages() { return 0; }
+acquire_apply_lock() { return 0; }
+release_apply_lock() { release_calls=$((release_calls + 1)); return 0; }
+prepare_config() { prepare_calls=$((prepare_calls + 1)); return 0; }
+mv() {
+  if [ "$#" = 3 ] && [ "$1" = -f ] && [ "$3" = "$LAST_PID_FILE" ]; then
+    last_pid_failure_calls=$((last_pid_failure_calls + 1))
+    return 73
+  fi
+  command mv "$@"
+}
+cleanup() { rm -rf "$base"; }
+trap cleanup 0 1 2 15
+mkdir -p "$CFG_DIR"
+: > "$PATCHER_CALL_LOG"
+: > "$MAIN_LOG"
+: > "$TEST_LOG"
+: > "$TMP_PKGS"
+printf 'old-pid\n' > "$LAST_PID_FILE"
+export PATCHER_CALL_LOG
+cat > "$PATCHER" <<'EOF'
+#!/bin/sh
+printf 'call\n' >> "$PATCHER_CALL_LOG"
+exit 0
+EOF
+chmod 0755 "$PATCHER"
+
+stable_result=0
+if apply_stable metadata-failure; then
+  fail last-pid-write-failure-was-swallowed
+else
+  stable_result=$?
+fi
+[ "$stable_result" = 74 ] || fail unexpected-stable-result-$stable_result
+[ "$last_pid_failure_calls" = 1 ] || fail last-pid-failure-not-injected
+[ "$(cat "$LAST_PID_FILE")" = old-pid ] || fail last-pid-destination-corrupted
+[ "$(wc -l < "$PATCHER_CALL_LOG" | tr -d ' ')" = 2 ] || fail patcher-precondition
+[ "$prepare_calls" = 1 ] || fail metadata-failure-retried-prepare-$prepare_calls
+[ "$release_calls" = 1 ] || fail apply-lock-release-count-$release_calls
+[ ! -e "$APPLIED_SNAPSHOT" ] && [ ! -e "$APPLIED_REVISION" ] || fail applied-metadata-recorded
+! grep -q 'apply verified' "$TEST_LOG" || fail success-log-after-metadata-failure
+printf 'PASS last-pid write failure regression\n'
+'''
+
+    if use_adb:
+        adb = shutil.which("adb")
+        if not adb:
+            report.add("FAIL", "last-pid write failure regression", "adb requested but not found")
+            return
+        command = [adb, "shell", "sh", "-s"]
+        test_base = "/data/local/tmp"
+    else:
+        shell = locate_posix_shell()
+        if not shell:
+            report.gap("last-pid write failure regression", "POSIX sh is required")
+            return
+        command = [shell, "-s"]
+        test_base = "${TMPDIR:-/tmp}"
+
+    payload = harness.replace("__LAST_PID_TEST_BASE__", test_base).encode("utf-8")
+    rc, output = run_command(command, root, payload)
+    report.check(
+        rc == 0 and "PASS last-pid write failure regression" in output,
+        "last-pid write failure regression",
+        "last_pid failure returns 74 after one apply/check pair without retry",
+        output.strip() or f"harness exited {rc}",
+    )
+
+
+def check_boot_last_pid_failure(root: Path, report: Report, use_adb: bool) -> None:
+    service = (root / "service.sh").read_text(encoding="utf-8")
+    boot_block = extract_function(
+        service, "boot_ok=0\nboot_try=1\n", "\nconfig_inotify_pid="
+    )
+    if not boot_block:
+        report.add("FAIL", "boot last-pid failure regression", "production boot retry block not found")
+        return
+
+    harness = r'''
+set -eu
+base=__BOOT_TEST_BASE__/a2h_boot_last_pid_$$
+APPLY_CALL_LOG="$base/apply.calls"
+SLEEP_CALL_LOG="$base/sleep.calls"
+TEST_LOG="$base/test.log"
+CFG_STATE="$base/state"
+APPLIED_SNAPSHOT="$base/applied_snapshot"
+
+fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
+log() { printf '%s\n' "$*" >> "$TEST_LOG"; }
+apply_once() { printf '%s\n' "$1" >> "$APPLY_CALL_LOG"; return 74; }
+sleep() { printf '%s\n' "$1" >> "$SLEEP_CALL_LOG"; return 0; }
+post_boot_notification() { :; }
+cleanup() { rm -rf "$base"; }
+trap cleanup 0 1 2 15
+mkdir -p "$base"
+: > "$APPLY_CALL_LOG"
+: > "$SLEEP_CALL_LOG"
+: > "$TEST_LOG"
+'''+ boot_block + r'''
+printf 'watcher-reached\n' > "$base/watcher.reached"
+[ "$(wc -l < "$APPLY_CALL_LOG" | tr -d ' ')" = 1 ] || fail boot-metadata-failure-retried
+[ ! -s "$SLEEP_CALL_LOG" ] || fail boot-metadata-failure-slept
+[ "$boot_ok" = 0 ] || fail boot-metadata-failure-marked-success
+[ "$runtime_status" = failure ] || fail boot-metadata-runtime-status
+[ -f "$base/watcher.reached" ] || fail boot-did-not-reach-watcher
+printf 'PASS boot last-pid failure regression\n'
+'''
+
+    if use_adb:
+        adb = shutil.which("adb")
+        if not adb:
+            report.add("FAIL", "boot last-pid failure regression", "adb requested but not found")
+            return
+        command = [adb, "shell", "sh", "-s"]
+        test_base = "/data/local/tmp"
+    else:
+        shell = locate_posix_shell()
+        if not shell:
+            report.gap("boot last-pid failure regression", "POSIX sh is required")
+            return
+        command = [shell, "-s"]
+        test_base = "${TMPDIR:-/tmp}"
+
+    payload = harness.replace("__BOOT_TEST_BASE__", test_base).encode("utf-8")
+    rc, output = run_command(command, root, payload)
+    report.check(
+        rc == 0 and "PASS boot last-pid failure regression" in output,
+        "boot last-pid failure regression",
+        "boot treats rc=74 as terminal for the attempt and immediately reaches the watcher",
+        output.strip() or f"harness exited {rc}",
+    )
+
+
+def check_postfs_runtime_cleanup(root: Path, report: Report, use_adb: bool) -> None:
+    postfs = (root / "post-fs-data.sh").read_text(encoding="utf-8")
+    postfs = postfs.replace(
+        "cleanup_stale_runtime /data/local/tmp",
+        'cleanup_stale_runtime "$runtime_test_dir"',
+    )
+    harness = r'''
+set -eu
+base=__POSTFS_TEST_BASE__/a2h_postfs_cleanup_$$
+runtime_test_dir="$base/runtime"
+BOOT_STATE=0
+
+fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
+getprop() {
+  case "${1:-}" in
+    sys.boot_completed) printf '%s\n' "$BOOT_STATE" ;;
+    *) printf '\n' ;;
+  esac
+}
+resetprop() { :; }
+setprop() { :; }
+cleanup() { rm -rf "$base"; }
+trap cleanup 0 1 2 15
+
+seed_runtime() {
+  rm -rf "$runtime_test_dir"
+  mkdir -p \
+    "$runtime_test_dir/a2h_apply.lock" \
+    "$runtime_test_dir/a2h_apply.worker" \
+    "$runtime_test_dir/a2h_config.lock"
+  printf 'pending\n' > "$runtime_test_dir/a2h_apply.pending"
+  printf 'pending-tmp\n' > "$runtime_test_dir/a2h_apply.pending.tmp.123"
+  printf 'state\n' > "$runtime_test_dir/a2h_state"
+  printf 'state-tmp\n' > "$runtime_test_dir/.a2h_state.123"
+  printf 'packages\n' > "$runtime_test_dir/a2h_packages.txt"
+  printf 'packages-tmp\n' > "$runtime_test_dir/.a2h_packages.123"
+  printf 'event\n' > "$runtime_test_dir/a2h_config.changed"
+  printf 'owner\n' > "$runtime_test_dir/a2h_apply.worker/pid"
+  printf 'keep\n' > "$runtime_test_dir/unrelated.keep"
+}
+
+seed_runtime
+''' + postfs + r'''
+[ -f "$runtime_test_dir/unrelated.keep" ] || fail early-unrelated-removed
+[ "$(find "$runtime_test_dir" -mindepth 1 ! -name unrelated.keep | wc -l | tr -d ' ')" = 0 ] ||
+  fail early-target-remains
+
+seed_runtime
+before=$(find "$runtime_test_dir" -mindepth 1 -print | sort | cksum)
+BOOT_STATE=1
+''' + postfs + r'''
+after=$(find "$runtime_test_dir" -mindepth 1 -print | sort | cksum)
+[ "$after" = "$before" ] || fail completed-boot-mutated-runtime
+printf 'PASS post-fs-data runtime cleanup regression\n'
+'''
+
+    if use_adb:
+        adb = shutil.which("adb")
+        if not adb:
+            report.add("FAIL", "post-fs-data runtime cleanup regression", "adb requested but not found")
+            return
+        command = [adb, "shell", "sh", "-s"]
+        test_base = "/data/local/tmp"
+    else:
+        shell = locate_posix_shell()
+        if not shell:
+            report.gap("post-fs-data runtime cleanup regression", "POSIX sh is required")
+            return
+        command = [shell, "-s"]
+        test_base = "${TMPDIR:-/tmp}"
+
+    payload = harness.replace("__POSTFS_TEST_BASE__", test_base).encode("utf-8")
+    rc, output = run_command(command, root, payload)
+    report.check(
+        rc == 0 and "PASS post-fs-data runtime cleanup regression" in output,
+        "post-fs-data runtime cleanup regression",
+        "early boot removes only module runtime artifacts; completed boot preserves all files",
+        output.strip() or f"harness exited {rc}",
     )
 
 
@@ -992,6 +1487,10 @@ def main() -> int:
     check_release_tree(root, report, args.adb)
     check_lock_protocol(root, report, args.adb)
     check_config_hotupdate(root, report, args.adb)
+    check_revision_metadata_repair(root, report, args.adb)
+    check_last_pid_write_failure(root, report, args.adb)
+    check_boot_last_pid_failure(root, report, args.adb)
+    check_postfs_runtime_cleanup(root, report, args.adb)
     check_webui_writer_transaction(root, report, args.adb)
     check_source_contracts(root, report)
     check_ndk(root, report, args.ndk)

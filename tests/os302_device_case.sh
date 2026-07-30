@@ -2,7 +2,7 @@
 set -eu
 
 MODDIR=${A2H_MODULE_DIR:-/data/adb/modules/a2h_hook}
-EXPECTED_VERSION=${A2H_EXPECTED_VERSION:-v1.5.5-fix2}
+EXPECTED_VERSION=${A2H_EXPECTED_VERSION:-v1.5.5-fix3}
 CUSTOM_PACKAGE=${A2H_TEST_PACKAGE:-com.kugou.android.lite}
 HOTUPDATE_PACKAGE=${A2H_HOTUPDATE_PACKAGE:-com.ss.android.ugc.aweme.lite}
 HOTUPDATE_PACKAGE_2=${A2H_HOTUPDATE_PACKAGE_2:-com.example.a2h.hotupdate}
@@ -27,6 +27,13 @@ assert_eq() {
   expected=$2
   label=$3
   [ "$actual" = "$expected" ] || fail "$label expected=$expected actual=${actual:-missing}"
+}
+
+is_uint() {
+  case ${1-} in
+    ''|*[!0-9]*) return 1 ;;
+    *) return 0 ;;
+  esac
 }
 
 run_check() {
@@ -197,16 +204,23 @@ while [ "$round" -le 2 ]; do
   if [ "$RESTART_AUDIO" = 1 ]; then
     restart_audio_hal
     attempt=0
-    restart_check_ok=0
+    restart_ready=0
     while [ "$attempt" -lt 40 ]; do
       attempt=$((attempt + 1))
       sleep 1
-      if A2H_QUIET_CHECK=1 A2H_QUIET_PREPARE=1 sh "$APPLIER" check whitelist >/dev/null 2>&1; then
-        restart_check_ok=1
+      restart_last_pid=$(cat "$CFG/last_pid" 2>/dev/null || true)
+      restart_snapshot=$(cat "$CFG/config_snapshot" 2>/dev/null || true)
+      restart_applied_snapshot=$(cat "$CFG/applied_snapshot" 2>/dev/null || true)
+      restart_revision=$(cat "$CFG/revision" 2>/dev/null || true)
+      restart_applied_revision=$(cat "$CFG/applied_revision" 2>/dev/null || true)
+      if [ "$restart_last_pid" = "$new_pid" ] &&
+         [ -n "$restart_snapshot" ] && [ "$restart_snapshot" = "$restart_applied_snapshot" ] &&
+         [ -n "$restart_revision" ] && [ "$restart_revision" = "$restart_applied_revision" ]; then
+        restart_ready=1
         break
       fi
     done
-    [ "$restart_check_ok" = 1 ] || fail "round $round watcher did not reapply after PID restart"
+    [ "$restart_ready" = 1 ] || fail "round $round watcher did not record reapply after PID restart"
     output=$(run_check whitelist)
     printf '%s\n' "$output" | grep -q 'active_ptrs=7 config_active=7 mismatch=0' || fail "round $round post-restart table mismatch"
     audio_restart_result=verified
@@ -235,7 +249,8 @@ while [ "$hot_wait" -lt 10 ]; do
   hot_revision=$(cat "$CFG/revision" 2>/dev/null || true)
   hot_applied=$(cat "$CFG/applied_revision" 2>/dev/null || true)
   hot_baseline=$(sed -n '8p' "$CFG/.package_baseline" 2>/dev/null || true)
-  [ "$hot_state" = 1 ] && [ "$hot_revision" = "$hot_applied" ] &&
+  [ "$hot_state" = 1 ] && is_uint "$hot_revision" && is_uint "$hot_applied" &&
+    [ "$hot_revision" -gt "$revision_before" ] && [ "$hot_revision" = "$hot_applied" ] &&
     [ "$hot_baseline" = "$HOTUPDATE_PACKAGE" ] && { hot_ok=1; break; }
 done
 [ "$hot_ok" = 1 ] || fail "slot 8 file-manager hot update timed out"
@@ -278,7 +293,8 @@ while [ "$multi_wait" -lt 10 ]; do
   multi_applied=$(cat "$CFG/applied_revision" 2>/dev/null || true)
   multi_baseline8=$(sed -n '8p' "$CFG/.package_baseline" 2>/dev/null || true)
   multi_baseline9=$(sed -n '9p' "$CFG/.package_baseline" 2>/dev/null || true)
-  [ "$multi_state" = 1 ] && [ "$multi_revision" = "$multi_applied" ] &&
+  [ "$multi_state" = 1 ] && is_uint "$multi_revision" && is_uint "$multi_applied" &&
+    [ "$multi_revision" -gt "$revision_before" ] && [ "$multi_revision" = "$multi_applied" ] &&
     [ "$multi_baseline8" = "$HOTUPDATE_PACKAGE_2" ] && [ -z "$multi_baseline9" ] && { multi_ok=1; break; }
 done
 [ "$multi_ok" = 1 ] || fail "slot 8 multi-stage hot update timed out"

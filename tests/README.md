@@ -39,8 +39,8 @@ does not attach to or modify the phone audio process.
 ## ZIP verification
 
 ```powershell
-python tests/verify_module_zip.py .\a2h_hook_v1.5.5-fix2.zip `
-  --expected-version v1.5.5-fix2 --expected-code 1552
+python tests/verify_module_zip.py .\a2h_hook_v1.5.5-fix3.zip `
+  --expected-version v1.5.5-fix3 --expected-code 1553
 ```
 
 This independently checks the exact member list, duplicates, path portability,
@@ -53,7 +53,7 @@ Preflight only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.5-fix2
+  -ExpectedVersion v1.5.5-fix3
 ```
 
 Full two-round test after the candidate module is installed and the phone has
@@ -61,14 +61,19 @@ rebooted:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.5-fix2 -Execute -AllowAudioRestart
+  -ExpectedVersion v1.5.5-fix3 -Execute -AllowAudioRestart
 ```
 
 The device case waits for the apply queue to become idle, backs up persistent
 and derived configuration, and requires a verified native restore before it
 exits. It tests global/whitelist round trips, official and custom slot counts,
 per-slot off/on, package-table preservation, two audio-HAL PID restarts,
-watcher re-application, and atomic plus multi-stage slot-8 file-manager edits.
+watcher re-application with one final native check per restart, and atomic plus
+multi-stage slot-8 file-manager edits. The fast suite also runs 40 production
+watcher cycles and rejects any steady-state native inspection or apply. A
+second watcher harness simulates an atomic save during inotify rearming and
+requires the short signature-poll grace window to detect and apply it before
+the 30-second health probe.
 A final manual close/reopen of the ReSukiSU WebUI remains required,
 because that manager exports only its main activity and has no stable direct
 intent for its internal module-WebUI route.
