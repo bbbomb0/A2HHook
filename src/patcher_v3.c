@@ -1,4 +1,4 @@
-// a2h_patch v1.5.5-fix3 - universal signature/ELF scan + 10-slot whitelist
+// a2h_patch v1.5.6 - universal signature/ELF scan + game audio lifecycle
 #define _GNU_SOURCE
 #include <stdint.h>
 #include <stdio.h>
@@ -61,10 +61,15 @@
 #define PTRACE_POKETEXT 4
 #define PTRACE_POKEDATA 5
 #define MAX_SLOTS 10
-#define A2H_VERSION "1.5.5-fix3"
+#define A2H_VERSION "1.5.6"
 #define WHITELIST_CAVE_BYTES (MAX_SLOTS * 64 + 16 + MAX_SLOTS * 8 + 32)
 #define WHITELIST_STUB_WORDS 19
 #define WHITELIST_STUB_BYTES (WHITELIST_STUB_WORDS * sizeof(uint32_t))
+#define A2H_APP_FUNC_BYTES 160u
+#define UPDATE_A2H_MODE_FUNC_BYTES 568u
+#define IS_A2H_ALLOWED_FUNC_BYTES 700u
+#define UPDATE_FLAGS_PATCH_OFF 0xDCu
+#define GAME_POLICY_PATCH_OFF 0x1DCu
 
 struct user_pt_regs_a64 {
     uint64_t regs[31];
@@ -115,6 +120,7 @@ static const profile_t PROFILES[] = {
     {"os3_0_302_0x3e3fc0","HyperOS3.0.302 verified",0x3E3FC0,160,{0xADC9C,0xB19F4,0xB507E,0xBC5CC,0xBC5DB,0xFCFFA},{17,19,22,14,15,14}},
     {"os3_0_305_0x3e4020","HyperOS3.0.305 static",0x3E4020,160,{0xADC8C,0xB19E4,0xB506E,0xBC5BC,0xBC5CB,0xFD028},{17,19,22,14,15,14}},
     {"os2_0_218_0x3e4280","HyperOS2.0.218 static",0x3E4280,160,{0xADE45,0xB1BBB,0xB5280,0xBC7CE,0xBC7DD,0xFD0FF},{17,19,22,14,15,14}},
+    {"os2_0_208_0x3e3b90","HyperOS2.0.208 static",0x3E3B90,160,{0xADD72,0xB1ACA,0xB4FED,0xBC53B,0xBC54A,0xFCDFD},{17,19,22,14,15,14}},
 };
 static slot_t slots[MAX_SLOTS];
 static uintptr_t g_func_off=0x3E3FC0,g_ptr_off=0x437200,g_stub_mark=0x437100,g_rw_start=0,g_rw_end=0,g_rx_start=0,g_rx_end=0;
@@ -172,6 +178,28 @@ static const unsigned char GLOBAL_PATCH[16]={
 };
 static const unsigned char WHITELIST_MARKER[16]={
     'A','2','H','1','W','L','S','T','0','0','0','2',0,0,0,0
+};
+static const unsigned char UPDATE_FLAGS_STOCK[32]={
+    0xC8,0x01,0x18,0x37,0x68,0x0E,0x41,0xF9,
+    0x00,0x69,0x77,0xF8,0x08,0x00,0x40,0xF9,
+    0x08,0x89,0x40,0xF9,0x00,0x01,0x3F,0xD6,
+    0x08,0x30,0x40,0x39,0xE8,0x00,0x20,0x37
+};
+static const unsigned char UPDATE_FLAGS_FAST[32]={
+    0x1F,0x09,0x1E,0x72,0xA1,0x01,0x00,0x54,
+    0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5,
+    0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5,
+    0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5
+};
+static const unsigned char GAME_POLICY_STOCK[20]={
+    0x1F,0x01,0x1A,0x6A,0x29,0x15,0x40,0xF9,
+    0x4A,0x79,0x1F,0x53,0xAB,0x83,0x5F,0xF8,
+    0x40,0x05,0x9F,0x1A
+};
+static const unsigned char GAME_POLICY_RELAXED[20]={
+    0x7F,0x02,0x00,0x71,0x29,0x15,0x40,0xF9,
+    0x4A,0x79,0x1F,0x53,0xAB,0x83,0x5F,0xF8,
+    0x40,0x01,0x9A,0x1A
 };
 static const uint32_t WHITELIST_STUB_FIXED_TAIL[WHITELIST_STUB_WORDS - 2]={
     0xB40001E0u, 0x52800142u, 0x340001A2u, 0xF8408423u,
@@ -2091,10 +2119,13 @@ static int exec_map_for_addr(pid_t pid, uintptr_t addr, char *path, size_t cap) 
     return found;
 }
 
-static int parse_unique_a2h_symbol(int fd, uint64_t file_size,
-                                   elf_a2h_symbol_t *out) {
+static int parse_unique_func_symbol(int fd, uint64_t file_size,
+                                    const char *symbol_name,
+                                    size_t expected_size,
+                                    elf_a2h_symbol_t *out) {
     Elf64_Ehdr eh;
-    if (!out || !pread_exact(fd, &eh, sizeof(eh), 0) ||
+    if (!out || !symbol_name || !symbol_name[0] || !expected_size ||
+        !pread_exact(fd, &eh, sizeof(eh), 0) ||
         memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0 ||
         eh.e_ident[EI_CLASS] != ELFCLASS64 ||
         eh.e_ident[EI_DATA] != ELFDATA2LSB ||
@@ -2131,7 +2162,7 @@ static int parse_unique_a2h_symbol(int fd, uint64_t file_size,
 
     int named = 0, invalid = 0, unique = 0;
     elf_a2h_symbol_t candidate = {0};
-    static const char symbol_name[] = "is_A2H_app";
+    size_t symbol_name_len = strlen(symbol_name);
     for (size_t i = 0; i < eh.e_shnum; ++i) {
         if (sh[i].sh_type != SHT_DYNSYM && sh[i].sh_type != SHT_SYMTAB) continue;
         if (sh[i].sh_entsize != sizeof(Elf64_Sym) ||
@@ -2163,8 +2194,8 @@ static int parse_unique_a2h_symbol(int fd, uint64_t file_size,
             size_t remain = str_bytes - sym->st_name;
             const char *name = strings + sym->st_name;
             const char *nul = (const char *)memchr(name, 0, remain);
-            if (!nul || (size_t)(nul - name) != sizeof(symbol_name) - 1 ||
-                memcmp(name, symbol_name, sizeof(symbol_name)) != 0) continue;
+            if (!nul || (size_t)(nul - name) != symbol_name_len ||
+                memcmp(name, symbol_name, symbol_name_len + 1) != 0) continue;
             named++;
             if (ELF64_ST_TYPE(sym->st_info) != STT_FUNC ||
                 ELF64_ST_BIND(sym->st_info) != STB_GLOBAL ||
@@ -2172,7 +2203,7 @@ static int parse_unique_a2h_symbol(int fd, uint64_t file_size,
                 sh[sym->st_shndx].sh_type != SHT_PROGBITS ||
                 !(sh[sym->st_shndx].sh_flags & SHF_ALLOC) ||
                 !(sh[sym->st_shndx].sh_flags & SHF_EXECINSTR) ||
-                sym->st_size < sizeof(GLOBAL_PATCH) ||
+                sym->st_size != expected_size ||
                 sym->st_size > ELF_SYMBOL_MAX_BYTES ||
                 sym->st_value > UINTPTR_MAX || sym->st_size > UINTPTR_MAX - sym->st_value ||
                 sh[sym->st_shndx].sh_size >
@@ -2224,19 +2255,21 @@ static int parse_unique_a2h_symbol(int fd, uint64_t file_size,
     free(ph); free(sh);
     if (invalid || (named > 0 && unique != 1)) {
         fprintf(stderr,
-                "[a2h_patch] ELF symbol rejected: named=%d unique=%d invalid=%d\n",
-                named, unique, invalid);
+                "[a2h_patch] ELF symbol rejected name=%s named=%d unique=%d invalid=%d expected_size=%lu\n",
+                symbol_name, named, unique, invalid,
+                (unsigned long)expected_size);
         return ELF_RESOLVE_REJECTED;
     }
     if (named == 0) {
-        fprintf(stderr, "[a2h_patch] ELF symbol unavailable: is_A2H_app stripped\n");
+        fprintf(stderr, "[a2h_patch] ELF symbol unavailable: %s stripped\n",
+                symbol_name);
         return ELF_RESOLVE_UNAVAILABLE;
     }
     *out = candidate;
     fprintf(stderr,
-            "[a2h_patch] ELF symbol is_A2H_app vaddr=0x%lx size=%lu file_off=0x%lx entries=%d\n",
-            (unsigned long)out->vaddr, (unsigned long)out->size,
-            (unsigned long)out->file_off, named);
+            "[a2h_patch] ELF symbol %s vaddr=0x%lx size=%lu file_off=0x%lx entries=%d\n",
+            symbol_name, (unsigned long)out->vaddr,
+            (unsigned long)out->size, (unsigned long)out->file_off, named);
     return ELF_RESOLVE_VERIFIED;
 }
 
@@ -2251,7 +2284,8 @@ static int resolve_func_by_elf_symbol(pid_t pid, uintptr_t base,
     int fd = open_mapped_hal(pid, &file_size);
     if (fd < 0) return 0;
     elf_a2h_symbol_t sym;
-    int parsed = parse_unique_a2h_symbol(fd, file_size, &sym);
+    int parsed = parse_unique_func_symbol(fd, file_size, "is_A2H_app",
+                                          A2H_APP_FUNC_BYTES, &sym);
     if (parsed != ELF_RESOLVE_VERIFIED) {
         close(fd);
         return parsed;
@@ -2335,6 +2369,292 @@ static int resolve_func_by_elf_symbol(pid_t pid, uintptr_t base,
             (unsigned long)sym.vaddr, (unsigned long)g_func_capacity,
             elf_a2h_state_name(state));
     return ELF_RESOLVE_VERIFIED;
+}
+
+typedef struct {
+    uintptr_t update_off;
+    uintptr_t policy_off;
+    int update_fast;
+    int policy_relaxed;
+    int valid;
+} auxiliary_targets_t;
+
+static auxiliary_targets_t g_auxiliary={0};
+
+static int exact_function_overlay(const unsigned char *disk,
+                                  const unsigned char *live,
+                                  size_t func_size, size_t patch_off,
+                                  const unsigned char *stock,
+                                  const unsigned char *patched,
+                                  size_t patch_size, int *is_patched) {
+    if (!disk || !live || !stock || !patched || !is_patched ||
+        patch_off > func_size || patch_size > func_size - patch_off ||
+        memcmp(disk + patch_off, stock, patch_size) != 0 ||
+        memcmp(live, disk, patch_off) != 0 ||
+        memcmp(live + patch_off + patch_size,
+               disk + patch_off + patch_size,
+               func_size - patch_off - patch_size) != 0) {
+        return 0;
+    }
+    if (memcmp(live + patch_off, stock, patch_size) == 0) {
+        *is_patched = 0;
+        return 1;
+    }
+    if (memcmp(live + patch_off, patched, patch_size) == 0) {
+        *is_patched = 1;
+        return 1;
+    }
+    return 0;
+}
+
+static int resolve_owned_auxiliary_symbol(int fd, uint64_t file_size,
+                                           pid_t pid, uintptr_t base,
+                                           const char *name,
+                                           size_t expected_size,
+                                           size_t patch_off,
+                                           const unsigned char *stock,
+                                           const unsigned char *patched,
+                                           size_t patch_size,
+                                           uintptr_t *out_off,
+                                           int *out_patched) {
+    elf_a2h_symbol_t sym={0};
+    int parsed = parse_unique_func_symbol(fd, file_size, name,
+                                          expected_size, &sym);
+    if (parsed != ELF_RESOLVE_VERIFIED || base > UINTPTR_MAX - sym.vaddr ||
+        sym.size > UINTPTR_MAX - (base + sym.vaddr)) {
+        fprintf(stderr,
+                "[a2h_patch] auxiliary symbol rejected name=%s parse=%d\n",
+                name, parsed);
+        return 0;
+    }
+    uintptr_t absolute = base + sym.vaddr;
+    if (absolute < g_rx_start || absolute + sym.size > g_rx_end) {
+        fprintf(stderr,
+                "[a2h_patch] auxiliary symbol rejected name=%s reason=RX-range\n",
+                name);
+        return 0;
+    }
+    unsigned char *disk = (unsigned char *)malloc(sym.size);
+    unsigned char *live = (unsigned char *)malloc(sym.size);
+    int owned = disk && live &&
+                pread_exact(fd, disk, sym.size, sym.file_off) &&
+                mem_r(pid, absolute, live, sym.size) == 0 &&
+                exact_function_overlay(disk, live, sym.size, patch_off,
+                                       stock, patched, patch_size,
+                                       out_patched);
+    free(disk);
+    free(live);
+    if (!owned) {
+        fprintf(stderr,
+                "[a2h_patch] auxiliary symbol rejected name=%s reason=foreign-or-unknown-bytes\n",
+                name);
+        return 0;
+    }
+    *out_off = sym.vaddr;
+    fprintf(stderr,
+            "[a2h_patch] auxiliary symbol verified name=%s func=0x%lx size=%lu state=%s\n",
+            name, (unsigned long)sym.vaddr, (unsigned long)sym.size,
+            *out_patched ? "module-overlay" : "stock");
+    return 1;
+}
+
+static int resolve_auxiliary_targets(pid_t pid, uintptr_t base) {
+    static const char update_name[] =
+        "_ZN7android22AudioALSAStreamManager13updateA2HModeEv";
+    static const char policy_name[] =
+        "_ZN7android22AudioALSAStreamManager12isA2HAllowedEv";
+    memset(&g_auxiliary, 0, sizeof(g_auxiliary));
+    uint64_t file_size = 0;
+    int fd = open_mapped_hal(pid, &file_size);
+    if (fd < 0) return 0;
+    int update_ok = resolve_owned_auxiliary_symbol(
+        fd, file_size, pid, base, update_name,
+        UPDATE_A2H_MODE_FUNC_BYTES, UPDATE_FLAGS_PATCH_OFF,
+        UPDATE_FLAGS_STOCK, UPDATE_FLAGS_FAST, sizeof(UPDATE_FLAGS_STOCK),
+        &g_auxiliary.update_off, &g_auxiliary.update_fast);
+    int policy_ok = update_ok && resolve_owned_auxiliary_symbol(
+        fd, file_size, pid, base, policy_name,
+        IS_A2H_ALLOWED_FUNC_BYTES, GAME_POLICY_PATCH_OFF,
+        GAME_POLICY_STOCK, GAME_POLICY_RELAXED, sizeof(GAME_POLICY_STOCK),
+        &g_auxiliary.policy_off, &g_auxiliary.policy_relaxed);
+    close(fd);
+    g_auxiliary.valid = update_ok && policy_ok;
+    if (!g_auxiliary.valid) {
+        memset(&g_auxiliary, 0, sizeof(g_auxiliary));
+        fprintf(stderr,
+                "[a2h_patch] ERROR: auxiliary lifecycle targets unresolved; no patch data written\n");
+        return 0;
+    }
+    return 1;
+}
+
+static int verify_auxiliary_targets(pid_t pid, uintptr_t base,
+                                    int want_policy_relaxed, int verbose) {
+    if (!g_auxiliary.valid) return 0;
+    unsigned char update[sizeof(UPDATE_FLAGS_FAST)];
+    unsigned char policy[sizeof(GAME_POLICY_STOCK)];
+    int update_ok = mem_r(pid, base + g_auxiliary.update_off +
+                          UPDATE_FLAGS_PATCH_OFF,
+                          update, sizeof(update)) == 0 &&
+                    memcmp(update, UPDATE_FLAGS_FAST, sizeof(update)) == 0;
+    const unsigned char *wanted_policy = want_policy_relaxed ?
+                                         GAME_POLICY_RELAXED :
+                                         GAME_POLICY_STOCK;
+    int policy_ok = mem_r(pid, base + g_auxiliary.policy_off +
+                          GAME_POLICY_PATCH_OFF,
+                          policy, sizeof(policy)) == 0 &&
+                    memcmp(policy, wanted_policy, sizeof(policy)) == 0;
+    if (verbose || !update_ok || !policy_ok) {
+        fprintf(stderr,
+                "[a2h_patch] auxiliary live update_fast=%s game_auto_pause=%s policy=%s final=%s\n",
+                update_ok ? "yes" : "no",
+                want_policy_relaxed ? "disabled" : "enabled",
+                policy_ok ? (want_policy_relaxed ? "relaxed" : "stock") :
+                            "mismatch",
+                update_ok && policy_ok ? "OK" : "FAIL");
+    }
+    return update_ok && policy_ok;
+}
+
+typedef struct {
+    uintptr_t update_addr;
+    uintptr_t policy_addr;
+    unsigned char update_before[sizeof(UPDATE_FLAGS_STOCK)];
+    unsigned char policy_before[sizeof(GAME_POLICY_STOCK)];
+    int valid;
+} auxiliary_transaction_t;
+
+static int auxiliary_transaction_begin(pid_t pid, uintptr_t base,
+                                        auxiliary_transaction_t *tx) {
+    if (!tx || !g_auxiliary.valid) return 0;
+    memset(tx, 0, sizeof(*tx));
+    tx->update_addr = base + g_auxiliary.update_off + UPDATE_FLAGS_PATCH_OFF;
+    tx->policy_addr = base + g_auxiliary.policy_off + GAME_POLICY_PATCH_OFF;
+    if (mem_r(pid, tx->update_addr, tx->update_before,
+              sizeof(tx->update_before)) != 0 ||
+        mem_r(pid, tx->policy_addr, tx->policy_before,
+              sizeof(tx->policy_before)) != 0) {
+        fprintf(stderr, "[a2h_patch] auxiliary transaction snapshot FAIL\n");
+        return 0;
+    }
+    tx->valid = 1;
+    fprintf(stderr,
+            "[a2h_patch] auxiliary transaction snapshot OK update_bytes=%lu policy_bytes=%lu\n",
+            (unsigned long)sizeof(tx->update_before),
+            (unsigned long)sizeof(tx->policy_before));
+    return 1;
+}
+
+static int write_code_twice(pid_t pid, uintptr_t base, uintptr_t addr,
+                            const unsigned char *wanted, size_t len,
+                            const char *label) {
+    unsigned char verify[sizeof(UPDATE_FLAGS_STOCK)];
+    if (!wanted || !label || !len || len > sizeof(verify)) return 0;
+    int first_write = mem_w(pid, addr, wanted, len) == 0 &&
+                      mem_r(pid, addr, verify, len) == 0 &&
+                      memcmp(verify, wanted, len) == 0;
+    int first_cache = first_write &&
+                      ((remote_icache_flush(pid, base, addr, len) &
+                        ICACHE_REMOTE_IVAU) != 0);
+    int second_write = first_cache && mem_w(pid, addr, wanted, len) == 0 &&
+                       mem_r(pid, addr, verify, len) == 0 &&
+                       memcmp(verify, wanted, len) == 0;
+    int second_cache = second_write &&
+                       ((remote_icache_flush(pid, base, addr, len) &
+                         ICACHE_REMOTE_IVAU) != 0);
+    syscall(__NR_membarrier, MEMBARRIER_CMD_GLOBAL, 0);
+    syscall(__NR_membarrier, MEMBARRIER_CMD_GLOBAL_EXPEDITED, 0);
+    int final_ok = second_cache && mem_r(pid, addr, verify, len) == 0 &&
+                   memcmp(verify, wanted, len) == 0;
+    fprintf(stderr,
+            "[a2h_patch] code write label=%s first=%s first_cache=%s second=%s second_cache=%s final=%s\n",
+            label, first_write ? "OK" : "FAIL",
+            first_cache ? "OK" : "FAIL",
+            second_write ? "OK" : "FAIL",
+            second_cache ? "OK" : "FAIL",
+            final_ok ? "OK" : "FAIL");
+    return final_ok;
+}
+
+static int restore_code_snapshot(pid_t pid, uintptr_t base, uintptr_t addr,
+                                 const unsigned char *before, size_t len,
+                                 const char *label) {
+    unsigned char verify[sizeof(UPDATE_FLAGS_STOCK)];
+    if (!before || !label || !len || len > sizeof(verify)) return 0;
+    int write_ok = mem_w(pid, addr, before, len) == 0 &&
+                   mem_r(pid, addr, verify, len) == 0 &&
+                   memcmp(verify, before, len) == 0;
+    int cache_ok = write_ok &&
+                   ((remote_icache_flush(pid, base, addr, len) &
+                     ICACHE_REMOTE_IVAU) != 0);
+    fprintf(stderr,
+            "[a2h_patch] code rollback label=%s bytes=%s cache=%s\n",
+            label, write_ok ? "OK" : "FAIL",
+            cache_ok ? "OK" : "FAIL");
+    return write_ok && cache_ok;
+}
+
+static int auxiliary_transaction_restore(pid_t pid, uintptr_t base,
+                                          const auxiliary_transaction_t *tx) {
+    if (!tx || !tx->valid) return 0;
+    int update_ok = restore_code_snapshot(
+        pid, base, tx->update_addr, tx->update_before,
+        sizeof(tx->update_before), "updateA2HMode");
+    int policy_ok = restore_code_snapshot(
+        pid, base, tx->policy_addr, tx->policy_before,
+        sizeof(tx->policy_before), "isA2HAllowed");
+    return update_ok && policy_ok;
+}
+
+static int auxiliary_cache_preflight(pid_t pid, uintptr_t base) {
+    if (!g_auxiliary.valid) return 0;
+    int update = remote_icache_flush(
+        pid, base, base + g_auxiliary.update_off + UPDATE_FLAGS_PATCH_OFF,
+        sizeof(UPDATE_FLAGS_FAST));
+    int policy = remote_icache_flush(
+        pid, base, base + g_auxiliary.policy_off + GAME_POLICY_PATCH_OFF,
+        sizeof(GAME_POLICY_STOCK));
+    int ok = (update & ICACHE_REMOTE_IVAU) != 0 &&
+             (policy & ICACHE_REMOTE_IVAU) != 0;
+    fprintf(stderr,
+            "[a2h_patch] auxiliary cache preflight update=%s policy=%s\n",
+            (update & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL",
+            (policy & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL");
+    return ok;
+}
+
+static int apply_auxiliary_targets(pid_t pid, uintptr_t base,
+                                   int want_policy_relaxed) {
+    if (!g_auxiliary.valid) return 0;
+    uintptr_t update_addr = base + g_auxiliary.update_off +
+                            UPDATE_FLAGS_PATCH_OFF;
+    uintptr_t policy_addr = base + g_auxiliary.policy_off +
+                            GAME_POLICY_PATCH_OFF;
+    unsigned char current[sizeof(UPDATE_FLAGS_STOCK)];
+    int update_ready = mem_r(pid, update_addr, current,
+                             sizeof(UPDATE_FLAGS_FAST)) == 0 &&
+                       memcmp(current, UPDATE_FLAGS_FAST,
+                              sizeof(UPDATE_FLAGS_FAST)) == 0;
+    if (!update_ready) {
+        update_ready = write_code_twice(pid, base, update_addr,
+                                        UPDATE_FLAGS_FAST,
+                                        sizeof(UPDATE_FLAGS_FAST),
+                                        "updateA2HMode.fast");
+    }
+    const unsigned char *policy = want_policy_relaxed ?
+                                  GAME_POLICY_RELAXED : GAME_POLICY_STOCK;
+    int policy_ready = mem_r(pid, policy_addr, current,
+                             sizeof(GAME_POLICY_STOCK)) == 0 &&
+                       memcmp(current, policy,
+                              sizeof(GAME_POLICY_STOCK)) == 0;
+    if (update_ready && !policy_ready) {
+        policy_ready = write_code_twice(
+            pid, base, policy_addr, policy, sizeof(GAME_POLICY_STOCK),
+            want_policy_relaxed ? "isA2HAllowed.relaxed" :
+                                  "isA2HAllowed.stock");
+    }
+    return update_ready && policy_ready &&
+           verify_auxiliary_targets(pid, base, want_policy_relaxed, 1);
 }
 
 // Prefer a unique stock prologue. Patched candidates must also be unambiguous
@@ -3073,7 +3393,8 @@ static void save_cave_hint(uintptr_t off) {
     if (f) { fprintf(f, "%lx\n", (unsigned long)off); fclose(f); }
 }
 int main(int argc,char **argv) {
-    int mode=0,pid=-1; char *pkgfile=NULL; uintptr_t base_override=0; int check_want_global=-1;
+    int mode=0,pid=-1; char *pkgfile=NULL; uintptr_t base_override=0;
+    int check_want_global=-1, game_auto_pause=1;
     long t0=now_ms();
     apply_profile(&PROFILES[0]);
     fprintf(stderr, "[a2h_patch] version=%s\n", A2H_VERSION);
@@ -3086,6 +3407,7 @@ int main(int argc,char **argv) {
             printf("       %s --status [PID]\n",argv[0]);
             printf("       %s --check global|whitelist [PID]\n",argv[0]);
             printf("       %s --packages FILE\n",argv[0]);
+            printf("       %s --game-auto-pause enabled|disabled\n",argv[0]);
             printf("       %s --base 0x...\n",argv[0]);
             return 0;
         } else if(strcmp(argv[i],"--disable")==0){
@@ -3100,6 +3422,17 @@ int main(int argc,char **argv) {
             check_want_global = (strcmp(argv[++i], "global")==0) ? 1 : 0;
         }
         else if(strcmp(argv[i],"--packages")==0 && i+1<argc) pkgfile=argv[++i];
+        else if(strcmp(argv[i],"--game-auto-pause")==0 && i+1<argc) {
+            const char *policy=argv[++i];
+            if(strcmp(policy,"enabled")==0) game_auto_pause=1;
+            else if(strcmp(policy,"disabled")==0) game_auto_pause=0;
+            else {
+                fprintf(stderr,
+                        "[a2h_patch] ERROR: invalid --game-auto-pause value=%s\n",
+                        policy);
+                return 2;
+            }
+        }
         else if(strcmp(argv[i],"--base")==0 && i+1<argc) base_override=(uintptr_t)strtoull(argv[++i],NULL,0);
         else if(argv[i][0] != '-') pid=atoi(argv[i]);
     }
@@ -3108,7 +3441,9 @@ int main(int argc,char **argv) {
     if(mode==0 || mode==1) log_system_identity();
     if(pid<=0){ for(int i=0;i<30;i++){ pid=find_pid(); if(pid>0)break; sleep(1);} }
     if(pid<=0){fprintf(stderr,"[a2h_patch] ERROR: service not found\n");return 2;}
-    fprintf(stderr,"[a2h_patch] pid=%d mode=%s\n", pid, mode==1?"whitelist":(mode==2?"show":(mode==3?"status":(mode==4?"check":"global"))));
+    fprintf(stderr,"[a2h_patch] pid=%d mode=%s game_auto_pause=%s\n", pid,
+            mode==1?"whitelist":(mode==2?"show":(mode==3?"status":(mode==4?"check":"global"))),
+            game_auto_pause?"enabled":"disabled");
     char n1[48], n2[48]; name_hal_primary(n1); name_hal_mt(n2);
     uintptr_t base=base_override, rw_s=0, rw_e=0, rx_s=0, rx_e=0;
     for(int i=0;i<10&&!base;i++) {
@@ -3163,6 +3498,10 @@ int main(int argc,char **argv) {
         if(g_attached)trace_detach(pid);
         return 2;
     }
+    if (!resolve_auxiliary_targets(pid, base)) {
+        if(g_attached)trace_detach(pid);
+        return 2;
+    }
     size_t required_capacity = mode == 1 ? WHITELIST_STUB_BYTES :
                                (mode == 0 ? sizeof(GLOBAL_PATCH) : 0);
     if (required_capacity && g_func_capacity < required_capacity) {
@@ -3194,9 +3533,19 @@ int main(int argc,char **argv) {
             sig_ok?"stock-match":(already_global?"global":(already_stub?"whitelist":"unknown")),
             already_global?"global":(already_stub?"whitelist":(sig_ok?"stock":"unknown")),
             g_locate_method[0]?g_locate_method:"?", g_profile, g_profile_hint);
-    if(mode==2){ int rc=show_strings(pid,base); if(g_attached)trace_detach(pid);
+    if(mode==2){
+        int rc=show_strings(pid,base);
+        verify_auxiliary_targets(pid, base, game_auto_pause ? 0 : 1, 1);
+        if(g_attached)trace_detach(pid);
         fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0); return rc?1:0; }
-    if(mode==3){ if(g_attached)trace_detach(pid); fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0); return already_global?0:1; }
+    if(mode==3){
+        int status_ok = already_global &&
+                        verify_auxiliary_targets(pid, base,
+                                                 game_auto_pause ? 0 : 1, 1);
+        if(g_attached)trace_detach(pid);
+        fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0);
+        return status_ok?0:1;
+    }
     if(mode==4){
         const char *cur = already_global?"global":(already_stub?"whitelist":(sig_ok?"stock":"unknown"));
         int ok = already_global;
@@ -3212,6 +3561,8 @@ int main(int argc,char **argv) {
             ok = table_ok && si.content_mismatch == 0;
             free_pkgs(pkgs);
         }
+        ok = ok && verify_auxiliary_targets(pid, base,
+                                             game_auto_pause ? 0 : 1, 1);
         fprintf(stderr,"[a2h_patch] live: want=%s cur=%s head=%02x %02x %02x %02x method=%s func=0x%lx active_ptrs=%d config_active=%d mismatch=%d\n",
                 check_want_global==1?"global":"whitelist", cur, vfy8[0],vfy8[1],vfy8[2],vfy8[3],
                 g_locate_method[0]?g_locate_method:"?", (unsigned long)k_func_off(),
@@ -3229,22 +3580,27 @@ int main(int argc,char **argv) {
         for(int i=0;i<MAX_SLOTS;i++) fprintf(stderr,"[a2h_patch] cfg[%d]=%s\n", i, (pkgs[i]&&pkgs[i][0])?pkgs[i]:"(empty)");
         int preflight = remote_icache_flush(pid, base, func_addr,
                                             WHITELIST_STUB_BYTES);
-        if ((preflight & ICACHE_REMOTE_IVAU) == 0) {
+        int auxiliary_preflight = auxiliary_cache_preflight(pid, base);
+        if ((preflight & ICACHE_REMOTE_IVAU) == 0 || !auxiliary_preflight) {
             fprintf(stderr,
-                    "[a2h_patch] ERROR: whitelist cache preflight failed; no patch data written\n");
+                    "[a2h_patch] ERROR: coordinated cache preflight failed; no patch data written\n");
             free_pkgs(pkgs);
             if(g_attached)trace_detach(pid);
             fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0);
             return 1;
         }
         whitelist_transaction_t tx;
-        if (!whitelist_transaction_begin(pid, base, &tx)) {
+        auxiliary_transaction_t auxiliary_tx;
+        if (!whitelist_transaction_begin(pid, base, &tx) ||
+            !auxiliary_transaction_begin(pid, base, &auxiliary_tx)) {
             free_pkgs(pkgs);
             if(g_attached)trace_detach(pid);
             fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0);
             return 1;
         }
-        int rc=apply_strings(pid,base,pkgs);
+        int auxiliary_ok=apply_auxiliary_targets(
+            pid, base, game_auto_pause ? 0 : 1);
+        int rc=auxiliary_ok && apply_strings(pid,base,pkgs);
         int stub_ok=0;
         if(rc) stub_ok=install_whitelist_stub(pid,base);
         else fprintf(stderr,"[a2h_patch] skip stub because string apply failed\n");
@@ -3253,17 +3609,27 @@ int main(int argc,char **argv) {
         stub_info_t si;
         memset(&si, 0, sizeof(si));
         int table_ok = stubbed && inspect_stub_table(pid, base, k_func_off(), vf, pkgs, 1, &si);
-        int final_ok = rc && stub_ok && stubbed && table_ok && si.content_mismatch == 0;
+        int lifecycle_ok = verify_auxiliary_targets(
+            pid, base, game_auto_pause ? 0 : 1, 1);
+        int final_ok = auxiliary_ok && lifecycle_ok && rc && stub_ok &&
+                       stubbed && table_ok && si.content_mismatch == 0;
         int rollback_ok = 1;
-        if (!final_ok) rollback_ok = whitelist_transaction_restore(pid, base, &tx);
+        if (!final_ok) {
+            int main_rollback = whitelist_transaction_restore(pid, base, &tx);
+            int auxiliary_rollback = auxiliary_transaction_restore(
+                pid, base, &auxiliary_tx);
+            rollback_ok = main_rollback && auxiliary_rollback;
+        }
         if (final_ok) {
             save_func_off_hint(k_func_off());
             save_cave_hint(slot_off(0));
         }
         free_pkgs(pkgs);
         fprintf(stderr,"whitelist: %s\n", final_ok?"OK":"FAIL");
-        fprintf(stderr,"[a2h_patch] summary method=%s profile=%s hint=%s write=%s stub=%s table=%s final=%s rollback=%s active=%d active_ptrs=%d lines=%d rejected=%d fallback=%d all_off=%d mismatch=%d icache=%s\n",
-                g_locate_method,g_profile,g_profile_hint, rc?"OK":"FAIL", stub_ok?"OK":"FAIL",
+        fprintf(stderr,"[a2h_patch] summary method=%s profile=%s hint=%s lifecycle=%s policy=%s write=%s stub=%s table=%s final=%s rollback=%s active=%d active_ptrs=%d lines=%d rejected=%d fallback=%d all_off=%d mismatch=%d icache=%s\n",
+                g_locate_method,g_profile,g_profile_hint,
+                lifecycle_ok?"OK":"FAIL",game_auto_pause?"stock":"relaxed",
+                rc?"OK":"FAIL", stub_ok?"OK":"FAIL",
                 table_ok?"OK":"FAIL", stubbed?"whitelist":"not-whitelist",
                 final_ok?"not-needed":(rollback_ok?"OK":"FAIL"),
                 stats.active, si.active_ptrs, stats.lines_read, stats.rejected,
@@ -3274,32 +3640,52 @@ int main(int argc,char **argv) {
         return final_ok?0:1;
     }
     int global_marked = memcmp(vfy8, GLOBAL_PATCH, sizeof(GLOBAL_PATCH)) == 0;
-    if (already_global && global_marked){
-        save_func_off_hint(k_func_off());
-        fprintf(stderr,"already enabled\n");
-        if(g_attached)trace_detach(pid);
-        fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0);
-        return 0;
-    }
-    fprintf(stderr, already_global ? "upgrading global marker...\n" : "enabling global...\n");
-    int preflight = remote_icache_flush(pid, base, func_addr,
-                                        sizeof(GLOBAL_PATCH));
-    if ((preflight & ICACHE_REMOTE_IVAU) == 0) {
+    int main_write_needed = !(already_global && global_marked);
+    fprintf(stderr, main_write_needed ?
+            (already_global ? "upgrading global marker...\n" : "enabling global...\n") :
+            "global entry already enabled; verifying lifecycle overlays...\n");
+    int preflight = main_write_needed ?
+                    remote_icache_flush(pid, base, func_addr,
+                                        sizeof(GLOBAL_PATCH)) :
+                    ICACHE_REMOTE_IVAU;
+    int auxiliary_preflight = auxiliary_cache_preflight(pid, base);
+    if ((preflight & ICACHE_REMOTE_IVAU) == 0 || !auxiliary_preflight) {
         fprintf(stderr,
-                "[a2h_patch] ERROR: global cache preflight failed; no function bytes written\n");
+                "[a2h_patch] ERROR: coordinated cache preflight failed; no function bytes written\n");
         if(g_attached)trace_detach(pid);
         fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0);
         return 1;
     }
     unsigned char global_before[sizeof(GLOBAL_PATCH)];
-    if (mem_r(pid, func_addr, global_before, sizeof(global_before)) != 0) {
+    auxiliary_transaction_t auxiliary_tx;
+    if (mem_r(pid, func_addr, global_before, sizeof(global_before)) != 0 ||
+        !auxiliary_transaction_begin(pid, base, &auxiliary_tx)) {
         fprintf(stderr,"[a2h_patch] ERROR: global transaction snapshot failed\n");
         if(g_attached)trace_detach(pid);
         fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0);
         return 1;
     }
+    int auxiliary_ok = apply_auxiliary_targets(
+        pid, base, game_auto_pause ? 0 : 1);
+    if (!main_write_needed) {
+        int ok = auxiliary_ok && verify_auxiliary_targets(
+            pid, base, game_auto_pause ? 0 : 1, 1);
+        int rollback_ok = ok ? 1 :
+                          auxiliary_transaction_restore(pid, base,
+                                                        &auxiliary_tx);
+        if (ok) save_func_off_hint(k_func_off());
+        fprintf(stderr,"enable: %s\n",ok?"OK":"FAIL");
+        fprintf(stderr,
+                "[a2h_patch] global lifecycle=%s policy=%s rollback=%s\n",
+                ok?"OK":"FAIL",game_auto_pause?"stock":"relaxed",
+                ok?"not-needed":(rollback_ok?"OK":"FAIL"));
+        if(g_attached)trace_detach(pid);
+        fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0);
+        return ok?0:1;
+    }
     unsigned char first_verify[sizeof(GLOBAL_PATCH)]={0};
-    int first_write_ok = mem_w(pid,func_addr,GLOBAL_PATCH,sizeof(GLOBAL_PATCH)) == 0 &&
+    int first_write_ok = auxiliary_ok &&
+                         mem_w(pid,func_addr,GLOBAL_PATCH,sizeof(GLOBAL_PATCH)) == 0 &&
                          mem_r(pid,func_addr,first_verify,sizeof(first_verify)) == 0 &&
                          memcmp(first_verify,GLOBAL_PATCH,sizeof(GLOBAL_PATCH)) == 0;
     int flush_first = first_write_ok ?
@@ -3321,10 +3707,18 @@ int main(int argc,char **argv) {
     int verify_ok = mem_r(pid,func_addr,vf,sizeof(vf)) == 0 &&
                     memcmp(vf,GLOBAL_PATCH,sizeof(GLOBAL_PATCH)) == 0;
     int cache_ok = first_cache_ok && second_cache_ok;
-    int ok = first_write_ok && second_write_ok && verify_ok && cache_ok;
+    int lifecycle_ok = verify_auxiliary_targets(
+        pid, base, game_auto_pause ? 0 : 1, 1);
+    int ok = auxiliary_ok && lifecycle_ok && first_write_ok &&
+             second_write_ok && verify_ok && cache_ok;
     int rollback_ok = 1;
-    if (!ok) rollback_ok = restore_global_snapshot(pid, base, func_addr,
+    if (!ok) {
+        int main_rollback = restore_global_snapshot(pid, base, func_addr,
                                                     global_before);
+        int auxiliary_rollback = auxiliary_transaction_restore(
+            pid, base, &auxiliary_tx);
+        rollback_ok = main_rollback && auxiliary_rollback;
+    }
     if (ok) save_func_off_hint(k_func_off());
     if (!first_write_ok) fprintf(stderr, "[a2h_patch] ERROR: global first write failed\n");
     if (first_write_ok && !first_cache_ok) fprintf(stderr, "[a2h_patch] ERROR: global first I-cache synchronization unverified\n");
@@ -3333,8 +3727,9 @@ int main(int argc,char **argv) {
     if (second_write_ok && !second_cache_ok) fprintf(stderr, "[a2h_patch] ERROR: global second I-cache synchronization unverified\n");
     if (!verify_ok) fprintf(stderr, "[a2h_patch] ERROR: global final byte verification failed\n");
     fprintf(stderr,"enable: %s\n",ok?"OK":"FAIL");
-    fprintf(stderr,"[a2h_patch] global verify head=%02x %02x %02x %02x method=%s profile=%s hint=%s icache=%s rollback=%s\n",
+    fprintf(stderr,"[a2h_patch] global verify head=%02x %02x %02x %02x method=%s profile=%s hint=%s lifecycle=%s policy=%s icache=%s rollback=%s\n",
             vf[0],vf[1],vf[2],vf[3], g_locate_method, g_profile, g_profile_hint,
+            lifecycle_ok?"OK":"FAIL",game_auto_pause?"stock":"relaxed",
             icache_status(), ok?"not-needed":(rollback_ok?"OK":"FAIL"));
     if(g_attached)trace_detach(pid);
     fprintf(stderr,"[a2h_patch] elapsed_ms=%ld\n", now_ms()-t0);

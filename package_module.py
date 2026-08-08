@@ -12,17 +12,21 @@ from pathlib import Path
 
 FILES = (
     "module.prop",
+    "LICENSE",
     "customize.sh",
     "service.sh",
     "webui.png",
+    "companion/a2h_companion.apk",
     "bin/a2h_apply",
     "config/packages.txt",
     "config/package_states",
     "config/state",
+    "config/game_auto_pause",
     "bin/a2h_patch",
     "bin/a2h_trigger",
     "post-fs-data.sh",
     "wrapper.sh",
+    "uninstall.sh",
     "webroot/index.html",
     "webroot/coolapk.png",
 )
@@ -35,18 +39,22 @@ EXECUTABLE = {
     "bin/a2h_trigger",
     "post-fs-data.sh",
     "wrapper.sh",
+    "uninstall.sh",
 }
 
 TEXT_FILES = {
     "module.prop",
+    "LICENSE",
     "customize.sh",
     "service.sh",
     "bin/a2h_apply",
     "config/packages.txt",
     "config/package_states",
     "config/state",
+    "config/game_auto_pause",
     "post-fs-data.sh",
     "wrapper.sh",
+    "uninstall.sh",
     "webroot/index.html",
 }
 

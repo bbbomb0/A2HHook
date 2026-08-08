@@ -9,9 +9,12 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
+import zipfile
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
@@ -25,7 +28,7 @@ OFFICIAL = (
     "com.luna.music",
 )
 
-EXPECTED_RELEASE = ("v1.5.5-fix3", "1553")
+EXPECTED_RELEASE = ("v1.5.6", "1560")
 
 HAL_CASES = {
     "OS2.0.218.0.VONCNXM": {
@@ -55,15 +58,20 @@ HAL_CASES = {
 }
 
 TEXT_RELEASE_FILES = (
+    "LICENSE",
+    "CONTRIBUTING.md",
     "module.prop",
     "customize.sh",
     "service.sh",
     "post-fs-data.sh",
     "wrapper.sh",
+    "uninstall.sh",
     "bin/a2h_apply",
     "config/packages.txt",
     "config/package_states",
     "config/state",
+    "config/game_auto_pause",
+    "companion/app/src/main/AndroidManifest.xml",
     "webroot/index.html",
 )
 
@@ -160,6 +168,33 @@ def run_command(command: list[str], cwd: Path, input_bytes: bytes | None = None)
     return completed.returncode, completed.stdout.decode("utf-8", errors="replace")
 
 
+def apk_signing_ids(data: bytes) -> set[int]:
+    eocd = data.rfind(b"PK\x05\x06", max(0, len(data) - 65557))
+    if eocd < 0 or eocd + 22 > len(data):
+        raise ValueError("APK EOCD is missing")
+    central_offset = struct.unpack_from("<I", data, eocd + 16)[0]
+    if central_offset < 32 or data[central_offset - 16:central_offset] != b"APK Sig Block 42":
+        raise ValueError("APK signing block is missing")
+    block_size = struct.unpack_from("<Q", data, central_offset - 24)[0]
+    block_start = central_offset - block_size - 8
+    if block_start < 0 or struct.unpack_from("<Q", data, block_start)[0] != block_size:
+        raise ValueError("APK signing block size mismatch")
+    ids: set[int] = set()
+    position = block_start + 8
+    pairs_end = central_offset - 24
+    while position < pairs_end:
+        if position + 12 > pairs_end:
+            raise ValueError("truncated APK signing pair")
+        pair_size = struct.unpack_from("<Q", data, position)[0]
+        if pair_size < 4 or pair_size > pairs_end - position - 8:
+            raise ValueError("invalid APK signing pair size")
+        ids.add(struct.unpack_from("<I", data, position + 8)[0])
+        position += 8 + pair_size
+    if position != pairs_end:
+        raise ValueError("APK signing pairs do not fill the block")
+    return ids
+
+
 def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     try:
         props = parse_properties(root / "module.prop")
@@ -180,6 +215,24 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "release version pair",
         f"version={EXPECTED_RELEASE[0]} versionCode={EXPECTED_RELEASE[1]}",
         f"expected={EXPECTED_RELEASE!r} actual={(version, props.get('versionCode', ''))!r}",
+    )
+    license_text = (root / "LICENSE").read_text(encoding="utf-8")
+    contributing = (root / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    license_contract = (
+        "GNU GENERAL PUBLIC LICENSE" in license_text
+        and "Version 3, 29 June 2007" in license_text
+        and "GPL-3.0-or-later" in readme
+        and "GPL-3.0-or-later" in contributing
+        and "书面形式明确同意" in contributing
+        and "不限制 GPL" in contributing
+        and "不能被追溯撤销" in readme
+    )
+    report.check(
+        license_contract,
+        "GPL and upstream governance contract",
+        "GPL-3.0-or-later migration, historical boundary, and written upstream approval are explicit",
+        "license text, migration boundary, or contribution governance is incomplete",
     )
 
     bad_text: list[str] = []
@@ -207,6 +260,13 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "default package states",
         "six enabled and four disabled",
         f"states={states!r}",
+    )
+    game_policy = (root / "config/game_auto_pause").read_text(encoding="utf-8")
+    report.check(
+        game_policy == "enabled\n",
+        "default game auto-pause policy",
+        "enabled (Xiaomi stock behavior)",
+        f"unexpected value: {game_policy!r}",
     )
 
     patcher = (root / "src/patcher_v3.c").read_text(encoding="utf-8")
@@ -245,6 +305,8 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and "verifyDeviceConfig(text,data,writePackages);" in apply_loop
         and "loadDeviceConfig({preserveNotice:true})" in apply_loop
         and "state!=='enabled'&&state!=='disabled'" in webui
+        and "policy!=='enabled'&&policy!=='disabled'" in webui
+        and "device-policy-mismatch" in webui
     )
     report.check(
         state_contract,
@@ -296,7 +358,7 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and "snapshot-state" in watcher
         and "changed across snapshot" in watcher
         and "CONFIG_EVENT_MARKER" in service
-        and 'state|packages.txt|package_states|config_generation)' in service
+        and 'state|game_auto_pause|packages.txt|package_states|config_generation)' in service
         and "inotifyd" in service
         and "signature_needed" in watcher
         and "config_poll_grace_ticks" in watcher
@@ -418,6 +480,14 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "installer checks baseline existence before input redirection",
         "first install can emit a missing .package_baseline redirection error",
     )
+    report.check(
+        "for name in state game_auto_pause packages.txt package_states config_generation .package_baseline" in installer
+        and re.search(r'repair_backslash_entry\s+"\$MODDIR/config\\\\game_auto_pause"', installer) is not None
+        and 'pm install -r --user 0 "$companion_apk"' in installer,
+        "installer policy/companion migration",
+        "game policy survives upgrades and companion install has a boot-time fallback",
+        "installer does not preserve game policy or companion install command drifted",
+    )
 
     scripts = ["customize.sh", "service.sh", "post-fs-data.sh", "wrapper.sh", "bin/a2h_apply"]
     if use_adb:
@@ -447,6 +517,130 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
             report.check(rc == 0, "WebUI JavaScript syntax", "node --check passed", output.strip())
         finally:
             temporary.unlink(missing_ok=True)
+
+
+def check_companion(root: Path, report: Report) -> None:
+    manifest_path = root / "companion/app/src/main/AndroidManifest.xml"
+    apk_path = root / "companion/a2h_companion.apk"
+    try:
+        manifest = ET.parse(manifest_path).getroot()
+    except (OSError, ET.ParseError) as exc:
+        report.add("FAIL", "companion manifest", str(exc))
+        return
+
+    android = "{http://schemas.android.com/apk/res/android}"
+    application = manifest.find("application")
+    permissions = {
+        node.get(android + "name", "") for node in manifest.findall("uses-permission")
+    }
+    activity = manifest.find("application/activity")
+    service = manifest.find("application/service")
+    activity_actions = {
+        node.get(android + "name", "")
+        for node in manifest.findall("application/activity/intent-filter/action")
+    }
+    service_actions = {
+        node.get(android + "name", "")
+        for node in manifest.findall("application/service/intent-filter/action")
+    }
+    manifest_ok = (
+        application is not None
+        and application.get(android + "allowBackup") == "false"
+        and application.get(android + "usesCleartextTraffic") == "false"
+        and "android.permission.INTERNET" not in permissions
+        and activity is not None
+        and activity.get(android + "name") == ".WebUiActivity"
+        and activity.get(android + "exported") == "true"
+        and "android.service.quicksettings.action.QS_TILE_PREFERENCES" in activity_actions
+        and service is not None
+        and service.get(android + "name") == ".A2HTileService"
+        and service.get(android + "permission") == "android.permission.BIND_QUICK_SETTINGS_TILE"
+        and "android.service.quicksettings.action.QS_TILE" in service_actions
+    )
+    report.check(
+        manifest_ok,
+        "companion manifest security",
+        "no network/accessibility/foreground permission; protected TileService and fixed preference activity",
+        f"permissions={sorted(permissions)!r} activity_actions={sorted(activity_actions)!r} service_actions={sorted(service_actions)!r}",
+    )
+
+    build_script = (root / "companion/build.ps1").read_text(encoding="utf-8")
+    report.check(
+        "$VersionName = '1.5.6'" in build_script
+        and "$VersionCode = '1560'" in build_script
+        and "--min-sdk-version', '29'" in build_script
+        and "--target-sdk-version', '35'" in build_script
+        and "signing.properties" in build_script,
+        "companion build metadata",
+        "version 1.5.6/1560, API 29-35, external stable signing config",
+        "companion build version/API/signing metadata mismatch",
+    )
+
+    web_activity = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/WebUiActivity.java").read_text(encoding="utf-8")
+    bridge = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/A2HBridge.java").read_text(encoding="utf-8")
+    tile = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/A2HTileService.java").read_text(encoding="utf-8")
+    java_security = (
+        "settings.setBlockNetworkLoads(true)" in web_activity
+        and "settings.setAllowFileAccess(false)" in web_activity
+        and "settings.setAllowContentAccess(false)" in web_activity
+        and "WebView.setWebContentsDebuggingEnabled(false)" in web_activity
+        and '"https".equals(uri.getScheme())' in web_activity
+        and '"/coolapk.png".equals(path)' in web_activity
+        and "addJavascriptInterface" in web_activity
+        and "__a2h_exec_[0-9]+_[0-9]+" in bridge
+        and "a2h_apply toggle" in tile
+        and "onStartListening" in tile
+    )
+    report.check(
+        java_security,
+        "companion local-root bridge boundary",
+        "fixed local assets, blocked network/file/content access, strict callback and a2h_apply toggle",
+        "companion WebView or tile bridge security contract is incomplete",
+    )
+
+    service_script = (root / "service.sh").read_text(encoding="utf-8")
+    uninstall_script = (root / "uninstall.sh").read_text(encoding="utf-8")
+    lifecycle_ok = (
+        "COMPANION_VERSION_CODE=1560" in service_script
+        and "ensure_companion_installed()" in service_script
+        and "ensure_companion_installed &" in service_script
+        and 'pm install -r --user 0 "$COMPANION_APK"' in service_script
+        and "pm uninstall io.github.bbbomb0.a2hhook" in uninstall_script
+        and "--user 0" not in uninstall_script
+    )
+    report.check(
+        lifecycle_ok,
+        "companion install/uninstall lifecycle",
+        "version-aware boot fallback and complete fixed-package uninstall are present",
+        "companion boot repair, version synchronization, or uninstall cleanup is incomplete",
+    )
+
+    try:
+        apk_data = apk_path.read_bytes()
+        ids = apk_signing_ids(apk_data)
+        with zipfile.ZipFile(apk_path, "r") as apk:
+            names = apk.namelist()
+            required = {
+                "AndroidManifest.xml", "classes.dex", "resources.arsc",
+                "assets/index.html", "assets/coolapk.png",
+            }
+            apk_ok = (
+                len(names) == len(set(names))
+                and required <= set(names)
+                and apk.testzip() is None
+                and apk.read("assets/index.html") == (root / "webroot/index.html").read_bytes()
+                and apk.read("assets/coolapk.png") == (root / "webroot/coolapk.png").read_bytes()
+                and 0xF05368C0 in ids
+            )
+    except (OSError, ValueError, zipfile.BadZipFile, struct.error) as exc:
+        report.add("FAIL", "companion signed APK", str(exc))
+    else:
+        report.check(
+            apk_ok,
+            "companion signed APK",
+            "unique/CRC-valid APK, exact WebUI assets and APK Signature Scheme v3 block",
+            f"entries={names!r} signing_ids={[hex(value) for value in sorted(ids)]!r}",
+        )
 
 
 def check_lock_protocol(root: Path, report: Report, use_adb: bool) -> None:
@@ -680,6 +874,91 @@ printf 'PASS configuration hot-update runtime regression\n'
     )
 
 
+def check_control_transaction(root: Path, report: Report, use_adb: bool) -> None:
+    applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
+    atomic_block = extract_function(applier, "commit_tmp() {", "write_default_packages() {")
+    controls_block = extract_function(applier, "set_controls() {", "find_hal_pid() {")
+    if not atomic_block or not controls_block:
+        report.add("FAIL", "mode/policy transaction regression", "production control functions not found")
+        return
+
+    harness = atomic_block + controls_block + r'''
+set -eu
+base=__CONTROL_TEST_BASE__/a2h_controls_$$
+CFG_DIR="$base/config"
+CFG_STATE="$CFG_DIR/state"
+CFG_GAME_POLICY="$CFG_DIR/game_auto_pause"
+lock_calls=0
+fail_policy_commit=0
+
+fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
+log() { :; }
+acquire_config_lock() { lock_calls=$((lock_calls + 1)); return 0; }
+release_config_lock() { return 0; }
+commit_tmp() {
+  src=$1
+  dest=$2
+  if [ "$fail_policy_commit" = 1 ] && [ "$dest" = "$CFG_GAME_POLICY" ]; then
+    fail_policy_commit=0
+    rm -f "$src"
+    return 71
+  fi
+  chmod "${3:-0644}" "$src" 2>/dev/null || true
+  mv -f "$src" "$dest"
+}
+cleanup() { rm -rf "$base"; }
+trap cleanup 0 1 2 15
+mkdir -p "$CFG_DIR"
+printf 'disabled\n' > "$CFG_STATE"
+printf 'enabled\n' > "$CFG_GAME_POLICY"
+
+if set_controls enabled invalid; then fail invalid-policy-accepted; fi
+[ "$lock_calls" = 0 ] || fail invalid-policy-acquired-lock
+[ "$(cat "$CFG_STATE")" = disabled ] || fail invalid-policy-changed-mode
+[ "$(cat "$CFG_GAME_POLICY")" = enabled ] || fail invalid-policy-changed-policy
+
+fail_policy_commit=1
+if set_controls enabled disabled; then fail injected-policy-write-succeeded; fi
+[ "$(cat "$CFG_STATE")" = disabled ] || fail mode-not-rolled-back
+[ "$(cat "$CFG_GAME_POLICY")" = enabled ] || fail policy-not-rolled-back
+
+set_controls enabled disabled || fail valid-controls-failed
+[ "$(cat "$CFG_STATE")" = enabled ] || fail valid-mode-not-committed
+[ "$(cat "$CFG_GAME_POLICY")" = disabled ] || fail valid-policy-not-committed
+
+rm -f "$CFG_STATE" "$CFG_GAME_POLICY"
+fail_policy_commit=1
+if set_controls enabled disabled; then fail missing-file-fault-succeeded; fi
+[ ! -e "$CFG_STATE" ] || fail absent-mode-not-restored
+[ ! -e "$CFG_GAME_POLICY" ] || fail absent-policy-not-restored
+printf 'PASS mode/policy transaction regression\n'
+'''
+
+    if use_adb:
+        adb = shutil.which("adb")
+        if not adb:
+            report.add("FAIL", "mode/policy transaction regression", "adb requested but not found")
+            return
+        command = [adb, "shell", "sh", "-s"]
+        test_base = "/data/local/tmp"
+    else:
+        shell = locate_posix_shell()
+        if not shell:
+            report.gap("mode/policy transaction regression", "POSIX sh is required")
+            return
+        command = [shell, "-s"]
+        test_base = "${TMPDIR:-/tmp}"
+
+    payload = harness.replace("__CONTROL_TEST_BASE__", test_base).encode("utf-8")
+    rc, output = run_command(command, root, payload)
+    report.check(
+        rc == 0 and "PASS mode/policy transaction regression" in output,
+        "mode/policy transaction regression",
+        "validation-before-lock, two-file rollback, success, and absent-file rollback passed",
+        output.strip() or f"harness exited {rc}",
+    )
+
+
 def check_revision_metadata_repair(root: Path, report: Report, use_adb: bool) -> None:
     applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
     atomic_block = extract_function(applier, "commit_tmp() {", "write_default_packages() {")
@@ -699,6 +978,7 @@ CURRENT_SNAPSHOT=314159:26
 CURRENT_REVISION=0
 ACTIVE_COUNT=6
 CURRENT_MODE=disabled
+CURRENT_GAME_AUTO_PAUSE=enabled
 metadata_mv_calls=0
 metadata_fail_snapshot=0
 METADATA_MV_LOG="$base/mv.log"
@@ -856,6 +1136,7 @@ TMP_PKGS="$base/packages.txt"
 APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
 APPLIED_REVISION="$CFG_DIR/applied_revision"
 CURRENT_MODE=enabled
+CURRENT_GAME_AUTO_PAUSE=enabled
 CURRENT_REVISION=17
 CURRENT_SNAPSHOT=271828:18
 ACTIVE_COUNT=10
@@ -1104,6 +1385,7 @@ def check_webui_writer_transaction(root: Path, report: Report, use_adb: bool) ->
     snapshot = {
         "packages": [*OFFICIAL, "com.example.slot7", "com.example.slot8", "", ""],
         "enabled": [True, True, True, True, True, True, True, True, False, False],
+        "gameAutoPause": "enabled",
         "generation": "4242",
     }
     javascript = "\n".join(
@@ -1199,7 +1481,7 @@ writer_mv_count=0
 A2H_FAIL_MV=0
 __COMBINED_COMMAND__
 [ "$?" -eq 0 ] || { printf 'FAIL: combined writer success path\n'; exit 1; }
-[ "$(cat "$base/queue_called")" = "queue disabled" ] || { printf 'FAIL: queue missing after writer commit\n'; exit 1; }
+[ "$(cat "$base/queue_called")" = "queue disabled enabled" ] || { printf 'FAIL: queue controls missing after writer commit\n'; exit 1; }
 [ "$(wc -l < "$base/config/packages.txt" | tr -d ' ')" = 10 ] || { printf 'FAIL: package line count\n'; exit 1; }
 [ "$(sed -n '8p' "$base/config/packages.txt")" = com.example.slot8 ] || { printf 'FAIL: slot 8 package\n'; exit 1; }
 [ "$(sed -n '8p' "$base/config/package_states")" = 1 ] || { printf 'FAIL: slot 8 state\n'; exit 1; }
@@ -1288,13 +1570,18 @@ def check_source_contracts(root: Path, report: Report) -> None:
     apply_strings = main_body.find("apply_strings", tx_begin)
     install_stub = main_body.find("install_whitelist_stub", apply_strings)
     tx_restore = main_body.find("whitelist_transaction_restore", install_stub)
+    auxiliary_begin = main_body.find("auxiliary_transaction_begin")
+    auxiliary_restore = main_body.find("auxiliary_transaction_restore", install_stub)
     outer_rollback = (
         tx_begin >= 0
-        and tx_begin < apply_strings < install_stub < tx_restore
+        and auxiliary_begin >= 0
+        and tx_begin < auxiliary_begin < apply_strings < install_stub < tx_restore < auxiliary_restore
         and re.search(
-            r"if\s*\(\s*!final_ok\s*\)\s*"
-            r"rollback_ok\s*=\s*whitelist_transaction_restore\s*\(",
+            r"if\s*\(\s*!final_ok\s*\).*?"
+            r"whitelist_transaction_restore\s*\(.*?"
+            r"auxiliary_transaction_restore\s*\(",
             main_body,
+            re.DOTALL,
         )
         is not None
     )
@@ -1485,8 +1772,10 @@ def main() -> int:
     archive = (args.archive or (root / "compatibility_archive")).resolve()
     report = Report()
     check_release_tree(root, report, args.adb)
+    check_companion(root, report)
     check_lock_protocol(root, report, args.adb)
     check_config_hotupdate(root, report, args.adb)
+    check_control_transaction(root, report, args.adb)
     check_revision_metadata_repair(root, report, args.adb)
     check_last_pid_write_failure(root, report, args.adb)
     check_boot_last_pid_failure(root, report, args.adb)

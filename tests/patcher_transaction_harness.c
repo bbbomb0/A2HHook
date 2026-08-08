@@ -95,6 +95,7 @@ static void reset_fake(void) {
     g_test_icache_override = -1;
     g_test_icache_fail_call = 0;
     g_test_icache_calls = 0;
+    memset(&g_auxiliary, 0, sizeof(g_auxiliary));
     for (int i = 0; i < MAX_SLOTS; ++i) {
         set_slot_off(i, 0x3000u + (uintptr_t)i * 64u);
         slots[i].max_len = 63;
@@ -105,6 +106,18 @@ static void reset_fake(void) {
     }
     write_call_count = 0;
     fail_write_call = 0;
+}
+
+static void configure_auxiliary_stock(void) {
+    g_auxiliary.update_off = 0x5000u;
+    g_auxiliary.policy_off = 0x6000u;
+    g_auxiliary.update_fast = 0;
+    g_auxiliary.policy_relaxed = 0;
+    g_auxiliary.valid = 1;
+    memcpy(fake_memory + g_auxiliary.update_off + UPDATE_FLAGS_PATCH_OFF,
+           UPDATE_FLAGS_STOCK, sizeof(UPDATE_FLAGS_STOCK));
+    memcpy(fake_memory + g_auxiliary.policy_off + GAME_POLICY_PATCH_OFF,
+           GAME_POLICY_STOCK, sizeof(GAME_POLICY_STOCK));
 }
 
 static void configure_owned_cave(void) {
@@ -407,13 +420,150 @@ static int test_outer_second_cache_failure(void) {
     return expect_equal(before, "outer-second-cache", 2);
 }
 
+static int test_auxiliary_transactions(void) {
+    int ok = 1;
+    unsigned char before[FAKE_SIZE];
+
+    reset_fake();
+    configure_auxiliary_stock();
+    memcpy(before, fake_memory, sizeof(before));
+    auxiliary_transaction_t transaction;
+    if (!auxiliary_transaction_begin(42, FAKE_BASE, &transaction)) {
+        fprintf(stderr, "FAIL auxiliary success snapshot\n");
+        return 0;
+    }
+    g_test_icache_override = ICACHE_REMOTE_IVAU;
+    if (!apply_auxiliary_targets(42, FAKE_BASE, 1) ||
+        !verify_auxiliary_targets(42, FAKE_BASE, 1, 0) ||
+        !auxiliary_transaction_restore(42, FAKE_BASE, &transaction) ||
+        !expect_equal(before, "auxiliary-success-restore", 0)) {
+        fprintf(stderr, "FAIL auxiliary success/restore path\n");
+        ok = 0;
+    }
+
+    for (int fault = 1; fault <= 4; ++fault) {
+        reset_fake();
+        configure_auxiliary_stock();
+        memcpy(before, fake_memory, sizeof(before));
+        if (!auxiliary_transaction_begin(42, FAKE_BASE, &transaction)) return 0;
+        g_test_icache_override = ICACHE_REMOTE_IVAU;
+        fail_write_call = fault;
+        if (apply_auxiliary_targets(42, FAKE_BASE, 1) != 0) {
+            fprintf(stderr, "FAIL auxiliary write fault=%d unexpectedly succeeded\n", fault);
+            ok = 0;
+        }
+        if (!auxiliary_transaction_restore(42, FAKE_BASE, &transaction)) {
+            fprintf(stderr, "FAIL auxiliary write fault=%d rollback failed\n", fault);
+            ok = 0;
+        }
+        ok &= expect_equal(before, "auxiliary-write", fault);
+    }
+
+    for (int fault = 1; fault <= 4; ++fault) {
+        reset_fake();
+        configure_auxiliary_stock();
+        memcpy(before, fake_memory, sizeof(before));
+        if (!auxiliary_transaction_begin(42, FAKE_BASE, &transaction)) return 0;
+        g_test_icache_override = ICACHE_REMOTE_IVAU;
+        g_test_icache_fail_call = fault;
+        if (apply_auxiliary_targets(42, FAKE_BASE, 1) != 0) {
+            fprintf(stderr, "FAIL auxiliary cache fault=%d unexpectedly succeeded\n", fault);
+            ok = 0;
+        }
+        if (!auxiliary_transaction_restore(42, FAKE_BASE, &transaction)) {
+            fprintf(stderr, "FAIL auxiliary cache fault=%d rollback failed\n", fault);
+            ok = 0;
+        }
+        ok &= expect_equal(before, "auxiliary-cache", fault);
+    }
+    return ok;
+}
+
+static int test_coordinated_whitelist_rollback(void) {
+    reset_fake();
+    configure_owned_cave();
+    configure_auxiliary_stock();
+    unsigned char before[FAKE_SIZE];
+    memcpy(before, fake_memory, sizeof(before));
+
+    whitelist_transaction_t main_transaction;
+    auxiliary_transaction_t auxiliary_transaction;
+    if (!whitelist_transaction_begin(42, FAKE_BASE, &main_transaction) ||
+        !auxiliary_transaction_begin(42, FAKE_BASE, &auxiliary_transaction)) {
+        fprintf(stderr, "FAIL coordinated whitelist snapshots\n");
+        return 0;
+    }
+
+    char *packages[MAX_SLOTS];
+    char values[MAX_SLOTS][64];
+    for (int i = 0; i < MAX_SLOTS; ++i) {
+        snprintf(values[i], sizeof(values[i]), "org.example.coordinated%d", i + 1);
+        packages[i] = values[i];
+    }
+    g_test_icache_override = ICACHE_REMOTE_IVAU;
+    if (!apply_auxiliary_targets(42, FAKE_BASE, 1) ||
+        !apply_strings(42, FAKE_BASE, packages)) {
+        fprintf(stderr, "FAIL coordinated whitelist setup\n");
+        return 0;
+    }
+    g_test_icache_fail_call = 6;
+    if (install_whitelist_stub(42, FAKE_BASE) != 0) {
+        fprintf(stderr, "FAIL coordinated whitelist cache fault not observed\n");
+        return 0;
+    }
+    if (!whitelist_transaction_restore(42, FAKE_BASE, &main_transaction) ||
+        !auxiliary_transaction_restore(42, FAKE_BASE, &auxiliary_transaction)) {
+        fprintf(stderr, "FAIL coordinated whitelist rollback\n");
+        return 0;
+    }
+    return expect_equal(before, "coordinated-whitelist", 6);
+}
+
+static int test_coordinated_global_rollback(void) {
+    reset_fake();
+    configure_auxiliary_stock();
+    unsigned char before[FAKE_SIZE];
+    unsigned char global_before[sizeof(GLOBAL_PATCH)];
+    memcpy(before, fake_memory, sizeof(before));
+    memcpy(global_before, fake_memory + g_func_off, sizeof(global_before));
+
+    auxiliary_transaction_t auxiliary_transaction;
+    if (!auxiliary_transaction_begin(42, FAKE_BASE, &auxiliary_transaction)) {
+        fprintf(stderr, "FAIL coordinated global snapshot\n");
+        return 0;
+    }
+    g_test_icache_override = ICACHE_REMOTE_IVAU;
+    if (!apply_auxiliary_targets(42, FAKE_BASE, 1)) {
+        fprintf(stderr, "FAIL coordinated global auxiliary setup\n");
+        return 0;
+    }
+    g_test_icache_fail_call = 6;
+    if (write_code_twice(42, FAKE_BASE, FAKE_BASE + g_func_off,
+                         GLOBAL_PATCH, sizeof(GLOBAL_PATCH),
+                         "is_A2H_app.global-test") != 0) {
+        fprintf(stderr, "FAIL coordinated global cache fault not observed\n");
+        return 0;
+    }
+    if (!restore_global_snapshot(42, FAKE_BASE, FAKE_BASE + g_func_off,
+                                 global_before) ||
+        !auxiliary_transaction_restore(42, FAKE_BASE, &auxiliary_transaction)) {
+        fprintf(stderr, "FAIL coordinated global rollback\n");
+        return 0;
+    }
+    return expect_equal(before, "coordinated-global", 6);
+}
+
 int main(void) {
     int ok = test_stub_transaction() && test_string_transaction() &&
              test_owned_stale_stub_shapes() &&
              test_ten_slot_matcher_semantics() &&
-             test_outer_second_cache_failure();
+             test_outer_second_cache_failure() &&
+             test_auxiliary_transactions() &&
+             test_coordinated_whitelist_rollback() &&
+             test_coordinated_global_rollback();
     if (!ok) return 1;
-    printf("PASS isolated transactions: stub faults=3 string faults=20 "
-           "stale overlays=2 matcher cases=9 outer second-cache rollback=1\n");
+    printf("PASS coordinated transactions: stub faults=3 string faults=20 "
+           "aux-write faults=4 aux-cache faults=4 stale overlays=2 "
+           "matcher cases=9 whitelist/global outer rollback=3\n");
     return 0;
 }

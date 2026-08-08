@@ -9,15 +9,18 @@ A2HHook 是面向 REDMI K80 Ultra / K80U 的音乐触感模块，目标是在 Ke
 - 单一“全局模式”开关：开启为全局，关闭即为白名单模式；
 - 手机重启后自动应用配置，并通过通知中心反馈结果；
 - 模块栏 WebUI 入口；
-- 文件管理器直接修改 `config/packages.txt` 后自动热更新。
+- 文件管理器直接修改 `config/packages.txt` 后自动热更新；
+- 部分游戏的 FAST 低延迟音频输出适配；
+- 可选择保留或关闭小米“游戏启动时暂停音乐触感”的官方策略；
+- 控制中心磁贴：点击切换全局/白名单，长按打开同版 WebUI。
 
-当前版本：`v1.5.5-fix3`。`v1.5.5-fix` 与 `v1.5.5-fix2` 继续独立保留，本版是第三代修复迭代。
+当前开发版本：`v1.5.6`。已公开的旧版本标签与附件继续作为不可变回归基线保留。
 
 ## 下载安装
 
 请到 GitHub Releases 下载：
 
-- `a2h_hook_v1.5.5-fix3.zip`
+- `a2h_hook_v1.5.6.zip`
 
 刷入方式：
 
@@ -26,6 +29,9 @@ A2HHook 是面向 REDMI K80 Ultra / K80U 的音乐触感模块，目标是在 Ke
 3. 进入模块卡片 WebUI；
 4. 开启“全局模式”即对所有应用生效；关闭后自动切换为白名单模式；
 5. 10 个包名可分别使用右侧开关，模式、包名或开关变化会自动保存并应用。
+6. 需要快捷切换时，将“A2H 音乐触感”添加到控制中心；首次使用按 Root 管理器提示授权。点击磁贴切换全局/白名单，长按打开 WebUI。
+
+“游戏时暂停”默认开启，保持小米官方行为。关闭后，后台音乐与游戏同时使用扬声器输出时允许继续音乐触感；通话、耳机/蓝牙等非扬声器路由、振动流占用和 HAL 总开关保护不会被绕过。
 
 默认官方白名单：
 
@@ -47,6 +53,7 @@ com.kugou.android
 ## 兼容性说明
 
 - 已按 HyperOS 2.x / 3.x 差异做通用定位与安全回退，并为 HyperOS 3.0.305 的已提供 HAL 加入严格识别；
+- 游戏兼容补丁通过 ELF 唯一符号、固定函数大小、完整函数磁盘/内存比对确认所有权，不使用未知固定偏移强写；
 - 当前主线保留双写入、I-cache 同步与失败回滚等兼容保险；
 - 为避免播放过程中周期性暂停音频 HAL，稳态不会在 PID 与配置均未变化时主动抢回被其他模块覆盖的补丁；遇到冲突请停用同类模块，或切换一次模式/重启后重新应用；
 - 已连接实机仅为 K80U / HyperOS 3.0.302。HyperOS 3.0.305、2.0.218 与 2.0.208 仍需对应系统实机回归，不会把静态分析结果写成实机验证；
@@ -62,6 +69,8 @@ com.kugou.android
 - Android NDK r26 或更新版本；
 - CMake 3.18+；
 - Python 3（统一负责严格清单打包、CRC 和 Unix 权限校验）。
+
+若需要重新构建控制中心伴生 APK，还需要 Android SDK Platform 36、Build Tools 36、JDK 21 和自己的 Android 签名密钥。仓库不包含作者签名私钥；正式提交的 APK由 `companion/build.ps1` 从 `webroot/` 同步资源后构建。
 
 默认构建和发布链只生成 native patcher / trigger，不编译或打包 Dobby、Zygisk 注入库和 LD_PRELOAD 包装链。仓库保留的 Dobby 代码与静态库仅供 `A2H_BUILD_LEGACY_INJECTION=ON` 的 legacy/诊断构建使用，不是模块正常运行依赖。
 
@@ -81,7 +90,7 @@ python package_module.py .
 构建完成后会生成：
 
 ```text
-a2h_hook_v1.5.5-fix3.zip
+a2h_hook_v1.5.6.zip
 ```
 
 ## 仓库结构
@@ -89,6 +98,7 @@ a2h_hook_v1.5.5-fix3.zip
 ```text
 .
 ├── src/                 # native 源码
+├── companion/           # 控制中心磁贴与同版 WebUI 伴生 APK
 ├── webroot/             # KernelSU WebUI
 ├── config/              # 默认配置
 ├── bin/a2h_apply        # WebUI/开机服务内部应用入口
@@ -109,7 +119,11 @@ a2h_hook_v1.5.5-fix3.zip
 
 ## 开源协议
 
-本项目代码以 MIT License 开源。第三方组件说明见 `THIRD_PARTY_NOTICES.md`。
+从许可证迁移提交及 `v1.5.6` 起，本项目原创代码按 `GPL-3.0-or-later` 开源。分发本项目或其衍生作品时，必须继续使用兼容的 GPL 条款，向接收者提供对应源码与相同权利，不得将衍生版本闭源。完整条款见 `LICENSE`，执行边界见 `LICENSE_POLICY.md`，第三方组件见 `THIRD_PARTY_NOTICES.md`。
+
+代码进入官方 A2HHook 仓库前必须经过作者或当前维护者明确书面批准并实际合入；仓库的 CODEOWNERS 与分支保护共同执行这一要求，详细流程见 `CONTRIBUTING.md` 和 `LICENSE_POLICY.md`。这项规则只管理官方仓库，不限制 GPL 允许的 fork、修改和再分发。
+
+历史版本曾按 MIT 发布。已经从历史 tag、附件或副本获得的 MIT 权利不能被追溯撤销；本次迁移不会重写旧 tag 或替换旧附件。旧 Release 说明会标明迁移边界，`v1.5.6` 及后续发布只按 `GPL-3.0-or-later` 提供。
 
 ## 免责声明
 

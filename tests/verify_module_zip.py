@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import re
 import struct
 import sys
@@ -13,30 +14,35 @@ from pathlib import Path, PurePosixPath
 
 FILES = (
     "module.prop",
+    "LICENSE",
     "customize.sh",
     "service.sh",
     "webui.png",
+    "companion/a2h_companion.apk",
     "bin/a2h_apply",
     "config/packages.txt",
     "config/package_states",
     "config/state",
+    "config/game_auto_pause",
     "bin/a2h_patch",
     "bin/a2h_trigger",
     "post-fs-data.sh",
     "wrapper.sh",
+    "uninstall.sh",
     "webroot/index.html",
     "webroot/coolapk.png",
 )
 
 EXECUTABLE = {
     "customize.sh", "service.sh", "bin/a2h_apply", "bin/a2h_patch",
-    "bin/a2h_trigger", "post-fs-data.sh", "wrapper.sh",
+    "bin/a2h_trigger", "post-fs-data.sh", "wrapper.sh", "uninstall.sh",
 }
 
 TEXT = {
-    "module.prop", "customize.sh", "service.sh", "bin/a2h_apply",
+    "module.prop", "LICENSE", "customize.sh", "service.sh", "bin/a2h_apply",
     "config/packages.txt", "config/package_states", "config/state",
-    "post-fs-data.sh", "wrapper.sh", "webroot/index.html",
+    "config/game_auto_pause",
+    "post-fs-data.sh", "wrapper.sh", "uninstall.sh", "webroot/index.html",
 }
 
 OFFICIAL = (
@@ -62,6 +68,33 @@ def properties(data: bytes) -> dict[str, str]:
             raise ValueError(f"duplicate module.prop key: {key}")
         values[key] = value
     return values
+
+
+def apk_signing_ids(data: bytes) -> set[int]:
+    eocd = data.rfind(b"PK\x05\x06", max(0, len(data) - 65557))
+    if eocd < 0 or eocd + 22 > len(data):
+        raise ValueError("companion APK EOCD is missing")
+    central_offset = struct.unpack_from("<I", data, eocd + 16)[0]
+    if central_offset < 32 or data[central_offset - 16:central_offset] != b"APK Sig Block 42":
+        raise ValueError("companion APK signing block is missing")
+    block_size = struct.unpack_from("<Q", data, central_offset - 24)[0]
+    block_start = central_offset - block_size - 8
+    if block_start < 0 or struct.unpack_from("<Q", data, block_start)[0] != block_size:
+        raise ValueError("companion APK signing block size mismatch")
+    ids: set[int] = set()
+    position = block_start + 8
+    pairs_end = central_offset - 24
+    while position < pairs_end:
+        if position + 12 > pairs_end:
+            raise ValueError("truncated companion APK signing pair")
+        pair_size = struct.unpack_from("<Q", data, position)[0]
+        if pair_size < 4 or pair_size > pairs_end - position - 8:
+            raise ValueError("invalid companion APK signing pair size")
+        ids.add(struct.unpack_from("<I", data, position + 8)[0])
+        position += 8 + pair_size
+    if position != pairs_end:
+        raise ValueError("companion APK signing pairs do not fill the block")
+    return ids
 
 
 def elf_program_headers(data: bytes) -> list[tuple[int, int, int]]:
@@ -127,6 +160,10 @@ def validate(path: Path, expected_version: str | None = None, expected_code: str
         if path.name != f"a2h_hook_{version}.zip":
             raise ValueError(f"ZIP filename does not match module version {version}")
 
+        license_text = archive.read("LICENSE").decode("utf-8")
+        if "GNU GENERAL PUBLIC LICENSE" not in license_text or "Version 3, 29 June 2007" not in license_text:
+            raise ValueError("module ZIP does not contain the GPLv3 license text")
+
         packages = archive.read("config/packages.txt").decode("utf-8").splitlines()
         states = archive.read("config/package_states").decode("utf-8").splitlines()
         if len(packages) != 10 or tuple(packages[:6]) != OFFICIAL:
@@ -135,6 +172,27 @@ def validate(path: Path, expected_version: str | None = None, expected_code: str
             raise ValueError("default package state table is invalid")
         if archive.read("config/state") != b"disabled\n":
             raise ValueError("default mode is not whitelist/disabled")
+        if archive.read("config/game_auto_pause") != b"enabled\n":
+            raise ValueError("default game auto-pause policy is not Xiaomi stock/enabled")
+
+        companion = archive.read("companion/a2h_companion.apk")
+        signing_ids = apk_signing_ids(companion)
+        if 0xF05368C0 not in signing_ids:
+            raise ValueError("companion APK is not signed with APK Signature Scheme v3")
+        with zipfile.ZipFile(io.BytesIO(companion), "r") as apk:
+            apk_names = apk.namelist()
+            required_apk = {
+                "AndroidManifest.xml", "classes.dex", "resources.arsc",
+                "assets/index.html", "assets/coolapk.png",
+            }
+            if len(apk_names) != len(set(apk_names)) or not required_apk <= set(apk_names):
+                raise ValueError("companion APK members are incomplete or duplicated")
+            if apk.testzip() is not None:
+                raise ValueError("companion APK CRC verification failed")
+            if apk.read("assets/index.html") != archive.read("webroot/index.html"):
+                raise ValueError("companion APK WebUI asset differs from module WebUI")
+            if apk.read("assets/coolapk.png") != archive.read("webroot/coolapk.png"):
+                raise ValueError("companion APK Coolapk asset differs from module WebUI")
 
         patcher = archive.read("bin/a2h_patch")
         trigger = archive.read("bin/a2h_trigger")

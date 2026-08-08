@@ -6,10 +6,12 @@
 /bin/*
 !/bin/a2h_apply
 /zygisk/
+/companion/build/
 *.o
 *.so
 *.a
 *.zip
+*.idsig
 
 # Local reverse-engineering / debug material
 /system/

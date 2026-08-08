@@ -1,5 +1,17 @@
 # 更新日志
 
+## v1.5.6
+
+- 修复部分游戏使用 `FAST` / `FAST|RAW` 低延迟输出时，即使包名已在全局或白名单范围内仍无法进入音乐触感链路的问题；继续排除 MMAP、VOIP 和通话输出。
+- WebUI 新增“游戏时暂停”开关，默认开启并保持小米官方多活动流暂停策略；关闭后，只放宽“必须恰好一个活动输出”的限制，仍要求所有活动输出走扬声器，并保留通话模式、外接路由、振动流和 HAL 总开关保护。
+- `is_A2H_app`、`updateA2HMode()` 与 `isA2HAllowed()` 组成统一严格事务：唯一 ELF 符号、函数大小、RX 范围和完整函数所有权验证通过后才写入；两次写入、两次 EL0 I-cache 同步、最终复核及跨函数失败回滚保持一致。
+- 新增标准 Android `TileService` 伴生 APK。控制中心磁贴点击复用 `a2h_apply toggle` 切换全局/白名单，长按打开 APK内置的同版 WebUI；不使用无障碍、前台服务、网络权限、轮询或 KernelSU 私有 WebUI token，兼容正常提供 `su -c` 的 KernelSU/ReKernelSU/ReSukiSU 环境。
+- 伴生 WebView 仅加载固定 APK本地资源，禁用网络、明文、file/content 访问与 WebView 调试；正式 APK使用稳定作者证书和 APK Signature Scheme v3，安装失败不会阻断核心模块。
+- `state` 与 `game_auto_pause` 的 WebUI/队列提交改为先完整校验、同锁快照和失败回滚，避免第二个配置文件写入失败时只保存一半状态。
+- 安装脚本自动安装伴生 APK，卸载模块时只卸载固定包名 `io.github.bbbomb0.a2hhook`；模块打包器和独立校验器加入 APK、策略配置、卸载脚本、GPL 正文、资产一致性与签名块检查。
+- 项目原创代码从本版本起迁移为 `GPL-3.0-or-later`。衍生分发必须继续开源并提供对应源码；贡献进入官方仓库须经维护者书面批准。历史 MIT tag 与附件保持不变，既有 MIT 权利不追溯撤销。
+- 版本迭代为 `v1.5.6` / `versionCode=1560`；OS3.0.302 作为当前实机回归目标，其他已归档 OS2/OS3 HAL 保持静态严格核验，不把静态结果描述为实机通杀。
+
 ## v1.5.5-fix3
 
 - 修复 K80U / HyperOS 3.0.302 播放音频时约每 30 秒出现一次短暂卡顿的问题。根因是 watcher 的周期 `a2h_apply check` 会让 native patcher 通过 ptrace 暂停整个音频 HAL 线程组。

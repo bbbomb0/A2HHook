@@ -1,5 +1,5 @@
 param(
-    [string]$ExpectedVersion = "v1.5.5-fix3",
+    [string]$ExpectedVersion = "v1.5.6",
     [string]$CustomPackage = "com.kugou.android.lite",
     [string]$Serial = "",
     [switch]$Execute,
