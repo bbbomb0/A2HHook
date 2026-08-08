@@ -8,6 +8,7 @@
 - 新增标准 Android `TileService` 伴生 APK。控制中心磁贴点击复用 `a2h_apply toggle` 切换全局/白名单，长按打开 APK内置的同版 WebUI；不使用无障碍、前台服务、网络权限、轮询或 KernelSU 私有 WebUI token，兼容正常提供 `su -c` 的 KernelSU/ReKernelSU/ReSukiSU 环境。
 - 伴生 WebView 仅加载固定 APK本地资源，禁用网络、明文、file/content 访问与 WebView 调试；正式 APK使用稳定作者证书和 APK Signature Scheme v3，安装失败不会阻断核心模块。
 - 修复伴生 WebUI 请求拦截器误拦截自身根页面导致长按磁贴进入空白页的问题；页面加载失败时使用不透明明暗背景，磁贴 Root 失败日志补充可诊断原因。首次使用磁贴仍需由用户在 KernelSU/ReSukiSU 中手动授权伴生应用 Root。
+- 伴生 APK 的 WebUI 按系统 `statusBars` WindowInsets 动态增加顶部安全间距，避免 Android 15/16 强制 edge-to-edge 后标题、图标与状态栏或挖孔区域重叠；不使用固定像素，旋转与不同状态栏高度会自动重算。
 - 修复 30 秒轻量健康探测调用 `snapshot-state` 时无条件 `touch` 两份现有日志、导致内容未变化但文件 mtime 周期刷新的问题；日志现在仅在不存在时创建，稳态探测不再产生日志元数据写入。
 - `state` 与 `game_auto_pause` 的 WebUI/队列提交改为先完整校验、同锁快照和失败回滚，避免第二个配置文件写入失败时只保存一半状态。
 - 安装脚本自动安装伴生 APK，卸载模块时只卸载固定包名 `io.github.bbbomb0.a2hhook`；模块打包器和独立校验器加入 APK、策略配置、卸载脚本、GPL 正文、资产一致性与签名块检查。

@@ -597,6 +597,14 @@ def check_companion(root: Path, report: Report) -> None:
         and '"/".equals(uri.getPath())' in web_activity
         and "return null;" in web_activity
         and "Color.TRANSPARENT" not in web_activity
+        and "setOnApplyWindowInsetsListener" in web_activity
+        and "WindowInsets.Type.statusBars()" in web_activity
+        and "WindowInsets.Type.displayCutout()" in web_activity
+        and "getInsetsIgnoringVisibility" in web_activity
+        and "status_bar_height" in web_activity
+        and "webParams.topMargin" in web_activity
+        and "FrameLayout" in web_activity
+        and "requestApplyInsets()" in web_activity
         and "addJavascriptInterface" in web_activity
         and "__a2h_exec_[0-9]+_[0-9]+" in bridge
         and "a2h_apply toggle" in tile

@@ -5,13 +5,16 @@ import android.content.Intent;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.ViewGroup;
+import android.view.WindowInsets;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import java.io.ByteArrayInputStream;
@@ -36,8 +39,9 @@ public final class WebUiActivity extends Activity {
         super.onCreate(state);
         webView = new WebView(this);
         int nightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
-        webView.setBackgroundColor(nightMode == Configuration.UI_MODE_NIGHT_YES
-                ? Color.rgb(17, 20, 23) : Color.rgb(243, 245, 246));
+        int backgroundColor = nightMode == Configuration.UI_MODE_NIGHT_YES
+                ? Color.rgb(17, 20, 23) : Color.rgb(243, 245, 246);
+        webView.setBackgroundColor(backgroundColor);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -48,10 +52,41 @@ public final class WebUiActivity extends Activity {
         WebView.setWebContentsDebuggingEnabled(false);
         webView.addJavascriptInterface(new A2HBridge(webView, executor), "ksu");
         webView.setWebViewClient(new LocalOnlyClient());
-        setContentView(webView, new ViewGroup.LayoutParams(
+        FrameLayout root = new FrameLayout(this);
+        root.setBackgroundColor(backgroundColor);
+        FrameLayout.LayoutParams webParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        root.addView(webView, webParams);
+        root.setOnApplyWindowInsetsListener((view, insets) -> {
+            int statusBarTop = getStatusBarTop(insets);
+            if (webParams.topMargin != statusBarTop) {
+                webParams.topMargin = statusBarTop;
+                webView.setLayoutParams(webParams);
+            }
+            return insets;
+        });
+        setContentView(root, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.requestApplyInsets();
         webView.loadDataWithBaseURL("https://" + LOCAL_HOST + "/", readAsset("index.html"),
                 "text/html", "UTF-8", null);
+    }
+
+    @SuppressWarnings("deprecation")
+    private int getStatusBarTop(WindowInsets insets) {
+        int top;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            int types = WindowInsets.Type.statusBars() | WindowInsets.Type.displayCutout();
+            top = insets.getInsetsIgnoringVisibility(types).top;
+        } else {
+            top = insets.getStableInsetTop();
+            if (insets.getDisplayCutout() != null) {
+                top = Math.max(top, insets.getDisplayCutout().getSafeInsetTop());
+            }
+        }
+        int id = getResources().getIdentifier("status_bar_height", "dimen", "android");
+        int fallback = id == 0 ? 0 : getResources().getDimensionPixelSize(id);
+        return Math.max(top, fallback);
     }
 
     private String readAsset(String name) {
