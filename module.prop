@@ -1,8 +1,8 @@
 id=a2h_hook
 name=A2H 音乐触感白名单
-version=v1.5.5-fix3
-versionCode=1553
+version=v1.5.6
+versionCode=1560
 author=bb_bomb
-description=全局/白名单音乐触感 · 包名热更新 · 10槽独立开关 · 开机自动启用
+description=全局/白名单音乐触感 · 游戏低延迟音频适配 · 控制中心磁贴 · 10槽独立开关
 webui=webroot
 webuiIcon=webui.png

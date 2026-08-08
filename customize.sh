@@ -51,6 +51,8 @@ repair_backslash_entry "$MODDIR/bin\\a2h_trigger"
 repair_backslash_entry "$MODDIR/bin\\a2h_inject"
 repair_backslash_entry "$MODDIR/config\\packages.txt"
 repair_backslash_entry "$MODDIR/config\\state"
+repair_backslash_entry "$MODDIR/config\\game_auto_pause"
+repair_backslash_entry "$MODDIR/companion\\a2h_companion.apk"
 
 mkdir -p \
   "$MODDIR/bin" \
@@ -64,7 +66,7 @@ old_states_present=0
 if [ "$MODDIR" != "$OLD_MODULE" ] && [ -d "$OLD_MODULE/config" ]; then
   [ -f "$OLD_MODULE/config/packages.txt" ] && old_packages_present=1
   [ -f "$OLD_MODULE/config/package_states" ] && old_states_present=1
-  for name in state packages.txt package_states config_generation .package_baseline; do
+  for name in state game_auto_pause packages.txt package_states config_generation .package_baseline; do
     [ -f "$OLD_MODULE/config/$name" ] || continue
     cp -f "$OLD_MODULE/config/$name" "$MODDIR/config/$name" 2>/dev/null
   done
@@ -114,6 +116,9 @@ done
 
 if [ ! -f "$MODDIR/config/state" ]; then
   printf '%s\n' disabled > "$MODDIR/config/state"
+fi
+if [ ! -f "$MODDIR/config/game_auto_pause" ]; then
+  printf '%s\n' enabled > "$MODDIR/config/game_auto_pause"
 fi
 
 packages_preexisting=0
@@ -180,7 +185,7 @@ if [ ! -f "$MODDIR/config/package_states" ]; then
 fi
 
 # Strip UTF-8 BOM from critical text files if any
-for f in "$MODDIR/module.prop" "$MODDIR/config/packages.txt" "$MODDIR/config/package_states" "$MODDIR/config/config_generation" "$MODDIR/config/.package_baseline" "$MODDIR/config/state" "$MODDIR/webroot/index.html"; do
+for f in "$MODDIR/module.prop" "$MODDIR/config/packages.txt" "$MODDIR/config/package_states" "$MODDIR/config/config_generation" "$MODDIR/config/.package_baseline" "$MODDIR/config/state" "$MODDIR/config/game_auto_pause" "$MODDIR/webroot/index.html"; do
   [ -f "$f" ] || continue
   # remove BOM if present
   if [ "$(dd if="$f" bs=1 count=3 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
@@ -245,19 +250,36 @@ chmod 755 \
   "$MODDIR/service.sh" \
   "$MODDIR/post-fs-data.sh" \
   "$MODDIR/wrapper.sh" \
+  "$MODDIR/uninstall.sh" \
   "$MODDIR/customize.sh" 2>/dev/null
 
 chmod 644 \
+  "$MODDIR/LICENSE" \
   "$MODDIR/module.prop" \
   "$MODDIR/webui.png" \
+  "$MODDIR/companion/a2h_companion.apk" \
   "$MODDIR/config/packages.txt" \
   "$MODDIR/config/package_states" \
   "$MODDIR/config/config_generation" \
   "$MODDIR/config/state" \
+  "$MODDIR/config/game_auto_pause" \
   "$MODDIR/webroot/index.html" \
   "$MODDIR/webroot/coolapk.png" 2>/dev/null
 
 chmod 600 "$MODDIR/config/.package_baseline" 2>/dev/null
+
+companion_apk="$MODDIR/companion/a2h_companion.apk"
+if [ -f "$companion_apk" ] && command -v pm >/dev/null 2>&1; then
+  companion_result=$(pm install -r --user 0 "$companion_apk" 2>&1)
+  if [ "$?" -eq 0 ]; then
+    ui_print "- 控制中心磁贴组件已安装"
+  else
+    ui_print "! 磁贴组件安装失败，核心音乐触感模块不受影响"
+    ui_print "! $companion_result"
+  fi
+else
+  ui_print "! 磁贴组件缺失或系统安装服务不可用"
+fi
 
 if [ -f "$MODDIR/webroot/index.html" ]; then
   ui_print "- WebUI 已就绪，请在 KernelSU / 模块栏直接打开"

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="io.github.bbbomb0.a2hhook">
+    <application
+        android:allowBackup="false"
+        android:label="A2HHook 音乐触感"
+        android:usesCleartextTraffic="false"
+        android:theme="@style/Theme.A2HHook">
+        <activity
+            android:name=".WebUiActivity"
+            android:excludeFromRecents="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE_PREFERENCES" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
+        <service
+            android:name=".A2HTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_a2h_tile"
+            android:label="A2H 音乐触感"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

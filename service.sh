@@ -9,7 +9,7 @@ if [ "${A2H_INOTIFY_CALLBACK:-0}" = "1" ]; then
   # inotifyd invokes: PROG EVENTS WATCHED_PATH [DIRECTORY_ENTRY].
   config_event_name=${3:-${2##*/}}
   case "$config_event_name" in
-    state|packages.txt|package_states|config_generation)
+    state|game_auto_pause|packages.txt|package_states|config_generation)
       : > "$CONFIG_EVENT_MARKER" 2>/dev/null
       ;;
   esac
@@ -20,6 +20,7 @@ APPLIER="$MODDIR/bin/a2h_apply"
 PATCHER="$MODDIR/bin/a2h_patch"
 CFG_DIR="$MODDIR/config"
 CFG_STATE="$CFG_DIR/state"
+CFG_GAME_POLICY="$CFG_DIR/game_auto_pause"
 CFG_PKGS="$CFG_DIR/packages.txt"
 CFG_STATES="$CFG_DIR/package_states"
 CFG_GENERATION="$CFG_DIR/config_generation"
@@ -33,13 +34,16 @@ NOTIFICATION_RETRY_FILE="$CFG_DIR/notification_retry_state"
 NOTIFICATION_LOCK_DIR="$CFG_DIR/.notification_lock"
 TMP_PKGS=/data/local/tmp/a2h_packages.txt
 LOG="$MODDIR/a2h_patch.log"
+COMPANION_APK="$MODDIR/companion/a2h_companion.apk"
+COMPANION_PACKAGE=io.github.bbbomb0.a2hhook
+COMPANION_VERSION_CODE=1560
 
 ts() { date '+%F %T'; }
 log() { printf '[%s] %s\n' "$(ts)" "$*" >> "$LOG" 2>/dev/null; }
 
 raw_config_signature() {
   {
-    for raw_config_file in "$CFG_STATE" "$CFG_PKGS" "$CFG_STATES" "$CFG_GENERATION"; do
+    for raw_config_file in "$CFG_STATE" "$CFG_GAME_POLICY" "$CFG_PKGS" "$CFG_STATES" "$CFG_GENERATION"; do
       if [ -f "$raw_config_file" ]; then
         printf '%s\n' "${raw_config_file##*/}"
         cksum < "$raw_config_file" 2>/dev/null
@@ -55,7 +59,7 @@ start_config_inotify() {
   config_inotify_pid=
   command -v inotifyd >/dev/null 2>&1 || return 1
   A2H_INOTIFY_CALLBACK=1 inotifyd "$MODDIR/service.sh" \
-    "$CFG_DIR:mnyd" "$CFG_STATE:w" "$CFG_PKGS:w" \
+    "$CFG_DIR:mnyd" "$CFG_STATE:w" "$CFG_GAME_POLICY:w" "$CFG_PKGS:w" \
     "$CFG_STATES:w" "$CFG_GENERATION:w" >/dev/null 2>&1 &
   config_inotify_pid=$!
   if kill -0 "$config_inotify_pid" 2>/dev/null; then
@@ -115,6 +119,40 @@ find_hal_pid() {
 apply_once() {
   service_reason=$1
   A2H_REASON="$service_reason" A2H_APPLY_ATTEMPTS=1 sh "$APPLIER" apply >> "$LOG" 2>&1
+}
+
+ensure_companion_installed() {
+  [ -f "$COMPANION_APK" ] || {
+    log "companion install skipped reason=apk-missing"
+    return 1
+  }
+  companion_wait=0
+  while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; do
+    [ "$companion_wait" -lt 60 ] || {
+      log "companion install deferred reason=boot-timeout"
+      return 1
+    }
+    sleep 2
+    companion_wait=$((companion_wait + 1))
+  done
+  command -v pm >/dev/null 2>&1 || {
+    log "companion install skipped reason=pm-missing"
+    return 1
+  }
+  companion_installed_code=$(dumpsys package "$COMPANION_PACKAGE" 2>/dev/null |
+    sed -n 's/^[[:space:]]*versionCode=\([0-9][0-9]*\).*/\1/p' | head -n 1)
+  if [ "$companion_installed_code" = "$COMPANION_VERSION_CODE" ]; then
+    log "companion ready package=$COMPANION_PACKAGE versionCode=$COMPANION_VERSION_CODE"
+    return 0
+  fi
+  companion_result=$(pm install -r --user 0 "$COMPANION_APK" 2>&1)
+  companion_rc=$?
+  if [ "$companion_rc" -eq 0 ]; then
+    log "companion installed package=$COMPANION_PACKAGE versionCode=$COMPANION_VERSION_CODE previous=${companion_installed_code:-none}"
+    return 0
+  fi
+  log "companion install FAIL rc=$companion_rc previous=${companion_installed_code:-none} output=$companion_result"
+  return "$companion_rc"
 }
 
 applier_busy() {
@@ -299,6 +337,7 @@ if [ ! -f "$APPLIER" ] || [ ! -f "$PATCHER" ]; then
 fi
 
 log "boot auto-apply start"
+ensure_companion_installed &
 boot_ok=0
 boot_try=1
 boot_delay=1

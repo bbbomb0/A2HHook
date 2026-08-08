@@ -10,6 +10,7 @@ MODDIR=$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd)
 PATCHER="$MODDIR/bin/a2h_patch"
 CFG_DIR="$MODDIR/config"
 CFG_STATE="$CFG_DIR/state"
+CFG_GAME_POLICY="$CFG_DIR/game_auto_pause"
 CFG_PKGS="$CFG_DIR/packages.txt"
 CFG_STATES="$CFG_DIR/package_states"
 CFG_GENERATION="$CFG_DIR/config_generation"
@@ -32,6 +33,7 @@ MAIN_LOG="$MODDIR/a2h_patch.log"
 SELF="$MODDIR/bin/a2h_apply"
 
 CURRENT_MODE=disabled
+CURRENT_GAME_AUTO_PAUSE=enabled
 CURRENT_SNAPSHOT=
 CURRENT_REVISION=0
 CURRENT_RAW_SIGNATURE=
@@ -152,6 +154,20 @@ normalize_mode() {
   esac
   write_value_atomic "$CFG_STATE" "$mode_value" 0644 || return 1
   CURRENT_MODE=$mode_value
+  return 0
+}
+
+normalize_game_auto_pause() {
+  game_policy_value=$(cat "$CFG_GAME_POLICY" 2>/dev/null | tr -d '\r' | head -n 1)
+  case "$game_policy_value" in
+    enabled|disabled) ;;
+    *)
+      game_policy_value=enabled
+      log "config game_auto_pause invalid; fallback=enabled(stock)"
+      ;;
+  esac
+  write_value_atomic "$CFG_GAME_POLICY" "$game_policy_value" 0644 || return 1
+  CURRENT_GAME_AUTO_PAUSE=$game_policy_value
   return 0
 }
 
@@ -456,6 +472,8 @@ compute_snapshot() {
     {
       printf 'state\n'
       cat "$CFG_STATE" 2>/dev/null
+      printf 'game_auto_pause\n'
+      cat "$CFG_GAME_POLICY" 2>/dev/null
       printf 'packages\n'
       cat "$CFG_PKGS" 2>/dev/null
       printf 'package_states\n'
@@ -468,7 +486,7 @@ compute_snapshot() {
 compute_raw_config_signature() {
   CURRENT_RAW_SIGNATURE=$(
     {
-      for signature_file in "$CFG_STATE" "$CFG_PKGS" "$CFG_STATES" "$CFG_GENERATION"; do
+      for signature_file in "$CFG_STATE" "$CFG_GAME_POLICY" "$CFG_PKGS" "$CFG_STATES" "$CFG_GENERATION"; do
         if [ -f "$signature_file" ]; then
           printf '%s\n' "${signature_file##*/}"
           cksum < "$signature_file" 2>/dev/null
@@ -514,7 +532,7 @@ record_revision() {
     [ "$CURRENT_REVISION" -gt 0 ] 2>/dev/null || CURRENT_REVISION=1
     write_value_atomic "$CFG_REVISION" "$CURRENT_REVISION" 0644 || return 1
     write_value_atomic "$CFG_SNAPSHOT" "$CURRENT_SNAPSHOT" 0644 || return 1
-    log "config revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT mode=$CURRENT_MODE"
+    log "config revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT mode=$CURRENT_MODE game_auto_pause=$CURRENT_GAME_AUTO_PAUSE"
   else
     CURRENT_REVISION=$revision_old
     if ! [ "$CURRENT_REVISION" -gt 0 ] 2>/dev/null; then
@@ -536,6 +554,7 @@ prepare_config_unlocked() {
     compute_raw_config_signature || return 1
     prepare_input_signature=$CURRENT_RAW_SIGNATURE
     normalize_mode || return 1
+    normalize_game_auto_pause || return 1
     normalize_package_config || return 1
     compute_raw_config_signature || return 1
     prepare_normalized_signature=$CURRENT_RAW_SIGNATURE
@@ -566,6 +585,88 @@ set_mode_unlocked() {
     *) return 2 ;;
   esac
   write_value_atomic "$CFG_STATE" "$set_mode_value" 0644
+}
+
+set_game_auto_pause_unlocked() {
+  set_policy_value=$1
+  case "$set_policy_value" in
+    enabled|on|stock) set_policy_value=enabled ;;
+    disabled|off|relaxed) set_policy_value=disabled ;;
+    *) return 2 ;;
+  esac
+  write_value_atomic "$CFG_GAME_POLICY" "$set_policy_value" 0644
+}
+
+set_controls() {
+  controls_mode=${1:-}
+  controls_policy=${2:-}
+  case "$controls_mode" in
+    '' ) ;;
+    enabled|global|on) controls_mode=enabled ;;
+    disabled|whitelist|list|off) controls_mode=disabled ;;
+    *) return 2 ;;
+  esac
+  case "$controls_policy" in
+    '' ) ;;
+    enabled|on|stock) controls_policy=enabled ;;
+    disabled|off|relaxed) controls_policy=disabled ;;
+    *) return 2 ;;
+  esac
+  if ! acquire_config_lock 20; then
+    log "set controls FAIL error=lock-timeout"
+    return 75
+  fi
+  controls_mode_existed=0
+  controls_policy_existed=0
+  [ -f "$CFG_STATE" ] && controls_mode_existed=1
+  [ -f "$CFG_GAME_POLICY" ] && controls_policy_existed=1
+  controls_mode_before=$(cat "$CFG_STATE" 2>/dev/null)
+  controls_policy_before=$(cat "$CFG_GAME_POLICY" 2>/dev/null)
+  controls_rc=0
+  [ -z "$controls_mode" ] || write_value_atomic "$CFG_STATE" "$controls_mode" 0644 || controls_rc=$?
+  if [ "$controls_rc" -eq 0 ] && [ -n "$controls_policy" ]; then
+    write_value_atomic "$CFG_GAME_POLICY" "$controls_policy" 0644 || controls_rc=$?
+  fi
+  if [ "$controls_rc" -ne 0 ]; then
+    controls_rollback=1
+    if [ "$controls_mode_existed" = "1" ]; then
+      write_value_atomic "$CFG_STATE" "$controls_mode_before" 0644 || controls_rollback=0
+    else
+      rm -f "$CFG_STATE" 2>/dev/null || controls_rollback=0
+    fi
+    if [ "$controls_policy_existed" = "1" ]; then
+      write_value_atomic "$CFG_GAME_POLICY" "$controls_policy_before" 0644 || controls_rollback=0
+    else
+      rm -f "$CFG_GAME_POLICY" 2>/dev/null || controls_rollback=0
+    fi
+    log "set controls rollback=$controls_rollback rc=$controls_rc"
+    [ "$controls_rollback" = "1" ] || controls_rc=1
+  fi
+  if ! release_config_lock; then
+    log "set controls FAIL error=lock-release"
+    [ "$controls_rc" -eq 0 ] && controls_rc=1
+  fi
+  return "$controls_rc"
+}
+
+toggle_mode() {
+  if ! acquire_config_lock 20; then
+    log "toggle mode FAIL error=lock-timeout"
+    return 75
+  fi
+  toggle_rc=0
+  normalize_mode || toggle_rc=$?
+  if [ "$toggle_rc" -eq 0 ]; then
+    toggle_next=enabled
+    [ "$CURRENT_MODE" = "enabled" ] && toggle_next=disabled
+    set_mode_unlocked "$toggle_next" || toggle_rc=$?
+  fi
+  if ! release_config_lock; then
+    log "toggle mode FAIL error=lock-release"
+    [ "$toggle_rc" -eq 0 ] && toggle_rc=1
+  fi
+  [ "$toggle_rc" -eq 0 ] && log "toggle mode accepted from=$CURRENT_MODE to=$toggle_next"
+  return "$toggle_rc"
 }
 
 find_hal_pid() {
@@ -870,14 +971,14 @@ run_check() {
     check_tmp="/data/local/tmp/.a2h_check.$$"
     if [ "$check_want" = "whitelist" ] && patcher_supports_packages; then
       if [ -n "$HAL_BASE" ]; then
-        "$PATCHER" --check "$check_want" "$HAL_PID" --packages "$check_pkgfile" --base "$HAL_BASE" > "$check_tmp" 2>&1
+        "$PATCHER" --check "$check_want" "$HAL_PID" --packages "$check_pkgfile" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE" > "$check_tmp" 2>&1
       else
-        "$PATCHER" --check "$check_want" "$HAL_PID" --packages "$check_pkgfile" > "$check_tmp" 2>&1
+        "$PATCHER" --check "$check_want" "$HAL_PID" --packages "$check_pkgfile" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" > "$check_tmp" 2>&1
       fi
     elif [ -n "$HAL_BASE" ]; then
-      "$PATCHER" --check "$check_want" "$HAL_PID" --base "$HAL_BASE" > "$check_tmp" 2>&1
+      "$PATCHER" --check "$check_want" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE" > "$check_tmp" 2>&1
     else
-      "$PATCHER" --check "$check_want" "$HAL_PID" > "$check_tmp" 2>&1
+      "$PATCHER" --check "$check_want" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" > "$check_tmp" 2>&1
     fi
     check_rc=$?
     if [ "$check_rc" -ne 0 ]; then
@@ -889,14 +990,14 @@ run_check() {
   fi
   if [ "$check_want" = "whitelist" ] && patcher_supports_packages; then
     if [ -n "$HAL_BASE" ]; then
-      "$PATCHER" --check "$check_want" "$HAL_PID" --packages "$check_pkgfile" --base "$HAL_BASE"
+      "$PATCHER" --check "$check_want" "$HAL_PID" --packages "$check_pkgfile" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE"
     else
-      "$PATCHER" --check "$check_want" "$HAL_PID" --packages "$check_pkgfile"
+      "$PATCHER" --check "$check_want" "$HAL_PID" --packages "$check_pkgfile" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE"
     fi
   elif [ -n "$HAL_BASE" ]; then
-    "$PATCHER" --check "$check_want" "$HAL_PID" --base "$HAL_BASE"
+    "$PATCHER" --check "$check_want" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE"
   else
-    "$PATCHER" --check "$check_want" "$HAL_PID"
+    "$PATCHER" --check "$check_want" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE"
   fi
 }
 
@@ -924,22 +1025,22 @@ apply_current() {
   }
   apply_want=whitelist
   [ "$CURRENT_MODE" = "enabled" ] && apply_want=global
-  log "apply start reason=$apply_reason pid=$HAL_PID base=${HAL_BASE:-auto} mode=$CURRENT_MODE want=$apply_want revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT"
+  log "apply start reason=$apply_reason pid=$HAL_PID base=${HAL_BASE:-auto} mode=$CURRENT_MODE want=$apply_want game_auto_pause=$CURRENT_GAME_AUTO_PAUSE revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT"
   log_slots
 
   apply_rc=1
   if [ "$CURRENT_MODE" = "enabled" ]; then
     if [ -n "$HAL_BASE" ]; then
-      "$PATCHER" "$HAL_PID" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
+      "$PATCHER" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
     else
-      "$PATCHER" "$HAL_PID" >> "$MAIN_LOG" 2>&1
+      "$PATCHER" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" >> "$MAIN_LOG" 2>&1
     fi
     apply_rc=$?
   else
     if [ -n "$HAL_BASE" ]; then
-      "$PATCHER" --disable "$HAL_PID" "$TMP_PKGS" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
+      "$PATCHER" --disable "$HAL_PID" "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
     else
-      "$PATCHER" --disable "$HAL_PID" "$TMP_PKGS" >> "$MAIN_LOG" 2>&1
+      "$PATCHER" --disable "$HAL_PID" "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" >> "$MAIN_LOG" 2>&1
     fi
     apply_rc=$?
   fi
@@ -947,14 +1048,14 @@ apply_current() {
   if [ "$apply_rc" -eq 0 ]; then
     if [ "$apply_want" = "whitelist" ] && patcher_supports_packages; then
       if [ -n "$HAL_BASE" ]; then
-        "$PATCHER" --check "$apply_want" "$HAL_PID" --packages "$TMP_PKGS" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
+        "$PATCHER" --check "$apply_want" "$HAL_PID" --packages "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
       else
-        "$PATCHER" --check "$apply_want" "$HAL_PID" --packages "$TMP_PKGS" >> "$MAIN_LOG" 2>&1
+        "$PATCHER" --check "$apply_want" "$HAL_PID" --packages "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" >> "$MAIN_LOG" 2>&1
       fi
     elif [ -n "$HAL_BASE" ]; then
-      "$PATCHER" --check "$apply_want" "$HAL_PID" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
+      "$PATCHER" --check "$apply_want" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
     else
-      "$PATCHER" --check "$apply_want" "$HAL_PID" >> "$MAIN_LOG" 2>&1
+      "$PATCHER" --check "$apply_want" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" >> "$MAIN_LOG" 2>&1
     fi
     check_rc=$?
   else
@@ -966,7 +1067,7 @@ apply_current() {
       log "apply FAIL reason=$apply_reason pid=$HAL_PID mode=$apply_want error=record-last-pid revision=$CURRENT_REVISION"
       return 74
     fi
-    log "apply verified reason=$apply_reason pid=$HAL_PID mode=$apply_want revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT"
+    log "apply verified reason=$apply_reason pid=$HAL_PID mode=$apply_want game_auto_pause=$CURRENT_GAME_AUTO_PAUSE revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT"
     return 0
   fi
   log "apply FAIL reason=$apply_reason pid=$HAL_PID mode=$apply_want patch_rc=$apply_rc check_rc=$check_rc revision=$CURRENT_REVISION"
@@ -1037,7 +1138,7 @@ apply_stable() {
 
   release_apply_lock
   if [ "$stable_rc" -eq 0 ]; then
-    printf 'APPLY_OK mode=%s revision=%s snapshot=%s active=%s\n' "$CURRENT_MODE" "$CURRENT_REVISION" "$CURRENT_SNAPSHOT" "$ACTIVE_COUNT"
+    printf 'APPLY_OK mode=%s game_auto_pause=%s revision=%s snapshot=%s active=%s\n' "$CURRENT_MODE" "$CURRENT_GAME_AUTO_PAUSE" "$CURRENT_REVISION" "$CURRENT_SNAPSHOT" "$ACTIVE_COUNT"
   else
     log "apply exhausted reason=$stable_reason attempts=$stable_try rc=$stable_rc"
   fi
@@ -1178,12 +1279,12 @@ queue_latest() {
     log "queue FAIL error=pending-write"
     return 2
   }
-  log "queue accepted mode=$CURRENT_MODE revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT"
+  log "queue accepted mode=$CURRENT_MODE game_auto_pause=$CURRENT_GAME_AUTO_PAUSE revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT"
   if ! start_worker; then
     log "queue FAIL error=worker-start pending=preserved"
     return 1
   fi
-  printf 'QUEUED mode=%s revision=%s snapshot=%s active=%s\n' "$CURRENT_MODE" "$CURRENT_REVISION" "$CURRENT_SNAPSHOT" "$ACTIVE_COUNT"
+  printf 'QUEUED mode=%s game_auto_pause=%s revision=%s snapshot=%s active=%s\n' "$CURRENT_MODE" "$CURRENT_GAME_AUTO_PAUSE" "$CURRENT_REVISION" "$CURRENT_SNAPSHOT" "$ACTIVE_COUNT"
   return 0
 }
 
@@ -1194,9 +1295,9 @@ show_current_unlocked() {
     return 2
   }
   if [ -n "$HAL_BASE" ]; then
-    "$PATCHER" --show "$HAL_PID" --base "$HAL_BASE"
+    "$PATCHER" --show "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE"
   else
-    "$PATCHER" --show "$HAL_PID"
+    "$PATCHER" --show "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE"
   fi
 }
 
@@ -1274,12 +1375,17 @@ case "$command_name" in
     exit $?
     ;;
   queue)
-    if [ -n "${2:-}" ]; then
-      set_mode "$2" || {
-        printf 'invalid mode: %s\n' "$2" >&2
+    if [ -n "${2:-}" ] || [ -n "${3:-}" ]; then
+      set_controls "${2:-}" "${3:-}" || {
+        printf 'invalid controls: mode=%s game_auto_pause=%s\n' "${2:-}" "${3:-}" >&2
         exit 2
       }
     fi
+    queue_latest
+    exit $?
+    ;;
+  toggle)
+    toggle_mode || exit $?
     queue_latest
     exit $?
     ;;
@@ -1308,7 +1414,7 @@ case "$command_name" in
     exit $?
     ;;
   *)
-    printf '%s\n' 'usage: a2h_apply [queue [enabled|disabled]|apply|enable|disable|show|status|check [global|whitelist]|snapshot|snapshot-state|busy]' >&2
+    printf '%s\n' 'usage: a2h_apply [queue [enabled|disabled] [enabled|disabled]|toggle|apply|enable|disable|show|status|check [global|whitelist]|snapshot|snapshot-state|busy]' >&2
     exit 2
     ;;
 esac

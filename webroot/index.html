@@ -30,7 +30,7 @@
       </div>
     </div>
     <div class="top-actions">
-      <span class="version">v1.5.5-fix3</span>
+      <span class="version">v1.5.6</span>
       <button class="icon" id="theme" type="button" title="切换主题" aria-label="切换主题">☼</button>
     </div>
   </header>
@@ -43,6 +43,16 @@
       </div>
       <label class="switch" title="全局模式">
         <input id="globalMode" type="checkbox" role="switch" aria-label="全局模式">
+        <span class="track"></span>
+      </label>
+    </div>
+    <div class="mode policy-mode">
+      <div class="mode-copy">
+        <span class="mode-title">游戏时暂停</span>
+        <span class="mode-value" id="policyValue">开启 · 官方策略</span>
+      </div>
+      <label class="switch" title="游戏启动时暂停音乐触感">
+        <input id="gamePause" type="checkbox" role="switch" aria-label="游戏时暂停音乐触感">
         <span class="track"></span>
       </label>
     </div>
@@ -84,10 +94,11 @@
   const OFFICIAL=['com.kugou.android','com.tencent.qqmusic','com.netease.cloudmusic','cn.kuwo.player','com.miui.player','com.luna.music'];
   const DEFAULTS=OFFICIAL.concat(['','','','']);
   const LABELS=['酷狗音乐','QQ音乐','网易云音乐','酷我音乐','小米音乐','Luna音乐','自定义 1','自定义 2','自定义 3','自定义 4'];
-  const STORAGE_KEY='a2h_config_v5';
-  const LEGACY_STORAGE_KEY='a2h_config_v4';
-  const DEVICE_MARKERS={state:'__A2H_DEVICE_STATE__',packages:'__A2H_DEVICE_PACKAGES__',states:'__A2H_DEVICE_STATES__',end:'__A2H_DEVICE_END__'};
+  const STORAGE_KEY='a2h_config_v6';
+  const LEGACY_STORAGE_KEYS=['a2h_config_v5','a2h_config_v4'];
+  const DEVICE_MARKERS={state:'__A2H_DEVICE_STATE__',policy:'__A2H_GAME_AUTO_PAUSE__',packages:'__A2H_DEVICE_PACKAGES__',states:'__A2H_DEVICE_STATES__',end:'__A2H_DEVICE_END__'};
   let mode='whitelist';
+  let gameAutoPause='enabled';
   let slots=DEFAULTS.slice();
   let slotEnabled=[true,true,true,true,true,true,false,false,false,false];
   let configRevision=0;
@@ -123,7 +134,7 @@
 
   function loadLocal(){
     try{
-      const raw=localStorage.getItem(STORAGE_KEY)||localStorage.getItem(LEGACY_STORAGE_KEY);
+      const raw=localStorage.getItem(STORAGE_KEY)||LEGACY_STORAGE_KEYS.map(key=>localStorage.getItem(key)).find(Boolean);
       if(!raw) return;
       const data=JSON.parse(raw);
       if(data&&Array.isArray(data.packages)){
@@ -131,10 +142,11 @@
         slotEnabled=cloneEnabled(data.enabled,slots);
       }
       mode=data&&data.mode==='global'?'global':'whitelist';
+      gameAutoPause=data&&data.gameAutoPause==='disabled'?'disabled':'enabled';
     }catch(error){}
   }
   function saveLocal(){
-    try{localStorage.setItem(STORAGE_KEY,JSON.stringify({version:5,mode,packages:slots,enabled:slotEnabled}));}catch(error){}
+    try{localStorage.setItem(STORAGE_KEY,JSON.stringify({version:6,mode,gameAutoPause,packages:slots,enabled:slotEnabled}));}catch(error){}
   }
   function setNotice(text,kind,sticky){
     const toast=$('toast');
@@ -150,6 +162,10 @@
     $('globalMode').checked=global;
     $('globalMode').disabled=!deviceConfigReady||applyBusy;
     $('modeValue').textContent=deviceConfigReady?(global?'开启 · 全局':'关闭 · 白名单'):(deviceConfigStatus==='error'?'读取失败':'正在读取');
+    const pause=gameAutoPause==='enabled';
+    $('gamePause').checked=pause;
+    $('gamePause').disabled=!deviceConfigReady||applyBusy;
+    $('policyValue').textContent=deviceConfigReady?(pause?'开启 · 官方策略':'关闭 · 保持触感'):(deviceConfigStatus==='error'?'读取失败':'正在读取');
     $('reset').disabled=!deviceConfigReady;
   }
   function updateCount(){
@@ -266,9 +282,9 @@
   function shellQuote(value){return "'"+String(value).replace(/'/g,"'\"'\"'")+"'";}
   function snapshotConfig(){
     const packages=cloneSlots(slots);
-    return {mode:mode==='global'?'global':'whitelist',packages,enabled:cloneEnabled(slotEnabled,packages),generation:String(Date.now())};
+    return {mode:mode==='global'?'global':'whitelist',gameAutoPause:gameAutoPause==='disabled'?'disabled':'enabled',packages,enabled:cloneEnabled(slotEnabled,packages),generation:String(Date.now())};
   }
-  function snapshotKey(data){return JSON.stringify({mode:data.mode,packages:data.packages,enabled:data.enabled});}
+  function snapshotKey(data){return JSON.stringify({mode:data.mode,gameAutoPause:data.gameAutoPause,packages:data.packages,enabled:data.enabled});}
   function validationMessage(data){
     const seen=new Set();
     for(let index=0;index<10;index++){
@@ -325,7 +341,7 @@
     data.mode=state==='enabled'?'global':'whitelist';
     const commands=['# A2HHook apply command'];
     if(writePackages) commands.push(buildWritePackagesCmd(data,true)+' &&');
-    commands.push('sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state));
+    commands.push('sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state)+' '+shellQuote(data.gameAutoPause));
     return commands.join('\n');
   }
 
@@ -467,7 +483,7 @@
         setNotice('正在保存：'+applyReason,'',true);
         try{
           const command=(writePackages ? buildWritePackagesCmd(data)+' && ' : '')+
-            'sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state)+' && '+
+             'sh /data/adb/modules/a2h_hook/bin/a2h_apply queue '+shellQuote(state)+' '+shellQuote(data.gameAutoPause)+' && '+
             buildReadDeviceCommand(writePackages);
           const text=extractStdout(await execRoot(command,15000));
           verifyDeviceConfig(text,data,writePackages);
@@ -515,7 +531,9 @@
   function buildReadDeviceCommand(includePackages){
     const lines=[
       "printf '%s\\n' "+shellQuote(DEVICE_MARKERS.state),
-      'cat /data/adb/modules/a2h_hook/config/state 2>/dev/null || exit 2'
+      'cat /data/adb/modules/a2h_hook/config/state 2>/dev/null || exit 2',
+      "printf '%s\\n' "+shellQuote(DEVICE_MARKERS.policy),
+      'cat /data/adb/modules/a2h_hook/config/game_auto_pause 2>/dev/null || exit 2'
     ];
     if(includePackages){
       lines.push(
@@ -529,11 +547,18 @@
     return lines.join('; ');
   }
   function parseDeviceMode(text,endMarker){
-    const stateText=parseDeviceSection(text,DEVICE_MARKERS.state,endMarker||DEVICE_MARKERS.end);
+    const stateText=parseDeviceSection(text,DEVICE_MARKERS.state,endMarker||DEVICE_MARKERS.policy);
     if(stateText===null) throw new Error('missing-device-state');
     const state=stateText.trim();
     if(state!=='enabled'&&state!=='disabled') throw new Error('invalid-device-state');
     return state==='enabled'?'global':'whitelist';
+  }
+  function parseDevicePolicy(text,endMarker){
+    const policyText=parseDeviceSection(text,DEVICE_MARKERS.policy,endMarker||DEVICE_MARKERS.end);
+    if(policyText===null) throw new Error('missing-device-policy');
+    const policy=policyText.trim();
+    if(policy!=='enabled'&&policy!=='disabled') throw new Error('invalid-device-policy');
+    return policy;
   }
   function parseDeviceConfig(text){
     if(text.indexOf(DEVICE_MARKERS.end)<0) throw new Error('incomplete-device-config');
@@ -543,11 +568,12 @@
     const packages=Array(10).fill('');
     packageText.replace(/\r/g,'').split('\n').slice(0,10).forEach((line,index)=>{packages[index]=normalizeSlot(line);});
     const rawStates=stateText.replace(/\r/g,'').split('\n').map(value=>value.trim());
-    return {mode:parseDeviceMode(text,DEVICE_MARKERS.packages),packages,enabled:cloneEnabled(rawStates,packages)};
+    return {mode:parseDeviceMode(text,DEVICE_MARKERS.policy),gameAutoPause:parseDevicePolicy(text,DEVICE_MARKERS.packages),packages,enabled:cloneEnabled(rawStates,packages)};
   }
   function verifyDeviceConfig(text,expected,includePackages){
-    const actual=includePackages?parseDeviceConfig(text):{mode:parseDeviceMode(text)};
+    const actual=includePackages?parseDeviceConfig(text):{mode:parseDeviceMode(text),gameAutoPause:parseDevicePolicy(text)};
     if(actual.mode!==expected.mode) throw new Error('device-mode-mismatch');
+    if(actual.gameAutoPause!==expected.gameAutoPause) throw new Error('device-policy-mismatch');
     if(includePackages){
       const expectedPackages=cloneSlots(expected.packages);
       const expectedEnabled=cloneEnabled(expected.enabled,expectedPackages);
@@ -572,6 +598,7 @@
       }
       const data=parseDeviceConfig(text);
       mode=data.mode;
+      gameAutoPause=data.gameAutoPause;
       slots=data.packages;
       slotEnabled=data.enabled;
       deviceConfigReady=true;
@@ -600,6 +627,13 @@
     configRevision++;
     renderMode();
     requestApply(mode==='global'?'全局模式已开启':'白名单模式已开启',false);
+  });
+  $('gamePause').addEventListener('change',event=>{
+    if(!deviceConfigReady){event.target.checked=gameAutoPause==='enabled';setNotice('设备配置尚未载入','warn');return;}
+    gameAutoPause=event.target.checked?'enabled':'disabled';
+    configRevision++;
+    renderMode();
+    requestApply(gameAutoPause==='enabled'?'已恢复官方游戏策略':'游戏期间保持触感',false);
   });
   $('theme').addEventListener('click',()=>{
     const root=document.documentElement;
