@@ -435,6 +435,14 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "a request arriving during a failed apply is reclaimed or left for a new worker",
         "failed worker can release its lock while leaving an unconsumed pending request",
     )
+    report.check(
+        'touch "$ACTION_LOG" "$MAIN_LOG"' not in applier
+        and '[ -e "$ACTION_LOG" ] || : > "$ACTION_LOG"' in applier
+        and '[ -e "$MAIN_LOG" ] || : > "$MAIN_LOG"' in applier,
+        "steady-state log metadata contract",
+        "snapshot-state creates missing logs without touching existing files",
+        "periodic metadata probes can still refresh existing log mtimes",
+    )
 
     postfs = (root / "post-fs-data.sh").read_text(encoding="utf-8")
     postfs_contract = (
@@ -586,6 +594,9 @@ def check_companion(root: Path, report: Report) -> None:
         and "WebView.setWebContentsDebuggingEnabled(false)" in web_activity
         and '"https".equals(uri.getScheme())' in web_activity
         and '"/coolapk.png".equals(path)' in web_activity
+        and '"/".equals(uri.getPath())' in web_activity
+        and "return null;" in web_activity
+        and "Color.TRANSPARENT" not in web_activity
         and "addJavascriptInterface" in web_activity
         and "__a2h_exec_[0-9]+_[0-9]+" in bridge
         and "a2h_apply toggle" in tile

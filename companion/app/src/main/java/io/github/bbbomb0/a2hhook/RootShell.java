@@ -50,7 +50,12 @@ final class RootShell {
                     new String(stderr.toByteArray(), StandardCharsets.UTF_8));
         } catch (Exception error) {
             if (process != null) process.destroyForcibly();
-            return new Result(1, "", error.getClass().getSimpleName());
+            String message = error.getMessage();
+            String detail = error.getClass().getSimpleName();
+            if (message != null && !message.trim().isEmpty()) {
+                detail += ": " + message.trim();
+            }
+            return new Result(1, "", detail);
         }
     }
 

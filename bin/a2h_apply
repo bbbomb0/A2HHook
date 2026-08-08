@@ -1356,7 +1356,8 @@ snapshot_state_current() {
 
 chmod 755 "$PATCHER" "$SELF" 2>/dev/null
 mkdir -p "$CFG_DIR" /data/local/tmp 2>/dev/null
-touch "$ACTION_LOG" "$MAIN_LOG" 2>/dev/null
+[ -e "$ACTION_LOG" ] || : > "$ACTION_LOG"
+[ -e "$MAIN_LOG" ] || : > "$MAIN_LOG"
 
 command_name=${1:-apply}
 case "$command_name" in
