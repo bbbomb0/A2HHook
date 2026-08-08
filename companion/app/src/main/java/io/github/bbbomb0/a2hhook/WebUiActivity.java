@@ -2,6 +2,7 @@ package io.github.bbbomb0.a2hhook;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
@@ -34,7 +35,9 @@ public final class WebUiActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         webView = new WebView(this);
-        webView.setBackgroundColor(Color.TRANSPARENT);
+        int nightMode = getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK;
+        webView.setBackgroundColor(nightMode == Configuration.UI_MODE_NIGHT_YES
+                ? Color.rgb(17, 20, 23) : Color.rgb(243, 245, 246));
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -89,12 +92,17 @@ public final class WebUiActivity extends Activity {
         @Override
         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
             Uri uri = request.getUrl();
-            if (isAllowedLocalUri(uri) && "/coolapk.png".equals(uri.getPath())) {
-                try {
-                    return new WebResourceResponse("image/png", null,
-                            getAssets().open("coolapk.png"));
-                } catch (IOException ignored) {
-                    return emptyResponse();
+            if (isAllowedLocalUri(uri)) {
+                if ("/".equals(uri.getPath())) {
+                    return null;
+                }
+                if ("/coolapk.png".equals(uri.getPath())) {
+                    try {
+                        return new WebResourceResponse("image/png", null,
+                                getAssets().open("coolapk.png"));
+                    } catch (IOException ignored) {
+                        return emptyResponse();
+                    }
                 }
             }
             return emptyResponse();

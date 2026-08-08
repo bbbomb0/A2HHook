@@ -4,12 +4,14 @@ import android.os.Handler;
 import android.os.Looper;
 import android.service.quicksettings.Tile;
 import android.service.quicksettings.TileService;
+import android.util.Log;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class A2HTileService extends TileService {
+    private static final String TAG = "A2HTileService";
     private static final String STATE_PATH = "/data/adb/modules/a2h_hook/config/state";
     private static final ExecutorService EXECUTOR = Executors.newSingleThreadExecutor(r -> {
         Thread thread = new Thread(r, "a2h-tile-root");
@@ -35,6 +37,9 @@ public final class A2HTileService extends TileService {
                     "sh /data/adb/modules/a2h_hook/bin/a2h_apply toggle; rc=$?; printf '\\n__A2H_TILE_MODE__\\n'; cat "
                             + STATE_PATH + " 2>/dev/null; exit $rc", 20000);
             String mode = parseMode(result.stdout);
+            if (result.code != 0 || mode == null) {
+                Log.w(TAG, "toggle failed rc=" + result.code + " stderr=" + concise(result.stderr));
+            }
             main.post(() -> {
                 busy.set(false);
                 if (result.code == 0 && mode != null) {
@@ -52,6 +57,9 @@ public final class A2HTileService extends TileService {
         EXECUTOR.execute(() -> {
             RootShell.Result result = RootShell.run("cat " + STATE_PATH, 5000);
             String mode = parseMode(result.stdout);
+            if (mode == null) {
+                Log.w(TAG, "refresh failed rc=" + result.code + " stderr=" + concise(result.stderr));
+            }
             main.post(() -> {
                 if (mode != null) {
                     knownMode = mode;
@@ -91,5 +99,11 @@ public final class A2HTileService extends TileService {
             if ("enabled".equals(mode) || "disabled".equals(mode)) return mode;
         }
         return null;
+    }
+
+    private static String concise(String value) {
+        if (value == null) return "";
+        String singleLine = value.replace('\r', ' ').replace('\n', ' ').trim();
+        return singleLine.length() <= 160 ? singleLine : singleLine.substring(0, 160);
     }
 }
