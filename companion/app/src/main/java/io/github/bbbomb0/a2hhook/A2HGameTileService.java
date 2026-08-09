@@ -1,7 +1,7 @@
 package io.github.bbbomb0.a2hhook;
 
-public final class A2HTileService extends A2HToggleTileService {
-    private static final String STATE_PATH = "/data/adb/modules/a2h_hook/config/state";
+public final class A2HGameTileService extends A2HToggleTileService {
+    private static final String STATE_PATH = "/data/adb/modules/a2h_hook/config/game_auto_pause";
 
     @Override
     protected String statePath() {
@@ -10,37 +10,36 @@ public final class A2HTileService extends A2HToggleTileService {
 
     @Override
     protected String toggleCommand() {
-        // The foreground command only commits the config; native apply is detached.
-        return "/data/adb/modules/a2h_hook/bin/a2h_apply toggle-fast";
+        return "/data/adb/modules/a2h_hook/bin/a2h_apply toggle-game-auto-pause-fast";
     }
 
     @Override
     protected String tileLabel() {
-        return "A2H 全局音乐触感";
+        return "游戏时暂停音乐触感";
     }
 
     @Override
     protected String activeSubtitle() {
-        return "全局";
+        return "已开启";
     }
 
     @Override
     protected String inactiveSubtitle() {
-        return "自定义";
+        return "已关闭";
     }
 
     @Override
     protected String pendingSubtitle() {
-        return "切换中";
+        return "应用中";
     }
 
     @Override
     protected int activeIcon() {
-        return drawableId("ic_a2h_tile");
+        return drawableId("ic_a2h_tile_game_on");
     }
 
     @Override
     protected int inactiveIcon() {
-        return drawableId("ic_a2h_tile_off");
+        return drawableId("ic_a2h_tile_game_off");
     }
 }

@@ -2,7 +2,7 @@
 set -eu
 
 MODDIR=${A2H_MODULE_DIR:-/data/adb/modules/a2h_hook}
-EXPECTED_VERSION=${A2H_EXPECTED_VERSION:-v1.5.6}
+EXPECTED_VERSION=${A2H_EXPECTED_VERSION:-v1.5.6-fix}
 CUSTOM_PACKAGE=${A2H_TEST_PACKAGE:-com.kugou.android.lite}
 HOTUPDATE_PACKAGE=${A2H_HOTUPDATE_PACKAGE:-com.ss.android.ugc.aweme.lite}
 HOTUPDATE_PACKAGE_2=${A2H_HOTUPDATE_PACKAGE_2:-com.example.a2h.hotupdate}
@@ -113,7 +113,7 @@ restore_config() {
   done
   chmod 0644 "$CFG/state" "$CFG/packages.txt" "$CFG/package_states" "$CFG/config_generation" 2>/dev/null || true
   chmod 0600 "$CFG/.package_baseline" 2>/dev/null || true
-  rm -f "$CFG/applied_snapshot" "$CFG/applied_revision" "$CFG/last_pid" 2>/dev/null
+  rm -f "$CFG/applied_snapshot" "$CFG/applied_revision" "$CFG/applied_game_auto_pause" "$CFG/last_pid" 2>/dev/null
   if ! A2H_REASON=regression-restore A2H_APPLY_ATTEMPTS=2 sh "$APPLIER" apply >/dev/null 2>&1; then
     printf 'FAIL: original config restored on disk but native re-apply failed; backup=%s\n' "$WORK/backup" >&2
     return 1

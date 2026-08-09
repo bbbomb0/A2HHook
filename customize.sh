@@ -9,6 +9,13 @@ ui_print() {
 MODDIR="${MODPATH:-$MODDIR}"
 [ -n "$MODDIR" ] || MODDIR="${0%/*}"
 
+# Cancel an uninstall task left by a previously removed copy before installing
+# the replacement companion APK. The task also self-cancels when this module is
+# present, but removing it here closes the race before Package Manager work.
+rm -f \
+  /data/adb/service.d/a2h_hook_companion_cleanup.sh \
+  /data/adb/service.d/.a2h_hook_companion_cleanup.* 2>/dev/null
+
 # Only remove the exact historical UTF-8 BOM module id. Broad name matching can
 # delete unrelated audio or haptic modules owned by the user.
 BOM_PREFIX=$(printf '\357\273\277')
@@ -270,12 +277,24 @@ chmod 600 "$MODDIR/config/.package_baseline" 2>/dev/null
 
 companion_apk="$MODDIR/companion/a2h_companion.apk"
 if [ -f "$companion_apk" ] && command -v pm >/dev/null 2>&1; then
-  companion_result=$(pm install -r --user 0 "$companion_apk" 2>&1)
-  if [ "$?" -eq 0 ]; then
-    ui_print "- 控制中心磁贴组件已安装"
+  # A module upgrade must not retain an old companion APK or its package data.
+  # Remove the exact package first; the user-0 fallback covers Android builds
+  # that reject an all-user uninstall while still leaving no upgrade path.
+  companion_uninstall_result=$(pm uninstall io.github.bbbomb0.a2hhook 2>&1)
+  if pm path io.github.bbbomb0.a2hhook >/dev/null 2>&1; then
+    companion_uninstall_result=$(pm uninstall --user 0 io.github.bbbomb0.a2hhook 2>&1)
+  fi
+  if pm path io.github.bbbomb0.a2hhook >/dev/null 2>&1; then
+    ui_print "! 旧磁贴组件卸载失败，已停止安装新组件"
+    ui_print "! $companion_uninstall_result"
   else
-    ui_print "! 磁贴组件安装失败，核心音乐触感模块不受影响"
-    ui_print "! $companion_result"
+    companion_result=$(pm install --user 0 "$companion_apk" 2>&1)
+    if [ "$?" -eq 0 ]; then
+      ui_print "- 控制中心磁贴组件已干净安装"
+    else
+      ui_print "! 磁贴组件安装失败，核心音乐触感模块不受影响"
+      ui_print "! $companion_result"
+    fi
   fi
 else
   ui_print "! 磁贴组件缺失或系统安装服务不可用"

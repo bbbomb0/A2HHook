@@ -36,7 +36,14 @@ TMP_PKGS=/data/local/tmp/a2h_packages.txt
 LOG="$MODDIR/a2h_patch.log"
 COMPANION_APK="$MODDIR/companion/a2h_companion.apk"
 COMPANION_PACKAGE=io.github.bbbomb0.a2hhook
-COMPANION_VERSION_CODE=1560
+COMPANION_VERSION_CODE=1561
+
+# A successfully installed module supersedes any one-shot companion cleanup
+# left by an earlier uninstall. The cleanup script independently checks both
+# module locations before touching the package.
+rm -f \
+  /data/adb/service.d/a2h_hook_companion_cleanup.sh \
+  /data/adb/service.d/.a2h_hook_companion_cleanup.* 2>/dev/null
 
 ts() { date '+%F %T'; }
 log() { printf '[%s] %s\n' "$(ts)" "$*" >> "$LOG" 2>/dev/null; }
@@ -141,14 +148,33 @@ ensure_companion_installed() {
   }
   companion_installed_code=$(dumpsys package "$COMPANION_PACKAGE" 2>/dev/null |
     sed -n 's/^[[:space:]]*versionCode=\([0-9][0-9]*\).*/\1/p' | head -n 1)
-  if [ "$companion_installed_code" = "$COMPANION_VERSION_CODE" ]; then
-    log "companion ready package=$COMPANION_PACKAGE versionCode=$COMPANION_VERSION_CODE"
+  companion_expected_hash=
+  companion_installed_hash=
+  companion_installed_apk=$(pm path "$COMPANION_PACKAGE" 2>/dev/null |
+    sed -n 's/^package://p' | head -n 1)
+  if command -v sha256sum >/dev/null 2>&1; then
+    companion_expected_hash=$(sha256sum "$COMPANION_APK" 2>/dev/null | awk '{print $1}')
+    [ -z "$companion_installed_apk" ] ||
+      companion_installed_hash=$(sha256sum "$companion_installed_apk" 2>/dev/null | awk '{print $1}')
+  fi
+  if [ "$companion_installed_code" = "$COMPANION_VERSION_CODE" ] &&
+     [ -n "$companion_expected_hash" ] &&
+     [ "$companion_installed_hash" = "$companion_expected_hash" ]; then
+    log "companion ready package=$COMPANION_PACKAGE versionCode=$COMPANION_VERSION_CODE sha256=$companion_expected_hash"
     return 0
   fi
-  companion_result=$(pm install -r --user 0 "$COMPANION_APK" 2>&1)
+  companion_uninstall_result=$(pm uninstall "$COMPANION_PACKAGE" 2>&1)
+  if pm path "$COMPANION_PACKAGE" >/dev/null 2>&1; then
+    companion_uninstall_result=$(pm uninstall --user 0 "$COMPANION_PACKAGE" 2>&1)
+  fi
+  if pm path "$COMPANION_PACKAGE" >/dev/null 2>&1; then
+    log "companion uninstall FAIL previous=${companion_installed_code:-none} output=$companion_uninstall_result"
+    return 1
+  fi
+  companion_result=$(pm install --user 0 "$COMPANION_APK" 2>&1)
   companion_rc=$?
   if [ "$companion_rc" -eq 0 ]; then
-    log "companion installed package=$COMPANION_PACKAGE versionCode=$COMPANION_VERSION_CODE previous=${companion_installed_code:-none}"
+    log "companion clean-installed package=$COMPANION_PACKAGE versionCode=$COMPANION_VERSION_CODE previous=${companion_installed_code:-none}"
     return 0
   fi
   log "companion install FAIL rc=$companion_rc previous=${companion_installed_code:-none} output=$companion_result"
