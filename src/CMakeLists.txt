@@ -32,7 +32,7 @@ endif()
 
 # Runtime patcher (scans maps + process_vm_writev)
 add_executable(a2h_patch patcher_v3.c)
-target_compile_options(a2h_patch PRIVATE -Os -static -Wall -Wextra)
+target_compile_options(a2h_patch PRIVATE -Oz -static -Wall -Wextra)
 target_link_options(a2h_patch PRIVATE -static)
 set_target_properties(a2h_patch PROPERTIES
     OUTPUT_NAME "a2h_patch"

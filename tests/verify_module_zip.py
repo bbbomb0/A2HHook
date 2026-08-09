@@ -53,6 +53,7 @@ OFFICIAL = (
 PT_INTERP = 3
 PT_DYNAMIC = 2
 DT_NEEDED = 1
+ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
 
 
 def properties(data: bytes) -> dict[str, str]:
@@ -137,6 +138,8 @@ def validate(path: Path, expected_version: str | None = None, expected_code: str
             expected = 0o755 if name in EXECUTABLE else 0o644
             if info.create_system != 3 or file_type != 0o100000 or mode != expected:
                 raise ValueError(f"invalid Unix mode for {name}: system={info.create_system} type={file_type:o} mode={mode:o}")
+            if info.date_time != ZIP_TIMESTAMP:
+                raise ValueError(f"non-reproducible ZIP timestamp for {name}: {info.date_time!r}")
             data = archive.read(name)
             if name in TEXT:
                 data.decode("utf-8")

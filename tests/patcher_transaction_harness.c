@@ -111,13 +111,88 @@ static void reset_fake(void) {
 static void configure_auxiliary_stock(void) {
     g_auxiliary.update_off = 0x5000u;
     g_auxiliary.policy_off = 0x6000u;
-    g_auxiliary.update_fast = 0;
+    g_auxiliary.stream_event_off = 0x7000u;
+    g_auxiliary.output_pool_off = 0xA000u;
+    g_auxiliary.update_flags_state = OVERLAY_STOCK;
+    g_auxiliary.update_app_policy_state = OVERLAY_STOCK;
     g_auxiliary.policy_relaxed = 0;
+    g_auxiliary.stream_ref_state = OVERLAY_STOCK;
+    g_auxiliary.output_pool_state = OVERLAY_STOCK;
+    g_auxiliary.stream_events_patched = 0;
     g_auxiliary.valid = 1;
+    memcpy(g_auxiliary.app_policy_disk,
+           UPDATE_APP_POLICY_DISK_TEMPLATE, UPDATE_APP_POLICY_BYTES);
+    uint32_t stock_call = 0;
+    uintptr_t call_target = g_auxiliary.update_off + 0x9000u;
+    if (!encode_aarch64_bl(
+            g_auxiliary.update_off + UPDATE_APP_POLICY_PATCH_OFF +
+            UPDATE_APP_POLICY_DISK_BL_OFF,
+            call_target, &stock_call)) {
+        fprintf(stderr, "FAIL auxiliary fixture BL encode\n");
+        exit(2);
+    }
+    store_u32le(g_auxiliary.app_policy_disk +
+                UPDATE_APP_POLICY_DISK_BL_OFF, stock_call);
+    if (!build_update_app_policy_overlay(
+            g_auxiliary.update_off, g_auxiliary.app_policy_disk,
+            g_auxiliary.app_policy_stock,
+            g_auxiliary.app_policy_relaxed,
+            g_auxiliary.app_policy_legacy,
+            &g_auxiliary.app_policy_call_target) ||
+        g_auxiliary.app_policy_call_target != call_target) {
+        fprintf(stderr, "FAIL auxiliary fixture policy generation\n");
+        exit(2);
+    }
+    memcpy(g_auxiliary.stream_ref_stock, STREAM_REF_STOCK_TEMPLATE,
+           STREAM_REF_PATCH_BYTES);
+    uint32_t delete_call = 0;
+    uintptr_t delete_target = g_auxiliary.stream_event_off + 0x9000u;
+    if (!encode_aarch64_bl(
+            g_auxiliary.stream_event_off + STREAM_REF_PATCH_OFF +
+            STREAM_REF_DELETE_BL_OFF,
+            delete_target, &delete_call)) {
+        fprintf(stderr, "FAIL stream reference fixture BL encode\n");
+        exit(2);
+    }
+    store_u32le(g_auxiliary.stream_ref_stock +
+                STREAM_REF_DELETE_BL_OFF, delete_call);
+    uintptr_t allowed_target = g_auxiliary.stream_event_off + 0x4000u;
+    uintptr_t update_target = g_auxiliary.stream_event_off + 0x5000u;
+    unsigned char output_tail[sizeof(OUTPUT_POOL_TAIL_STOCK_TEMPLATE)];
+    memcpy(output_tail, OUTPUT_POOL_TAIL_STOCK_TEMPLATE,
+           sizeof(output_tail));
+    if (!build_stream_ref_overlay(
+            g_auxiliary.stream_event_off, g_auxiliary.stream_ref_stock,
+            allowed_target, update_target, g_auxiliary.output_pool_off,
+            output_tail,
+            g_auxiliary.stream_ref_patched,
+            g_auxiliary.stream_ref_handoff_legacy,
+            g_auxiliary.stream_ref_legacy,
+            g_auxiliary.output_pool_tail_patched,
+            &g_auxiliary.stream_ref_delete_target,
+            &g_auxiliary.output_pool_stack_fail_target) ||
+        g_auxiliary.stream_ref_delete_target != delete_target) {
+        fprintf(stderr, "FAIL stream reference fixture generation\n");
+        exit(2);
+    }
     memcpy(fake_memory + g_auxiliary.update_off + UPDATE_FLAGS_PATCH_OFF,
            UPDATE_FLAGS_STOCK, sizeof(UPDATE_FLAGS_STOCK));
+    memcpy(fake_memory + g_auxiliary.update_off +
+           UPDATE_APP_POLICY_PATCH_OFF, g_auxiliary.app_policy_stock,
+           UPDATE_APP_POLICY_BYTES);
     memcpy(fake_memory + g_auxiliary.policy_off + GAME_POLICY_PATCH_OFF,
            GAME_POLICY_STOCK, sizeof(GAME_POLICY_STOCK));
+    memcpy(fake_memory + g_auxiliary.stream_event_off +
+           STREAM_REF_PATCH_OFF, g_auxiliary.stream_ref_stock,
+           STREAM_REF_PATCH_BYTES);
+    memcpy(fake_memory + g_auxiliary.output_pool_off +
+           OUTPUT_POOL_TAIL_PATCH_OFF, OUTPUT_POOL_TAIL_STOCK,
+           OUTPUT_POOL_TAIL_PATCH_BYTES);
+    for (size_t i = 0; i < STREAM_EVENT_PATCH_COUNT; ++i) {
+        memcpy(fake_memory + g_auxiliary.stream_event_off +
+               STREAM_EVENT_PATCH_OFFSETS[i], STREAM_EVENT_STOCK[i],
+               STREAM_EVENT_PATCH_SIZES[i]);
+    }
 }
 
 static void configure_owned_cave(void) {
@@ -420,6 +495,273 @@ static int test_outer_second_cache_failure(void) {
     return expect_equal(before, "outer-second-cache", 2);
 }
 
+static int test_app_policy_overlay_generation(void) {
+    static const uintptr_t updates[] = {
+        0x3974A0u, 0x397B20u, 0x397800u, 0x397860u
+    };
+    static const uintptr_t targets[] = {
+        0x41ED60u, 0x41F460u, 0x41F1B0u, 0x41F210u
+    };
+    for (size_t i = 0; i < sizeof(updates) / sizeof(updates[0]); ++i) {
+        unsigned char disk[UPDATE_APP_POLICY_BYTES];
+        unsigned char stock[UPDATE_APP_POLICY_BYTES];
+        unsigned char relaxed[UPDATE_APP_POLICY_BYTES];
+        unsigned char legacy[UPDATE_APP_POLICY_BYTES];
+        memcpy(disk, UPDATE_APP_POLICY_DISK_TEMPLATE, sizeof(disk));
+        uint32_t stock_call = 0;
+        uintptr_t stock_site = updates[i] + UPDATE_APP_POLICY_PATCH_OFF +
+                               UPDATE_APP_POLICY_DISK_BL_OFF;
+        if (!encode_aarch64_bl(stock_site, targets[i], &stock_call)) {
+            fprintf(stderr, "FAIL policy fixture=%lu stock BL encode\n",
+                    (unsigned long)i);
+            return 0;
+        }
+        store_u32le(disk + UPDATE_APP_POLICY_DISK_BL_OFF, stock_call);
+        uintptr_t generated_target = 0;
+        if (!build_update_app_policy_overlay(updates[i], disk, stock,
+                                             relaxed, legacy,
+                                             &generated_target) ||
+            generated_target != targets[i]) {
+            fprintf(stderr, "FAIL policy fixture=%lu generation\n",
+                    (unsigned long)i);
+            return 0;
+        }
+        uintptr_t relaxed_target = 0;
+        uintptr_t relaxed_site = updates[i] + UPDATE_APP_POLICY_PATCH_OFF +
+                                 UPDATE_APP_POLICY_RELAXED_BL_OFF;
+        if (!decode_aarch64_bl(
+                relaxed_site,
+                load_u32le(relaxed + UPDATE_APP_POLICY_RELAXED_BL_OFF),
+                &relaxed_target) || relaxed_target != targets[i]) {
+            fprintf(stderr, "FAIL policy fixture=%lu relaxed BL target\n",
+                    (unsigned long)i);
+            return 0;
+        }
+        uintptr_t stock_target = 0;
+        uintptr_t stock_handoff_site = updates[i] +
+            UPDATE_APP_POLICY_PATCH_OFF + UPDATE_APP_POLICY_STOCK_BL_OFF;
+        if (!decode_aarch64_bl(
+                stock_handoff_site,
+                load_u32le(stock + UPDATE_APP_POLICY_STOCK_BL_OFF),
+                &stock_target) || stock_target != targets[i] ||
+            load_u32le(stock + 0x0Cu) != 0xB50001A8u ||
+            load_u32le(stock + 0x10u) != 0x39546668u ||
+            load_u32le(relaxed) != 0xF9429A77u ||
+            load_u32le(relaxed + 0x08u) != 0x39546668u ||
+            load_u32le(relaxed + 0x30u) != 0xF94002F7u ||
+            load_u32le(relaxed + 0x34u) != 0xB5FFFF17u ||
+            load_u32le(relaxed + 0x38u) != 0x52800037u ||
+            memcmp(legacy + sizeof(UPDATE_APP_POLICY_LEGACY_TEMPLATE),
+                   disk + sizeof(UPDATE_APP_POLICY_LEGACY_TEMPLATE),
+                   UPDATE_APP_POLICY_BYTES -
+                   sizeof(UPDATE_APP_POLICY_LEGACY_TEMPLATE)) != 0) {
+            fprintf(stderr,
+                    "FAIL policy fixture=%lu handoff/loop/legacy shape "
+                    "stock=%08x/%08x/%08x relaxed=%08x/%08x/%08x legacy_tail=%02x\n",
+                    (unsigned long)i, load_u32le(stock),
+                    load_u32le(stock + 0x0Cu), load_u32le(stock + 0x10u),
+                    load_u32le(relaxed), load_u32le(relaxed + 0x30u),
+                    load_u32le(relaxed + 0x34u),
+                    legacy[sizeof(UPDATE_APP_POLICY_LEGACY_TEMPLATE)]);
+            return 0;
+        }
+    }
+
+    unsigned char corrupt[UPDATE_APP_POLICY_BYTES];
+    unsigned char stock[UPDATE_APP_POLICY_BYTES];
+    unsigned char relaxed[UPDATE_APP_POLICY_BYTES];
+    unsigned char legacy[UPDATE_APP_POLICY_BYTES];
+    uintptr_t target = 0;
+    memcpy(corrupt, UPDATE_APP_POLICY_DISK_TEMPLATE, sizeof(corrupt));
+    corrupt[0] ^= 1u;
+    if (build_update_app_policy_overlay(0x397800u, corrupt, stock,
+                                        relaxed, legacy, &target)) {
+        fprintf(stderr, "FAIL policy foreign stock shape accepted\n");
+        return 0;
+    }
+    return 1;
+}
+
+static int test_stream_ref_overlay_generation(void) {
+    static const uintptr_t streams[] = {
+        0x361870u, 0x361F00u, 0x361B20u, 0x361B80u
+    };
+    static const uintptr_t targets[] = {
+        0x415BB0u, 0x4162A0u, 0x415FE0u, 0x416040u
+    };
+    static const uintptr_t outputs[] = {
+        0x3A45C0u, 0x3A4C70u, 0x3A4950u, 0x3A49B0u
+    };
+    for (size_t i = 0; i < sizeof(streams) / sizeof(streams[0]); ++i) {
+        unsigned char stock[STREAM_REF_PATCH_BYTES];
+        unsigned char patched[STREAM_REF_PATCH_BYTES];
+        unsigned char handoff_legacy[STREAM_REF_PATCH_BYTES];
+        unsigned char legacy[STREAM_REF_PATCH_BYTES];
+        unsigned char output_patched[OUTPUT_POOL_TAIL_PATCH_BYTES];
+        unsigned char output_tail[sizeof(OUTPUT_POOL_TAIL_STOCK_TEMPLATE)];
+        memcpy(output_tail, OUTPUT_POOL_TAIL_STOCK_TEMPLATE,
+               sizeof(output_tail));
+        memcpy(stock, STREAM_REF_STOCK_TEMPLATE, sizeof(stock));
+        uint32_t call = 0;
+        uintptr_t site = streams[i] + STREAM_REF_PATCH_OFF +
+                         STREAM_REF_DELETE_BL_OFF;
+        if (!encode_aarch64_bl(site, targets[i], &call)) {
+            fprintf(stderr, "FAIL stream ref fixture=%lu BL encode\n",
+                    (unsigned long)i);
+            return 0;
+        }
+        store_u32le(stock + STREAM_REF_DELETE_BL_OFF, call);
+        uintptr_t allowed_target = targets[i] + 0x100u;
+        uintptr_t update_target = targets[i] + 0x200u;
+        uintptr_t generated_target = 0;
+        uintptr_t stack_target = 0;
+        if (!build_stream_ref_overlay(
+                streams[i], stock, allowed_target, update_target,
+                outputs[i], output_tail, patched, handoff_legacy, legacy,
+                output_patched,
+                &generated_target, &stack_target) ||
+            generated_target != targets[i] ||
+            stack_target != outputs[i] + OUTPUT_POOL_STACK_FAIL_OFF ||
+            load_u32le(patched + STREAM_REF_DELETE_BL_OFF) != call ||
+            memcmp(legacy + STREAM_REF_LEGACY_EVENT_OFF,
+                   STREAM_REF_LEGACY_EVENT_RECOMPUTE,
+                   sizeof(STREAM_REF_LEGACY_EVENT_RECOMPUTE)) != 0) {
+            fprintf(stderr, "FAIL stream ref fixture=%lu generation\n",
+                    (unsigned long)i);
+            return 0;
+        }
+        uint32_t expected_allowed = 0;
+        uint32_t expected_update = 0;
+        uint32_t expected_output = 0;
+        if (!encode_aarch64_bl(
+                streams[i] + STREAM_REF_PATCH_OFF +
+                STREAM_REF_ALLOWED_BL_OFF,
+                allowed_target, &expected_allowed) ||
+            !encode_aarch64_b(
+                streams[i] + STREAM_REF_PATCH_OFF +
+                STREAM_REF_UPDATE_B_OFF,
+                update_target, &expected_update) ||
+            !encode_aarch64_b(
+                outputs[i] + OUTPUT_POOL_TAIL_PATCH_OFF,
+                streams[i] + STREAM_REF_HELPER_OFF,
+                &expected_output) ||
+            load_u32le(patched) != 0xAA0003F5u ||
+            load_u32le(patched + 0x20u) != 0xF9429EC8u ||
+            load_u32le(patched + STREAM_REF_ALLOWED_BL_OFF) !=
+                expected_allowed ||
+            load_u32le(patched + 0x48u) != 0x391466C8u ||
+            load_u32le(patched + 0x4Cu) != 0x14000012u ||
+            load_u32le(patched + 0x64u) != 0xD503201Fu ||
+            load_u32le(patched + 0x68u) != 0xD503201Fu ||
+            load_u32le(handoff_legacy + 0x64u) != 0x34000054u ||
+            load_u32le(handoff_legacy + 0x68u) != 0x391466DFu ||
+            load_u32le(patched + STREAM_REF_UPDATE_B_OFF) !=
+                expected_update ||
+            load_u32le(output_patched) != expected_output ||
+            load_u32le(patched + 0x90u) != 0xD503201Fu ||
+            STREAM_EVENT_PATCH_SIZES[0] != 8u ||
+            load_u32le(STREAM_EVENT_RECOMPUTE[0]) != 0x3914671Fu ||
+            load_u32le(STREAM_EVENT_RECOMPUTE[0] + 4) != 0x14000118u) {
+            fprintf(stderr,
+                    "FAIL stream ref fixture=%lu handoff/helper instructions\n",
+                    (unsigned long)i);
+            return 0;
+        }
+    }
+    unsigned char corrupt[STREAM_REF_PATCH_BYTES];
+    unsigned char patched[STREAM_REF_PATCH_BYTES];
+    unsigned char handoff_legacy[STREAM_REF_PATCH_BYTES];
+    unsigned char legacy[STREAM_REF_PATCH_BYTES];
+    unsigned char output_patched[OUTPUT_POOL_TAIL_PATCH_BYTES];
+    unsigned char output_tail[sizeof(OUTPUT_POOL_TAIL_STOCK_TEMPLATE)];
+    uintptr_t target = 0;
+    uintptr_t stack_target = 0;
+    memcpy(output_tail, OUTPUT_POOL_TAIL_STOCK_TEMPLATE,
+           sizeof(output_tail));
+    memcpy(corrupt, STREAM_REF_STOCK_TEMPLATE, sizeof(corrupt));
+    corrupt[0] ^= 1u;
+    if (build_stream_ref_overlay(
+            0x361B20u, corrupt, 0x41F000u, 0x41F100u, 0x3A4950u,
+            output_tail, patched, handoff_legacy, legacy, output_patched,
+            &target,
+            &stack_target)) {
+        fprintf(stderr, "FAIL stream reference foreign shape accepted\n");
+        return 0;
+    }
+    return 1;
+}
+
+typedef struct {
+    int present;
+    size_t device_count;
+    uint32_t first_device;
+} model_output_t;
+
+static int model_handoff_on_decrement(int references, size_t app_count,
+                                      int mode_active, int allowed) {
+    return references == 0 && app_count == 1 && mode_active && allowed;
+}
+
+static int model_policy_decision(size_t app_count, int handoff,
+                                 int relaxed, int any_match) {
+    if (app_count != 0) {
+        if (relaxed) return any_match;
+        return app_count == 1 && any_match;
+    }
+    return handoff != 0;
+}
+
+static int test_stream_ref_handoff_semantics(void) {
+    static const struct {
+        int references;
+        size_t apps;
+        int mode_active;
+        int allowed;
+        int expected_handoff;
+        const char *label;
+    } decrements[] = {
+        {1, 1, 1, 1, 0, "nonzero-reference"},
+        {0, 1, 1, 1, 1, "same-app-stream-handoff"},
+        {0, 1, 1, 0, 0, "foreign-route"},
+        {0, 1, 0, 1, 0, "inactive-audio"},
+        {0, 2, 1, 1, 0, "multiple-packages"},
+    };
+    for (size_t i = 0; i < sizeof(decrements) / sizeof(decrements[0]); ++i) {
+        int actual = model_handoff_on_decrement(
+            decrements[i].references, decrements[i].apps,
+            decrements[i].mode_active, decrements[i].allowed);
+        if (actual != decrements[i].expected_handoff) {
+            fprintf(stderr,
+                    "FAIL handoff decrement %s expected=%d actual=%d\n",
+                    decrements[i].label, decrements[i].expected_handoff,
+                    actual);
+            return 0;
+        }
+    }
+    if (!model_policy_decision(0, 1, 0, 0) ||
+        model_policy_decision(1, 1, 0, 0) ||
+        model_policy_decision(2, 1, 0, 1) ||
+        !model_policy_decision(2, 0, 1, 1) ||
+        model_policy_decision(2, 0, 1, 0)) {
+        fprintf(stderr, "FAIL handoff map precedence/relaxed semantics\n");
+        return 0;
+    }
+    int handoff = 1;
+    /* Output activation precedes +appname on observed game transitions. */
+    if (!model_policy_decision(0, handoff, 0, 0)) {
+        fprintf(stderr, "FAIL active output cleared handoff before app commit\n");
+        return 0;
+    }
+    /* The committed +appname map supersedes and clears the transient flag. */
+    handoff = 0;
+    if (!model_policy_decision(1, handoff, 0, 1) ||
+        model_policy_decision(1, handoff, 0, 0)) {
+        fprintf(stderr, "FAIL committed app did not supersede handoff\n");
+        return 0;
+    }
+    return 1;
+}
+
 static int test_auxiliary_transactions(void) {
     int ok = 1;
     unsigned char before[FAKE_SIZE];
@@ -441,7 +783,7 @@ static int test_auxiliary_transactions(void) {
         ok = 0;
     }
 
-    for (int fault = 1; fault <= 4; ++fault) {
+    for (int fault = 1; fault <= 14; ++fault) {
         reset_fake();
         configure_auxiliary_stock();
         memcpy(before, fake_memory, sizeof(before));
@@ -459,7 +801,7 @@ static int test_auxiliary_transactions(void) {
         ok &= expect_equal(before, "auxiliary-write", fault);
     }
 
-    for (int fault = 1; fault <= 4; ++fault) {
+    for (int fault = 1; fault <= 14; ++fault) {
         reset_fake();
         configure_auxiliary_stock();
         memcpy(before, fake_memory, sizeof(before));
@@ -475,6 +817,20 @@ static int test_auxiliary_transactions(void) {
             ok = 0;
         }
         ok &= expect_equal(before, "auxiliary-cache", fault);
+    }
+
+    reset_fake();
+    configure_auxiliary_stock();
+    memcpy(fake_memory + g_auxiliary.update_off + UPDATE_FLAGS_PATCH_OFF,
+           UPDATE_FLAGS_LEGACY, sizeof(UPDATE_FLAGS_LEGACY));
+    memcpy(fake_memory + g_auxiliary.stream_event_off +
+           STREAM_REF_PATCH_OFF, g_auxiliary.stream_ref_legacy,
+           STREAM_REF_PATCH_BYTES);
+    g_test_icache_override = ICACHE_REMOTE_IVAU;
+    if (!apply_auxiliary_targets(42, FAKE_BASE, 0) ||
+        !verify_auxiliary_targets(42, FAKE_BASE, 0, 0)) {
+        fprintf(stderr, "FAIL legacy v1.5.6 lifecycle migration\n");
+        ok = 0;
     }
     return ok;
 }
@@ -506,7 +862,7 @@ static int test_coordinated_whitelist_rollback(void) {
         fprintf(stderr, "FAIL coordinated whitelist setup\n");
         return 0;
     }
-    g_test_icache_fail_call = 6;
+    g_test_icache_fail_call = 16;
     if (install_whitelist_stub(42, FAKE_BASE) != 0) {
         fprintf(stderr, "FAIL coordinated whitelist cache fault not observed\n");
         return 0;
@@ -516,7 +872,7 @@ static int test_coordinated_whitelist_rollback(void) {
         fprintf(stderr, "FAIL coordinated whitelist rollback\n");
         return 0;
     }
-    return expect_equal(before, "coordinated-whitelist", 6);
+    return expect_equal(before, "coordinated-whitelist", 14);
 }
 
 static int test_coordinated_global_rollback(void) {
@@ -537,7 +893,7 @@ static int test_coordinated_global_rollback(void) {
         fprintf(stderr, "FAIL coordinated global auxiliary setup\n");
         return 0;
     }
-    g_test_icache_fail_call = 6;
+    g_test_icache_fail_call = 16;
     if (write_code_twice(42, FAKE_BASE, FAKE_BASE + g_func_off,
                          GLOBAL_PATCH, sizeof(GLOBAL_PATCH),
                          "is_A2H_app.global-test") != 0) {
@@ -550,7 +906,7 @@ static int test_coordinated_global_rollback(void) {
         fprintf(stderr, "FAIL coordinated global rollback\n");
         return 0;
     }
-    return expect_equal(before, "coordinated-global", 6);
+    return expect_equal(before, "coordinated-global", 14);
 }
 
 int main(void) {
@@ -558,12 +914,17 @@ int main(void) {
              test_owned_stale_stub_shapes() &&
              test_ten_slot_matcher_semantics() &&
              test_outer_second_cache_failure() &&
+             test_app_policy_overlay_generation() &&
+             test_stream_ref_overlay_generation() &&
+             test_stream_ref_handoff_semantics() &&
              test_auxiliary_transactions() &&
              test_coordinated_whitelist_rollback() &&
              test_coordinated_global_rollback();
     if (!ok) return 1;
     printf("PASS coordinated transactions: stub faults=3 string faults=20 "
-           "aux-write faults=4 aux-cache faults=4 stale overlays=2 "
-           "matcher cases=9 whitelist/global outer rollback=3\n");
+           "aux-write faults=14 aux-cache faults=14 legacy-migration=1 "
+           "policy-generations=4 stream-ref-generations=4 "
+           "stream-ref-semantics=11 stale overlays=2 matcher cases=9 "
+           "whitelist/global outer rollback=3\n");
     return 0;
 }

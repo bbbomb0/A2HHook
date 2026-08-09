@@ -13,7 +13,11 @@ The command verifies release metadata, strict C syntax/warnings, Android shell
 syntax, inline WebUI JavaScript syntax, WebUI device-state persistence guards,
 archived HAL fingerprints, the 76-byte whitelist/global capacity guard,
 profile/ELF resolver ordering, the outer whitelist transaction, the test-only
-cache-fault seam, and strict stale-stub ownership contracts. With `--adb`, it
+cache-fault seam, strict stale-stub ownership, 32-bit game/spatial flags,
+72-byte stock/relaxed handoff policy, 148-byte stream handoff/helper plus
+output-pool tail branch, committed-`+appname` handoff clearing, ROM-specific
+BL/PLT generation and two event-driven appname overlays across the four
+archived HALs. With `--adb`, it
 also runs the PID/starttime lock harness against Android `/proc`, including PID
 reuse, legacy PID-only owners, strict release ownership, and an interrupted
 lock-creation state.
@@ -26,24 +30,28 @@ powershell -ExecutionPolicy Bypass -File tests/run_transaction_harness.ps1 `
 ```
 
 The harness includes the current `src/patcher_v3.c`, replaces remote memory I/O
-with a private byte array, injects every primary write failure in the string and
-single-pass whitelist-stub transactions, and checks byte-for-byte rollback. It
+with a private byte array, injects every primary and auxiliary write/cache
+failure in the coordinated transaction, and checks byte-for-byte rollback. It
 also verifies strict 8-byte and 16-byte stale-overlay ownership, rejects damaged
 suffix/marker evidence, recovers an owned safe-tail cave without external hint
 files, and executes a small instruction model against all ten matcher slots.
-The model covers slots 7 and 10, disabled/null entries, and exact string
-boundaries. The harness also injects a second-pass cache-maintenance failure and
-proves the outer function-and-cave transaction restores the original bytes. It
+The model covers slots 7 and 10, disabled/null entries, exact string boundaries,
+four ROM-specific app-policy/handoff BL generations, eleven handoff and
+map-precedence boundary cases, legacy public-v1.5.6 and first-generation
+handoff migration, plus stock/relaxed application policy transitions. It also
+proves the outer function, cave and all
+auxiliary regions restore their original bytes on any failure. It
 does not attach to or modify the phone audio process.
 
 ## ZIP verification
 
 ```powershell
-python tests/verify_module_zip.py .\a2h_hook_v1.5.5-fix3.zip `
-  --expected-version v1.5.5-fix3 --expected-code 1553
+python tests/verify_module_zip.py .\a2h_hook_v1.5.6.zip `
+  --expected-version v1.5.6 --expected-code 1560
 ```
 
 This independently checks the exact member list, duplicates, path portability,
+fixed reproducible member timestamps,
 Unix file modes, CRC, BOM/CRLF, configuration shape, module metadata, AArch64
 ELF identity, static patcher linkage, and embedded patcher version.
 
@@ -53,7 +61,7 @@ Preflight only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.5-fix3
+  -ExpectedVersion v1.5.6
 ```
 
 Full two-round test after the candidate module is installed and the phone has
@@ -61,7 +69,7 @@ rebooted:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.5-fix3 -Execute -AllowAudioRestart
+  -ExpectedVersion v1.5.6 -Execute -AllowAudioRestart
 ```
 
 The device case waits for the apply queue to become idle, backs up persistent
@@ -69,14 +77,15 @@ and derived configuration, and requires a verified native restore before it
 exits. It tests global/whitelist round trips, official and custom slot counts,
 per-slot off/on, package-table preservation, two audio-HAL PID restarts,
 watcher re-application with one final native check per restart, and atomic plus
-multi-stage slot-8 file-manager edits. The fast suite also runs 40 production
+multi-stage slot-8 file-manager edits. The multi-stage case requires the
+intermediate table to remain below the three-sample quiet window and produce no
+separate revision. The fast suite also runs 40 production
 watcher cycles and rejects any steady-state native inspection or apply. A
 second watcher harness simulates an atomic save during inotify rearming and
 requires the short signature-poll grace window to detect and apply it before
 the 30-second health probe.
-A final manual close/reopen of the ReSukiSU WebUI remains required,
-because that manager exports only its main activity and has no stable direct
-intent for its internal module-WebUI route.
+Control-center tile and companion-WebUI rendering remain device UI checks; the
+native matrix does not synthesize SystemUI touch input.
 
 ## OS3.0.305 runtime evidence
 

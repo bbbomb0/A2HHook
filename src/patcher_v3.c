@@ -68,8 +68,39 @@
 #define A2H_APP_FUNC_BYTES 160u
 #define UPDATE_A2H_MODE_FUNC_BYTES 568u
 #define IS_A2H_ALLOWED_FUNC_BYTES 700u
+#define STREAM_SET_PARAMETERS_FUNC_BYTES 12040u
+#define UPDATE_OUTPUT_POOL_FUNC_BYTES 1128u
 #define UPDATE_FLAGS_PATCH_OFF 0xDCu
+#define UPDATE_APP_POLICY_PATCH_OFF 0x130u
+#define UPDATE_APP_POLICY_BYTES 72u
+#define UPDATE_APP_POLICY_DISK_BL_OFF 0x24u
+#define UPDATE_APP_POLICY_STOCK_BL_OFF 0x34u
+#define UPDATE_APP_POLICY_RELAXED_BL_OFF 0x28u
+#define UPDATE_APP_POLICY_LEGACY_BL_OFF 0x1Cu
+#define UPDATE_A2H_ALLOWED_BL_OFF 0x1D4u
 #define GAME_POLICY_PATCH_OFF 0x1DCu
+#define STREAM_EVENT_PATCH_COUNT 2u
+#define STREAM_EVENT_PATCH_MAX_BYTES 8u
+#define STREAM_REF_PATCH_OFF 0x2030u
+#define STREAM_REF_PATCH_BYTES 148u
+#define STREAM_REF_DELETE_BL_OFF 0x10u
+#define STREAM_REF_ALLOWED_BL_OFF 0x38u
+#define STREAM_REF_STACK_COND_OFF 0x60u
+#define STREAM_REF_UPDATE_B_OFF 0x8Cu
+#define STREAM_REF_HELPER_OFF 0x2084u
+#define STREAM_APP_MAP_MANAGER_OFF 0x1F58u
+#define STREAM_UPDATE_CALL_OFF 0x23F8u
+#define STREAM_UPDATE_BL_OFF 0x23FCu
+#define STREAM_UPDATE_CALL_BYTES 12u
+#define STREAM_REF_LEGACY_EVENT_OFF 0x24u
+#define OUTPUT_POOL_TAIL_PATCH_OFF 0x278u
+#define OUTPUT_POOL_TAIL_PATCH_BYTES 4u
+#define OUTPUT_POOL_MANAGER_ARG_OFF 0x38u
+#define OUTPUT_POOL_STACK_COND_OFF 0x0Cu
+#define OUTPUT_POOL_STACK_FAIL_OFF 0x464u
+#define HANDOFF_FLAG_OFF 0x519u
+#define STREAM_OVERLAY_REGION_COUNT (STREAM_EVENT_PATCH_COUNT + 1u)
+#define AUXILIARY_PATCH_MAX_BYTES STREAM_REF_PATCH_BYTES
 
 struct user_pt_regs_a64 {
     uint64_t regs[31];
@@ -185,11 +216,63 @@ static const unsigned char UPDATE_FLAGS_STOCK[32]={
     0x08,0x89,0x40,0xF9,0x00,0x01,0x3F,0xD6,
     0x08,0x30,0x40,0x39,0xE8,0x00,0x20,0x37
 };
-static const unsigned char UPDATE_FLAGS_FAST[32]={
+/* Public v1.5.6 only covered low-byte FAST/DEEP/OFFLOAD flags. */
+static const unsigned char UPDATE_FLAGS_LEGACY[32]={
     0x1F,0x09,0x1E,0x72,0xA1,0x01,0x00,0x54,
     0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5,
     0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5,
     0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5
+};
+static const unsigned char UPDATE_FLAGS_GAME[32]={
+    0x08,0x0C,0x40,0xB9,0x1F,0x09,0x1E,0x72,
+    0x81,0x01,0x00,0x54,0x68,0x01,0x90,0x37,
+    0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5,
+    0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5
+};
+/* The stock BL displacement differs by ROM.  Its four bytes are generated
+ * from the mapped ELF after the rest of this block is matched exactly. */
+static const unsigned char UPDATE_APP_POLICY_DISK_TEMPLATE[UPDATE_APP_POLICY_BYTES]={
+    0x68,0x9E,0x42,0xF9,0x1F,0x05,0x00,0xF1,
+    0x81,0x01,0x00,0x54,0x68,0x9A,0x42,0xF9,
+    0x09,0x41,0x40,0x39,0x0A,0x11,0x40,0xF9,
+    0x08,0x45,0x00,0x91,0x3F,0x01,0x00,0x72,
+    0x00,0x01,0x8A,0x9A,0x00,0x00,0x00,0x00,
+    0x17,0x00,0x00,0x52,0xC8,0x02,0x40,0x39,
+    0xA8,0x00,0x08,0x37,0x14,0x00,0x00,0x14,
+    0x37,0x00,0x80,0x52,0xC8,0x02,0x40,0x39,
+    0x28,0x02,0x08,0x36,0xA3,0xE8,0xFF,0xD0
+};
+static const unsigned char UPDATE_APP_POLICY_STOCK_TEMPLATE[UPDATE_APP_POLICY_BYTES]={
+    0x68,0x9E,0x42,0xF9,0x1F,0x05,0x00,0xF1,
+    0xA0,0x00,0x00,0x54,0xA8,0x01,0x00,0xB5,
+    0x68,0x66,0x54,0x39,0x17,0x01,0x00,0x52,
+    0x1B,0x00,0x00,0x14,0x68,0x9A,0x42,0xF9,
+    0x09,0x41,0x40,0x39,0x0A,0x45,0x00,0x91,
+    0x08,0x11,0x40,0xF9,0x3F,0x01,0x00,0x72,
+    0x40,0x01,0x88,0x9A,0x00,0x00,0x00,0x00,
+    0x17,0x00,0x00,0x52,0x12,0x00,0x00,0x14,
+    0x37,0x00,0x80,0x52,0x10,0x00,0x00,0x14
+};
+static const unsigned char UPDATE_APP_POLICY_RELAXED_TEMPLATE[UPDATE_APP_POLICY_BYTES]={
+    /* x23 is callee-saved and keeps the current node across is_A2H_app. */
+    0x77,0x9A,0x42,0xF9,0x97,0x00,0x00,0xB5,
+    0x68,0x66,0x54,0x39,0x17,0x01,0x00,0x52,
+    0x1D,0x00,0x00,0x14,0xE9,0x42,0x40,0x39,
+    0xEA,0x46,0x00,0x91,0xE0,0x12,0x40,0xF9,
+    0x3F,0x01,0x00,0x72,0x40,0x01,0x80,0x9A,
+    0x00,0x00,0x00,0x00,0xA0,0x00,0x00,0x35,
+    0xF7,0x02,0x40,0xF9,0x17,0xFF,0xFF,0xB5,
+    0x37,0x00,0x80,0x52,0x12,0x00,0x00,0x14,
+    0x17,0x00,0x80,0x52,0x10,0x00,0x00,0x14
+};
+static const unsigned char UPDATE_APP_POLICY_LEGACY_TEMPLATE[56]={
+    0x77,0x9A,0x42,0xF9,0xB7,0x01,0x00,0xB4,
+    0xE9,0x42,0x40,0x39,0xEA,0x46,0x00,0x91,
+    0xE0,0x12,0x40,0xF9,0x3F,0x01,0x00,0x72,
+    0x40,0x01,0x80,0x9A,0x00,0x00,0x00,0x00,
+    0x80,0x00,0x00,0x35,0xF7,0x02,0x40,0xF9,
+    0x17,0xFF,0xFF,0xB5,0x03,0x00,0x00,0x14,
+    0xF7,0x03,0x1F,0x2A,0x02,0x00,0x00,0x14
 };
 static const unsigned char GAME_POLICY_STOCK[20]={
     0x1F,0x01,0x1A,0x6A,0x29,0x15,0x40,0xF9,
@@ -201,6 +284,72 @@ static const unsigned char GAME_POLICY_RELAXED[20]={
     0x4A,0x79,0x1F,0x53,0xAB,0x83,0x5F,0xF8,
     0x40,0x01,0x9A,0x1A
 };
+static const size_t STREAM_EVENT_PATCH_OFFSETS[STREAM_EVENT_PATCH_COUNT]={
+    0x1F94u,0x22B4u
+};
+static const size_t STREAM_EVENT_PATCH_SIZES[STREAM_EVENT_PATCH_COUNT]={
+    8u,4u
+};
+static const unsigned char STREAM_EVENT_STOCK
+        [STREAM_EVENT_PATCH_COUNT][STREAM_EVENT_PATCH_MAX_BYTES]={
+    {0x08,0xD4,0x0F,0x36,0x40,0x07,0x00,0x91},
+    {0xD8,0xFD,0xFF,0x17,0x00,0x00,0x00,0x00}
+};
+static const unsigned char STREAM_EVENT_RECOMPUTE
+        [STREAM_EVENT_PATCH_COUNT][STREAM_EVENT_PATCH_MAX_BYTES]={
+    /* A committed +appname supersedes the transient handoff. */
+    {0x1F,0x67,0x14,0x39,0x18,0x01,0x00,0x14},
+    {0x51,0x00,0x00,0x14}
+};
+static const unsigned char STREAM_EVENT_HANDOFF_LEGACY
+        [STREAM_EVENT_PATCH_MAX_BYTES]={
+    0x19,0x01,0x00,0x14,0x40,0x07,0x00,0x91
+};
+static const unsigned char STREAM_REF_LEGACY_EVENT_RECOMPUTE[4]={
+    0xE9,0x00,0x00,0x14
+};
+static const unsigned char STREAM_REF_STOCK_TEMPLATE[STREAM_REF_PATCH_BYTES]={
+    0xE8,0x03,0x49,0x39,0x15,0x28,0x40,0xB9,0x68,0x00,0x00,0x36,0xE0,0x2B,0x41,0xF9,
+    0x20,0xC9,0x02,0x94,0x15,0x04,0x00,0x34,0x48,0x06,0x00,0xB0,0x08,0xC5,0x46,0xF9,
+    0x08,0x01,0x40,0x39,0x08,0xCE,0x0F,0x36,0xF5,0xCB,0x40,0xF9,0x76,0x0A,0x40,0xF9,
+    0xE0,0x03,0x09,0x91,0x41,0x07,0x00,0x91,0xF7,0x03,0x09,0x91,0x7D,0x1E,0xFC,0x97,
+    0xF7,0x37,0x00,0xF9,0x42,0x06,0x00,0xB0,0x42,0x80,0x46,0xF9,0xC0,0x82,0x14,0x91,
+    0xE1,0x03,0x09,0x91,0xE3,0xA3,0x01,0x91,0xE4,0xFF,0x08,0x91,0xD5,0xEB,0x02,0x94,
+    0x07,0x28,0x40,0xB9,0xC3,0xEC,0xFF,0xF0,0x63,0x9C,0x25,0x91,0x41,0xED,0xFF,0x90,
+    0x21,0xC0,0x33,0x91,0x22,0xEC,0xFF,0xF0,0x42,0xAC,0x0B,0x91,0x60,0x00,0x80,0x52,
+    0x04,0xCF,0x80,0x52,0xE5,0x03,0x03,0xAA,0xE6,0x03,0x15,0xAA,0x25,0xC9,0x02,0x94,
+    0x79,0x00,0x00,0x14
+};
+static const unsigned char STREAM_REF_PATCH_TEMPLATE[STREAM_REF_PATCH_BYTES]={
+    0xF5,0x03,0x00,0xAA,0xE8,0x03,0x49,0x39,0x68,0x00,0x00,0x36,0xE0,0x2B,0x41,0xF9,
+    0x00,0x00,0x00,0x94,0xA8,0x2A,0x40,0xB9,0xC8,0x01,0x00,0x35,0x76,0x0A,0x40,0xF9,
+    0xC8,0x9E,0x42,0xF9,0x1F,0x05,0x00,0xF1,0x61,0x03,0x00,0x54,0xC8,0x4E,0x54,0x39,
+    0x28,0x03,0x00,0x34,0xE0,0x03,0x16,0xAA,0x00,0x00,0x00,0x94,0x1F,0x04,0x00,0x71,
+    0xA1,0x02,0x00,0x54,0x28,0x00,0x80,0x52,0xC8,0x66,0x14,0x39,0x12,0x00,0x00,0x14,
+    0xDE,0x00,0x00,0x14,0x28,0x17,0x40,0xF9,0xA9,0x83,0x5F,0xF8,0x1F,0x01,0x09,0xEB,
+    0x01,0x00,0x00,0x54,0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5,0xE0,0x03,0x16,0xAA,
+    0xF4,0x4F,0x5B,0xA9,0xF6,0x57,0x5A,0xA9,0xF8,0x5F,0x59,0xA9,0xFA,0x67,0x58,0xA9,
+    0xFC,0x6F,0x57,0xA9,0xFD,0x7B,0x56,0xA9,0xFF,0x03,0x07,0x91,0x00,0x00,0x00,0x14,
+    0x1F,0x20,0x03,0xD5
+};
+static const unsigned char OUTPUT_POOL_TAIL_STOCK[OUTPUT_POOL_TAIL_PATCH_BYTES]={
+    0x28,0x17,0x40,0xF9
+};
+static const unsigned char OUTPUT_POOL_TAIL_STOCK_TEMPLATE[48]={
+    0x28,0x17,0x40,0xF9,0xA9,0x83,0x5F,0xF8,
+    0x1F,0x01,0x09,0xEB,0x01,0x0F,0x00,0x54,
+    0xF4,0x4F,0x5B,0xA9,0xF6,0x57,0x5A,0xA9,
+    0xF8,0x5F,0x59,0xA9,0xFA,0x67,0x58,0xA9,
+    0xFC,0x6F,0x57,0xA9,0xFD,0x7B,0x56,0xA9,
+    0xFF,0x03,0x07,0x91,0xC0,0x03,0x5F,0xD6
+};
+static const unsigned char STREAM_UPDATE_CALL_TEMPLATE
+        [STREAM_UPDATE_CALL_BYTES]={
+    0x60,0x0A,0x40,0xF9,0x00,0x00,0x00,0x00,
+    0x85,0xFD,0xFF,0x17
+};
+static const uint32_t STREAM_APP_MAP_MANAGER_ADD=0x91148300u;
+static const uint32_t OUTPUT_POOL_MANAGER_ARG_MOV=0xAA0003F6u;
 static const uint32_t WHITELIST_STUB_FIXED_TAIL[WHITELIST_STUB_WORDS - 2]={
     0xB40001E0u, 0x52800142u, 0x340001A2u, 0xF8408423u,
     0xB4000123u, 0xAA0003E4u, 0x38401485u, 0x38401466u,
@@ -224,6 +373,12 @@ static int patched_global_tail_ok(const unsigned char *head, size_t n) {
 }
 static uint32_t load_u32le(const unsigned char *h) {
     return (uint32_t)h[0] | ((uint32_t)h[1] << 8) | ((uint32_t)h[2] << 16) | ((uint32_t)h[3] << 24);
+}
+static void store_u32le(unsigned char *h, uint32_t value) {
+    h[0] = (unsigned char)value;
+    h[1] = (unsigned char)(value >> 8);
+    h[2] = (unsigned char)(value >> 16);
+    h[3] = (unsigned char)(value >> 24);
 }
 static int exact_whitelist_stub_suffix(const unsigned char *h, size_t n,
                                        size_t first_word) {
@@ -2001,7 +2156,7 @@ static int profile_official_strings_exact(pid_t pid, uintptr_t base,
     return 1;
 }
 
-#define ELF_SYMBOL_MAX_BYTES 4096u
+#define ELF_SYMBOL_MAX_BYTES 16384u
 #define ELF_TABLE_MAX_BYTES (32u * 1024u * 1024u)
 
 typedef enum {
@@ -2374,8 +2529,28 @@ static int resolve_func_by_elf_symbol(pid_t pid, uintptr_t base,
 typedef struct {
     uintptr_t update_off;
     uintptr_t policy_off;
-    int update_fast;
+    uintptr_t stream_event_off;
+    uintptr_t output_pool_off;
+    unsigned char app_policy_disk[UPDATE_APP_POLICY_BYTES];
+    unsigned char app_policy_stock[UPDATE_APP_POLICY_BYTES];
+    unsigned char app_policy_relaxed[UPDATE_APP_POLICY_BYTES];
+    unsigned char app_policy_legacy[UPDATE_APP_POLICY_BYTES];
+    uintptr_t app_policy_call_target;
+    uintptr_t allowed_call_target;
+    unsigned char stream_ref_stock[STREAM_REF_PATCH_BYTES];
+    unsigned char stream_ref_patched[STREAM_REF_PATCH_BYTES];
+    unsigned char stream_ref_handoff_legacy[STREAM_REF_PATCH_BYTES];
+    unsigned char stream_ref_legacy[STREAM_REF_PATCH_BYTES];
+    uintptr_t stream_ref_delete_target;
+    uintptr_t stream_ref_update_target;
+    uintptr_t output_pool_stack_fail_target;
+    unsigned char output_pool_tail_patched[OUTPUT_POOL_TAIL_PATCH_BYTES];
+    int update_flags_state;
+    int update_app_policy_state;
     int policy_relaxed;
+    int stream_ref_state;
+    int output_pool_state;
+    unsigned int stream_events_patched;
     int valid;
 } auxiliary_targets_t;
 
@@ -2405,6 +2580,497 @@ static int exact_function_overlay(const unsigned char *disk,
         return 1;
     }
     return 0;
+}
+
+typedef struct {
+    size_t patch_off;
+    const unsigned char *stock;
+    const unsigned char *patched;
+    const unsigned char *alternate;
+    const unsigned char *legacy;
+    size_t patch_size;
+} owned_overlay_region_t;
+
+enum {
+    OVERLAY_STOCK = 0,
+    OVERLAY_PATCHED = 1,
+    OVERLAY_ALTERNATE = 2,
+    OVERLAY_LEGACY = 3
+};
+
+static int decode_aarch64_bl(uintptr_t site, uint32_t instruction,
+                             uintptr_t *target) {
+    if (!target || (instruction & 0xFC000000u) != 0x94000000u ||
+        site > (uintptr_t)INT64_MAX) {
+        return 0;
+    }
+    int64_t immediate = (int64_t)(instruction & 0x03FFFFFFu);
+    if (immediate & 0x02000000ll) immediate -= 0x04000000ll;
+    int64_t resolved = (int64_t)site + immediate * 4;
+    if (resolved < 0 || (uint64_t)resolved > (uint64_t)UINTPTR_MAX ||
+        ((uintptr_t)resolved & 3u) != 0) {
+        return 0;
+    }
+    *target = (uintptr_t)resolved;
+    return 1;
+}
+
+static int encode_aarch64_bl(uintptr_t site, uintptr_t target,
+                             uint32_t *instruction) {
+    if (!instruction || site > (uintptr_t)INT64_MAX ||
+        target > (uintptr_t)INT64_MAX) {
+        return 0;
+    }
+    int64_t delta = (int64_t)target - (int64_t)site;
+    int64_t immediate = delta / 4;
+    if ((delta & 3ll) != 0 || immediate < -0x02000000ll ||
+        immediate > 0x01FFFFFFll) {
+        return 0;
+    }
+    *instruction = 0x94000000u |
+                   ((uint32_t)immediate & 0x03FFFFFFu);
+    return 1;
+}
+
+static int encode_aarch64_b(uintptr_t site, uintptr_t target,
+                            uint32_t *instruction) {
+    if (!instruction || site > (uintptr_t)INT64_MAX ||
+        target > (uintptr_t)INT64_MAX) {
+        return 0;
+    }
+    int64_t delta = (int64_t)target - (int64_t)site;
+    int64_t immediate = delta / 4;
+    if ((delta & 3ll) != 0 || immediate < -0x02000000ll ||
+        immediate > 0x01FFFFFFll) {
+        return 0;
+    }
+    *instruction = 0x14000000u |
+                   ((uint32_t)immediate & 0x03FFFFFFu);
+    return 1;
+}
+
+static int decode_aarch64_b_cond(uintptr_t site, uint32_t instruction,
+                                 uintptr_t *target, uint32_t *condition) {
+    if (!target || (instruction & 0xFF000010u) != 0x54000000u ||
+        site > (uintptr_t)INT64_MAX) {
+        return 0;
+    }
+    int64_t immediate = (int64_t)((instruction >> 5) & 0x7FFFFu);
+    if (immediate & 0x40000ll) immediate -= 0x80000ll;
+    int64_t resolved = (int64_t)site + immediate * 4;
+    if (resolved < 0 || (uint64_t)resolved > (uint64_t)UINTPTR_MAX ||
+        ((uintptr_t)resolved & 3u) != 0) {
+        return 0;
+    }
+    *target = (uintptr_t)resolved;
+    if (condition) *condition = instruction & 0xFu;
+    return 1;
+}
+
+static int encode_aarch64_b_cond(uintptr_t site, uintptr_t target,
+                                 uint32_t condition,
+                                 uint32_t *instruction) {
+    if (!instruction || condition > 0xFu ||
+        site > (uintptr_t)INT64_MAX || target > (uintptr_t)INT64_MAX) {
+        return 0;
+    }
+    int64_t delta = (int64_t)target - (int64_t)site;
+    int64_t immediate = delta / 4;
+    if ((delta & 3ll) != 0 || immediate < -0x40000ll ||
+        immediate > 0x3FFFFll) {
+        return 0;
+    }
+    *instruction = 0x54000000u |
+                   (((uint32_t)immediate & 0x7FFFFu) << 5) |
+                   condition;
+    return 1;
+}
+
+static int build_update_app_policy_overlay(
+        uintptr_t update_vaddr, const unsigned char *stock,
+        unsigned char *stock_handoff, unsigned char *relaxed_handoff,
+        unsigned char *legacy, uintptr_t *call_target) {
+    if (!stock || !stock_handoff || !relaxed_handoff || !legacy ||
+        !call_target ||
+        memcmp(stock, UPDATE_APP_POLICY_DISK_TEMPLATE,
+               UPDATE_APP_POLICY_DISK_BL_OFF) != 0 ||
+        memcmp(stock + UPDATE_APP_POLICY_DISK_BL_OFF + sizeof(uint32_t),
+               UPDATE_APP_POLICY_DISK_TEMPLATE +
+               UPDATE_APP_POLICY_DISK_BL_OFF + sizeof(uint32_t),
+               UPDATE_APP_POLICY_BYTES - UPDATE_APP_POLICY_DISK_BL_OFF -
+               sizeof(uint32_t)) != 0) {
+        return 0;
+    }
+    uintptr_t target = 0;
+    uintptr_t stock_call = update_vaddr + UPDATE_APP_POLICY_PATCH_OFF +
+                           UPDATE_APP_POLICY_DISK_BL_OFF;
+    uintptr_t stock_handoff_call = update_vaddr +
+        UPDATE_APP_POLICY_PATCH_OFF + UPDATE_APP_POLICY_STOCK_BL_OFF;
+    uintptr_t relaxed_call = update_vaddr + UPDATE_APP_POLICY_PATCH_OFF +
+                             UPDATE_APP_POLICY_RELAXED_BL_OFF;
+    uintptr_t legacy_call = update_vaddr + UPDATE_APP_POLICY_PATCH_OFF +
+                            UPDATE_APP_POLICY_LEGACY_BL_OFF;
+    uint32_t stock_replacement = 0;
+    uint32_t relaxed_replacement = 0;
+    uint32_t legacy_replacement = 0;
+    if (!decode_aarch64_bl(stock_call,
+                           load_u32le(stock +
+                                      UPDATE_APP_POLICY_DISK_BL_OFF),
+                           &target) ||
+        !encode_aarch64_bl(stock_handoff_call, target,
+                           &stock_replacement) ||
+        !encode_aarch64_bl(relaxed_call, target,
+                           &relaxed_replacement) ||
+        !encode_aarch64_bl(legacy_call, target,
+                           &legacy_replacement)) {
+        return 0;
+    }
+    memcpy(stock_handoff, UPDATE_APP_POLICY_STOCK_TEMPLATE,
+           UPDATE_APP_POLICY_BYTES);
+    store_u32le(stock_handoff + UPDATE_APP_POLICY_STOCK_BL_OFF,
+                stock_replacement);
+    memcpy(relaxed_handoff, UPDATE_APP_POLICY_RELAXED_TEMPLATE,
+           UPDATE_APP_POLICY_BYTES);
+    store_u32le(relaxed_handoff + UPDATE_APP_POLICY_RELAXED_BL_OFF,
+                relaxed_replacement);
+    memcpy(legacy, stock, UPDATE_APP_POLICY_BYTES);
+    memcpy(legacy, UPDATE_APP_POLICY_LEGACY_TEMPLATE,
+           sizeof(UPDATE_APP_POLICY_LEGACY_TEMPLATE));
+    store_u32le(legacy + UPDATE_APP_POLICY_LEGACY_BL_OFF,
+                legacy_replacement);
+    *call_target = target;
+    return 1;
+}
+
+static int exact_aarch64_plt_entry(pid_t pid, uintptr_t base,
+                                   uintptr_t target_vaddr) {
+    if (base > UINTPTR_MAX - target_vaddr) return 0;
+    uintptr_t address = base + target_vaddr;
+    if (address < g_rx_start || address > g_rx_end ||
+        sizeof(uint32_t) * 4u > g_rx_end - address) {
+        return 0;
+    }
+    unsigned char bytes[sizeof(uint32_t) * 4u];
+    if (mem_r(pid, address, bytes, sizeof(bytes)) != 0) return 0;
+    uint32_t adrp = load_u32le(bytes);
+    uint32_t ldr = load_u32le(bytes + 4);
+    uint32_t add = load_u32le(bytes + 8);
+    uint32_t branch = load_u32le(bytes + 12);
+    uint32_t ldr_offset = ((ldr >> 10) & 0xFFFu) << 3;
+    uint32_t add_offset = (add >> 10) & 0xFFFu;
+    return (adrp & 0x9F00001Fu) == 0x90000010u &&
+           (ldr & 0xFFC003FFu) == 0xF9400211u &&
+           (add & 0xFFC003FFu) == 0x91000210u &&
+           branch == 0xD61F0220u && ldr_offset == add_offset;
+}
+
+static int stream_ref_stock_shape(const unsigned char *stock) {
+    if (!stock) return 0;
+    for (size_t offset = 0; offset < STREAM_REF_PATCH_BYTES;
+         offset += sizeof(uint32_t)) {
+        uint32_t current = load_u32le(stock + offset);
+        uint32_t expected = load_u32le(STREAM_REF_STOCK_TEMPLATE + offset);
+        if (offset == 0x10u || offset == 0x3Cu || offset == 0x5Cu ||
+            offset == 0x8Cu) {
+            if ((current & 0xFC000000u) != 0x94000000u) return 0;
+        } else if (offset == 0x18u || offset == 0x44u ||
+                   offset == 0x74u) {
+            if ((current & 0x9F00001Fu) !=
+                (expected & 0x9F00001Fu)) return 0;
+        } else if (offset == 0x68u || offset == 0x70u ||
+                   offset == 0x78u) {
+            if ((current & 0xFFC003FFu) !=
+                (expected & 0xFFC003FFu)) return 0;
+        } else if (current != expected) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int build_stream_ref_overlay(
+        uintptr_t stream_vaddr, const unsigned char *stock,
+        uintptr_t allowed_target, uintptr_t update_target,
+        uintptr_t output_vaddr, const unsigned char *output_tail,
+        unsigned char *patched, unsigned char *handoff_legacy,
+        unsigned char *legacy,
+        unsigned char *output_patched, uintptr_t *delete_target,
+        uintptr_t *stack_fail_target) {
+    if (!stock || !output_tail || !patched || !handoff_legacy || !legacy ||
+        !output_patched || !delete_target || !stack_fail_target ||
+        !allowed_target || !update_target ||
+        stream_vaddr > UINTPTR_MAX - STREAM_REF_PATCH_OFF -
+                       STREAM_REF_DELETE_BL_OFF ||
+        output_vaddr > UINTPTR_MAX - OUTPUT_POOL_TAIL_PATCH_OFF -
+                       sizeof(OUTPUT_POOL_TAIL_STOCK_TEMPLATE) ||
+        memcmp(output_tail, OUTPUT_POOL_TAIL_STOCK_TEMPLATE,
+               sizeof(OUTPUT_POOL_TAIL_STOCK_TEMPLATE)) != 0 ||
+        !stream_ref_stock_shape(stock)) {
+        return 0;
+    }
+    uintptr_t delete_site = stream_vaddr + STREAM_REF_PATCH_OFF +
+                            STREAM_REF_DELETE_BL_OFF;
+    uintptr_t allowed_site = stream_vaddr + STREAM_REF_PATCH_OFF +
+                             STREAM_REF_ALLOWED_BL_OFF;
+    uintptr_t stack_site = stream_vaddr + STREAM_REF_PATCH_OFF +
+                           STREAM_REF_STACK_COND_OFF;
+    uintptr_t update_site = stream_vaddr + STREAM_REF_PATCH_OFF +
+                            STREAM_REF_UPDATE_B_OFF;
+    uintptr_t output_site = output_vaddr + OUTPUT_POOL_TAIL_PATCH_OFF;
+    uintptr_t stack_target = 0;
+    uintptr_t target = 0;
+    uint32_t stack_condition = 0;
+    uint32_t delete_replacement = 0;
+    uint32_t allowed_replacement = 0;
+    uint32_t stack_replacement = 0;
+    uint32_t update_replacement = 0;
+    uint32_t output_replacement = 0;
+    if (!decode_aarch64_bl(
+            delete_site,
+            load_u32le(stock + STREAM_REF_DELETE_BL_OFF), &target) ||
+        !decode_aarch64_b_cond(
+            output_site + OUTPUT_POOL_STACK_COND_OFF,
+            load_u32le(output_tail + OUTPUT_POOL_STACK_COND_OFF),
+            &stack_target, &stack_condition) || stack_condition != 1u ||
+        stack_target != output_vaddr + OUTPUT_POOL_STACK_FAIL_OFF ||
+        !encode_aarch64_bl(delete_site, target, &delete_replacement) ||
+        !encode_aarch64_bl(allowed_site, allowed_target,
+                           &allowed_replacement) ||
+        !encode_aarch64_b_cond(stack_site, stack_target, stack_condition,
+                               &stack_replacement) ||
+        !encode_aarch64_b(update_site, update_target,
+                          &update_replacement) ||
+        !encode_aarch64_b(output_site,
+                          stream_vaddr + STREAM_REF_HELPER_OFF,
+                          &output_replacement)) {
+        return 0;
+    }
+    memcpy(patched, STREAM_REF_PATCH_TEMPLATE, STREAM_REF_PATCH_BYTES);
+    store_u32le(patched + STREAM_REF_DELETE_BL_OFF, delete_replacement);
+    store_u32le(patched + STREAM_REF_ALLOWED_BL_OFF, allowed_replacement);
+    store_u32le(patched + STREAM_REF_STACK_COND_OFF, stack_replacement);
+    store_u32le(patched + STREAM_REF_UPDATE_B_OFF, update_replacement);
+    store_u32le(output_patched, output_replacement);
+    memcpy(handoff_legacy, patched, STREAM_REF_PATCH_BYTES);
+    store_u32le(handoff_legacy + 0x64u, 0x34000054u);
+    store_u32le(handoff_legacy + 0x68u, 0x391466DFu);
+    memcpy(legacy, stock, STREAM_REF_PATCH_BYTES);
+    memcpy(legacy + STREAM_REF_LEGACY_EVENT_OFF,
+           STREAM_REF_LEGACY_EVENT_RECOMPUTE,
+           sizeof(STREAM_REF_LEGACY_EVENT_RECOMPUTE));
+    *delete_target = target;
+    *stack_fail_target = stack_target;
+    return 1;
+}
+
+static int prepare_stream_ref_overlay(
+        int fd, uint64_t file_size, pid_t pid, uintptr_t base,
+        const char *stream_name, const char *output_name) {
+    elf_a2h_symbol_t sym = {0};
+    elf_a2h_symbol_t output_sym = {0};
+    unsigned char output_tail[sizeof(OUTPUT_POOL_TAIL_STOCK_TEMPLATE)];
+    unsigned char update_context[STREAM_UPDATE_CALL_BYTES];
+    uint32_t stream_app_manager = 0;
+    uint32_t output_manager_arg = 0;
+    int parsed = parse_unique_func_symbol(fd, file_size, stream_name,
+                                          STREAM_SET_PARAMETERS_FUNC_BYTES,
+                                          &sym);
+    int output_parsed = parse_unique_func_symbol(
+        fd, file_size, output_name, UPDATE_OUTPUT_POOL_FUNC_BYTES,
+        &output_sym);
+    if (parsed != ELF_RESOLVE_VERIFIED ||
+        output_parsed != ELF_RESOLVE_VERIFIED ||
+        STREAM_REF_PATCH_OFF > sym.size ||
+        STREAM_REF_PATCH_BYTES > sym.size - STREAM_REF_PATCH_OFF ||
+        STREAM_UPDATE_CALL_OFF > sym.size ||
+        sizeof(update_context) > sym.size - STREAM_UPDATE_CALL_OFF ||
+        STREAM_APP_MAP_MANAGER_OFF > sym.size ||
+        sizeof(stream_app_manager) >
+            sym.size - STREAM_APP_MAP_MANAGER_OFF ||
+        OUTPUT_POOL_MANAGER_ARG_OFF > output_sym.size ||
+        sizeof(output_manager_arg) >
+            output_sym.size - OUTPUT_POOL_MANAGER_ARG_OFF ||
+        OUTPUT_POOL_TAIL_PATCH_OFF > output_sym.size ||
+        sizeof(output_tail) >
+            output_sym.size - OUTPUT_POOL_TAIL_PATCH_OFF ||
+        !pread_exact(fd, g_auxiliary.stream_ref_stock,
+                     STREAM_REF_PATCH_BYTES,
+                     sym.file_off + STREAM_REF_PATCH_OFF) ||
+        !pread_exact(fd, update_context, sizeof(update_context),
+                     sym.file_off + STREAM_UPDATE_CALL_OFF) ||
+        memcmp(update_context, STREAM_UPDATE_CALL_TEMPLATE,
+               STREAM_UPDATE_BL_OFF - STREAM_UPDATE_CALL_OFF) != 0 ||
+        memcmp(update_context + sizeof(uint32_t) * 2u,
+               STREAM_UPDATE_CALL_TEMPLATE + sizeof(uint32_t) * 2u,
+               sizeof(uint32_t)) != 0 ||
+        !decode_aarch64_bl(sym.vaddr + STREAM_UPDATE_BL_OFF,
+                           load_u32le(update_context + sizeof(uint32_t)),
+                           &g_auxiliary.stream_ref_update_target) ||
+        !pread_exact(fd, &stream_app_manager, sizeof(stream_app_manager),
+                     sym.file_off + STREAM_APP_MAP_MANAGER_OFF) ||
+        stream_app_manager != STREAM_APP_MAP_MANAGER_ADD ||
+        !pread_exact(fd, &output_manager_arg, sizeof(output_manager_arg),
+                     output_sym.file_off + OUTPUT_POOL_MANAGER_ARG_OFF) ||
+        output_manager_arg != OUTPUT_POOL_MANAGER_ARG_MOV ||
+        !pread_exact(fd, output_tail, sizeof(output_tail),
+                     output_sym.file_off + OUTPUT_POOL_TAIL_PATCH_OFF) ||
+        !build_stream_ref_overlay(
+            sym.vaddr, g_auxiliary.stream_ref_stock,
+            g_auxiliary.allowed_call_target,
+            g_auxiliary.stream_ref_update_target,
+            output_sym.vaddr, output_tail,
+            g_auxiliary.stream_ref_patched,
+            g_auxiliary.stream_ref_handoff_legacy,
+            g_auxiliary.stream_ref_legacy,
+            g_auxiliary.output_pool_tail_patched,
+            &g_auxiliary.stream_ref_delete_target,
+            &g_auxiliary.output_pool_stack_fail_target) ||
+        !exact_aarch64_plt_entry(pid, base,
+                                 g_auxiliary.stream_ref_delete_target) ||
+        !exact_aarch64_plt_entry(pid, base,
+                                 g_auxiliary.stream_ref_update_target)) {
+        fprintf(stderr,
+                "[a2h_patch] stream handoff overlay rejected: stock shape/branch/PLT mismatch\n");
+        return 0;
+    }
+    g_auxiliary.output_pool_off = output_sym.vaddr;
+    fprintf(stderr,
+            "[a2h_patch] stream handoff overlay generated bytes=%u delete_target=0x%lx update_target=0x%lx stack_fail=0x%lx output_pool=0x%lx\n",
+            STREAM_REF_PATCH_BYTES,
+            (unsigned long)g_auxiliary.stream_ref_delete_target,
+            (unsigned long)g_auxiliary.stream_ref_update_target,
+            (unsigned long)g_auxiliary.output_pool_stack_fail_target,
+            (unsigned long)g_auxiliary.output_pool_off);
+    return 1;
+}
+
+static int prepare_update_app_policy_overlay(
+        int fd, uint64_t file_size, pid_t pid, uintptr_t base,
+        const char *update_name) {
+    elf_a2h_symbol_t sym = {0};
+    uint32_t allowed_call = 0;
+    int parsed = parse_unique_func_symbol(fd, file_size, update_name,
+                                          UPDATE_A2H_MODE_FUNC_BYTES, &sym);
+    if (parsed != ELF_RESOLVE_VERIFIED ||
+        UPDATE_APP_POLICY_PATCH_OFF > sym.size ||
+        UPDATE_APP_POLICY_BYTES > sym.size - UPDATE_APP_POLICY_PATCH_OFF ||
+        UPDATE_A2H_ALLOWED_BL_OFF > sym.size ||
+        sizeof(allowed_call) > sym.size - UPDATE_A2H_ALLOWED_BL_OFF ||
+        !pread_exact(fd, g_auxiliary.app_policy_disk,
+                     UPDATE_APP_POLICY_BYTES,
+                     sym.file_off + UPDATE_APP_POLICY_PATCH_OFF) ||
+        !pread_exact(fd, &allowed_call, sizeof(allowed_call),
+                     sym.file_off + UPDATE_A2H_ALLOWED_BL_OFF) ||
+        !decode_aarch64_bl(sym.vaddr + UPDATE_A2H_ALLOWED_BL_OFF,
+                           allowed_call,
+                           &g_auxiliary.allowed_call_target) ||
+        !build_update_app_policy_overlay(
+            sym.vaddr, g_auxiliary.app_policy_disk,
+            g_auxiliary.app_policy_stock,
+            g_auxiliary.app_policy_relaxed,
+            g_auxiliary.app_policy_legacy,
+            &g_auxiliary.app_policy_call_target) ||
+        !exact_aarch64_plt_entry(pid, base,
+                                 g_auxiliary.app_policy_call_target) ||
+        !exact_aarch64_plt_entry(pid, base,
+                                 g_auxiliary.allowed_call_target)) {
+        fprintf(stderr,
+                "[a2h_patch] auxiliary app policy rejected: stock shape/BL/PLT mismatch\n");
+        return 0;
+    }
+    fprintf(stderr,
+            "[a2h_patch] auxiliary app policy generated bytes=%u call_target=0x%lx allowed_target=0x%lx\n",
+            UPDATE_APP_POLICY_BYTES,
+            (unsigned long)g_auxiliary.app_policy_call_target,
+            (unsigned long)g_auxiliary.allowed_call_target);
+    return 1;
+}
+
+static int exact_multi_overlay(const unsigned char *disk,
+                               const unsigned char *live,
+                               size_t func_size,
+                               const owned_overlay_region_t *regions,
+                               size_t region_count, int *states) {
+    if (!disk || !live || !regions || !region_count || !states) return 0;
+    size_t cursor = 0;
+    for (size_t i = 0; i < region_count; ++i) {
+        const owned_overlay_region_t *region = &regions[i];
+        if (!region->stock || !region->patched || !region->patch_size ||
+            region->patch_off < cursor || region->patch_off > func_size ||
+            region->patch_size > func_size - region->patch_off ||
+            memcmp(disk + cursor, live + cursor,
+                   region->patch_off - cursor) != 0 ||
+            memcmp(disk + region->patch_off, region->stock,
+                   region->patch_size) != 0) {
+            return 0;
+        }
+        const unsigned char *live_region = live + region->patch_off;
+        if (memcmp(live_region, region->stock, region->patch_size) == 0) {
+            states[i] = OVERLAY_STOCK;
+        } else if (memcmp(live_region, region->patched,
+                          region->patch_size) == 0) {
+            states[i] = OVERLAY_PATCHED;
+        } else if (region->alternate &&
+                   memcmp(live_region, region->alternate,
+                          region->patch_size) == 0) {
+            states[i] = OVERLAY_ALTERNATE;
+        } else if (region->legacy &&
+                   memcmp(live_region, region->legacy,
+                          region->patch_size) == 0) {
+            states[i] = OVERLAY_LEGACY;
+        } else {
+            return 0;
+        }
+        cursor = region->patch_off + region->patch_size;
+    }
+    return memcmp(disk + cursor, live + cursor, func_size - cursor) == 0;
+}
+
+static int resolve_owned_multi_symbol(int fd, uint64_t file_size,
+                                      pid_t pid, uintptr_t base,
+                                      const char *name,
+                                      size_t expected_size,
+                                      const owned_overlay_region_t *regions,
+                                      size_t region_count,
+                                      uintptr_t *out_off, int *states) {
+    elf_a2h_symbol_t sym={0};
+    int parsed = parse_unique_func_symbol(fd, file_size, name,
+                                          expected_size, &sym);
+    if (parsed != ELF_RESOLVE_VERIFIED || base > UINTPTR_MAX - sym.vaddr ||
+        sym.size > UINTPTR_MAX - (base + sym.vaddr)) {
+        fprintf(stderr,
+                "[a2h_patch] auxiliary symbol rejected name=%s parse=%d\n",
+                name, parsed);
+        return 0;
+    }
+    uintptr_t absolute = base + sym.vaddr;
+    if (absolute < g_rx_start || absolute + sym.size > g_rx_end) {
+        fprintf(stderr,
+                "[a2h_patch] auxiliary symbol rejected name=%s reason=RX-range\n",
+                name);
+        return 0;
+    }
+    unsigned char *disk = (unsigned char *)malloc(sym.size);
+    unsigned char *live = (unsigned char *)malloc(sym.size);
+    int owned = disk && live &&
+                pread_exact(fd, disk, sym.size, sym.file_off) &&
+                mem_r(pid, absolute, live, sym.size) == 0 &&
+                exact_multi_overlay(disk, live, sym.size, regions,
+                                    region_count, states);
+    free(disk);
+    free(live);
+    if (!owned) {
+        fprintf(stderr,
+                "[a2h_patch] auxiliary symbol rejected name=%s reason=foreign-or-unknown-bytes\n",
+                name);
+        return 0;
+    }
+    *out_off = sym.vaddr;
+    fprintf(stderr,
+            "[a2h_patch] auxiliary symbol verified name=%s func=0x%lx size=%lu regions=%lu\n",
+            name, (unsigned long)sym.vaddr, (unsigned long)sym.size,
+            (unsigned long)region_count);
+    return 1;
 }
 
 static int resolve_owned_auxiliary_symbol(int fd, uint64_t file_size,
@@ -2463,64 +3129,201 @@ static int resolve_auxiliary_targets(pid_t pid, uintptr_t base) {
         "_ZN7android22AudioALSAStreamManager13updateA2HModeEv";
     static const char policy_name[] =
         "_ZN7android22AudioALSAStreamManager12isA2HAllowedEv";
+    static const char stream_event_name[] =
+        "_ZN7android18AudioALSAStreamOut13setParametersERKNS_7String8E";
+    static const char output_pool_name[] =
+        "_ZN7android22AudioALSAStreamManager22updateOutputPoolActiveE20audio_output_flags_tb";
     memset(&g_auxiliary, 0, sizeof(g_auxiliary));
     uint64_t file_size = 0;
     int fd = open_mapped_hal(pid, &file_size);
     if (fd < 0) return 0;
-    int update_ok = resolve_owned_auxiliary_symbol(
+    if (!prepare_update_app_policy_overlay(fd, file_size, pid, base,
+                                           update_name) ||
+        !prepare_stream_ref_overlay(fd, file_size, pid, base,
+                                    stream_event_name,
+                                    output_pool_name)) {
+        close(fd);
+        memset(&g_auxiliary, 0, sizeof(g_auxiliary));
+        return 0;
+    }
+    const owned_overlay_region_t update_regions[] = {
+        {UPDATE_FLAGS_PATCH_OFF, UPDATE_FLAGS_STOCK, UPDATE_FLAGS_GAME,
+         NULL, UPDATE_FLAGS_LEGACY, sizeof(UPDATE_FLAGS_STOCK)},
+        {UPDATE_APP_POLICY_PATCH_OFF, g_auxiliary.app_policy_disk,
+         g_auxiliary.app_policy_stock, g_auxiliary.app_policy_relaxed,
+         g_auxiliary.app_policy_legacy, UPDATE_APP_POLICY_BYTES}
+    };
+    const owned_overlay_region_t stream_regions[STREAM_OVERLAY_REGION_COUNT] = {
+        {STREAM_EVENT_PATCH_OFFSETS[0], STREAM_EVENT_STOCK[0],
+         STREAM_EVENT_RECOMPUTE[0], NULL, STREAM_EVENT_HANDOFF_LEGACY,
+         STREAM_EVENT_PATCH_SIZES[0]},
+        {STREAM_REF_PATCH_OFF, g_auxiliary.stream_ref_stock,
+         g_auxiliary.stream_ref_patched,
+         g_auxiliary.stream_ref_handoff_legacy,
+         g_auxiliary.stream_ref_legacy,
+         STREAM_REF_PATCH_BYTES},
+        {STREAM_EVENT_PATCH_OFFSETS[1], STREAM_EVENT_STOCK[1],
+         STREAM_EVENT_RECOMPUTE[1], NULL, NULL,
+         STREAM_EVENT_PATCH_SIZES[1]}
+    };
+    int update_states[2]={0};
+    int stream_states[STREAM_OVERLAY_REGION_COUNT]={0};
+    int update_ok = resolve_owned_multi_symbol(
         fd, file_size, pid, base, update_name,
-        UPDATE_A2H_MODE_FUNC_BYTES, UPDATE_FLAGS_PATCH_OFF,
-        UPDATE_FLAGS_STOCK, UPDATE_FLAGS_FAST, sizeof(UPDATE_FLAGS_STOCK),
-        &g_auxiliary.update_off, &g_auxiliary.update_fast);
-    int policy_ok = update_ok && resolve_owned_auxiliary_symbol(
+        UPDATE_A2H_MODE_FUNC_BYTES, update_regions,
+        sizeof(update_regions) / sizeof(update_regions[0]),
+        &g_auxiliary.update_off, update_states);
+    int stream_ok = update_ok && resolve_owned_multi_symbol(
+        fd, file_size, pid, base, stream_event_name,
+        STREAM_SET_PARAMETERS_FUNC_BYTES, stream_regions,
+        STREAM_OVERLAY_REGION_COUNT, &g_auxiliary.stream_event_off,
+        stream_states);
+    int policy_ok = stream_ok && resolve_owned_auxiliary_symbol(
         fd, file_size, pid, base, policy_name,
         IS_A2H_ALLOWED_FUNC_BYTES, GAME_POLICY_PATCH_OFF,
         GAME_POLICY_STOCK, GAME_POLICY_RELAXED, sizeof(GAME_POLICY_STOCK),
         &g_auxiliary.policy_off, &g_auxiliary.policy_relaxed);
+    int output_pool_patched = 0;
+    uintptr_t output_pool_off = 0;
+    int output_pool_ok = policy_ok && resolve_owned_auxiliary_symbol(
+        fd, file_size, pid, base, output_pool_name,
+        UPDATE_OUTPUT_POOL_FUNC_BYTES, OUTPUT_POOL_TAIL_PATCH_OFF,
+        OUTPUT_POOL_TAIL_STOCK, g_auxiliary.output_pool_tail_patched,
+        OUTPUT_POOL_TAIL_PATCH_BYTES, &output_pool_off,
+        &output_pool_patched) &&
+        output_pool_off == g_auxiliary.output_pool_off;
     close(fd);
-    g_auxiliary.valid = update_ok && policy_ok;
+    g_auxiliary.update_flags_state = update_states[0];
+    g_auxiliary.update_app_policy_state = update_states[1];
+    g_auxiliary.stream_ref_state = stream_states[1];
+    g_auxiliary.output_pool_state = output_pool_patched ?
+        OVERLAY_PATCHED : OVERLAY_STOCK;
+    if (stream_states[0] == OVERLAY_PATCHED)
+        g_auxiliary.stream_events_patched++;
+    if (stream_states[2] == OVERLAY_PATCHED)
+        g_auxiliary.stream_events_patched++;
+    int handoff_owned = stream_states[1] == OVERLAY_PATCHED ||
+                        stream_states[1] == OVERLAY_ALTERNATE;
+    int output_owned = output_pool_patched != 0;
+    int app_policy_new = update_states[1] == OVERLAY_PATCHED ||
+                         update_states[1] == OVERLAY_ALTERNATE;
+    int app_policy_old = update_states[1] == OVERLAY_STOCK ||
+                         update_states[1] == OVERLAY_LEGACY;
+    int ownership_coherent = handoff_owned == output_owned &&
+        ((handoff_owned && app_policy_new) ||
+         (!handoff_owned && app_policy_old));
+    g_auxiliary.valid = update_ok && stream_ok && policy_ok &&
+                        output_pool_ok && ownership_coherent;
     if (!g_auxiliary.valid) {
         memset(&g_auxiliary, 0, sizeof(g_auxiliary));
         fprintf(stderr,
                 "[a2h_patch] ERROR: auxiliary lifecycle targets unresolved; no patch data written\n");
         return 0;
     }
+    fprintf(stderr,
+            "[a2h_patch] auxiliary ownership output_flags=%s app_policy=%s stream_handoff=%s output_pool=%s stream_events=%u/%u output_policy=%s\n",
+            g_auxiliary.update_flags_state == OVERLAY_LEGACY ? "legacy-v1.5.6" :
+            (g_auxiliary.update_flags_state == OVERLAY_PATCHED ? "game" : "stock"),
+            g_auxiliary.update_app_policy_state == OVERLAY_ALTERNATE ?
+                "relaxed-handoff" :
+            (g_auxiliary.update_app_policy_state == OVERLAY_PATCHED ?
+                "stock-handoff" :
+            (g_auxiliary.update_app_policy_state == OVERLAY_LEGACY ?
+                "legacy-relaxed" : "stock")),
+            g_auxiliary.stream_ref_state == OVERLAY_PATCHED ? "handoff" :
+            g_auxiliary.stream_ref_state == OVERLAY_ALTERNATE ?
+                "handoff-v1" :
+            (g_auxiliary.stream_ref_state == OVERLAY_LEGACY ?
+             "legacy-event" : "stock"),
+            g_auxiliary.output_pool_state == OVERLAY_PATCHED ?
+                "event-tail" : "stock",
+            g_auxiliary.stream_events_patched, STREAM_EVENT_PATCH_COUNT,
+            g_auxiliary.policy_relaxed ? "relaxed" : "stock");
     return 1;
 }
 
 static int verify_auxiliary_targets(pid_t pid, uintptr_t base,
-                                    int want_policy_relaxed, int verbose) {
+                                    int want_app_policy_relaxed,
+                                    int verbose) {
     if (!g_auxiliary.valid) return 0;
-    unsigned char update[sizeof(UPDATE_FLAGS_FAST)];
+    unsigned char update[sizeof(UPDATE_FLAGS_GAME)];
+    unsigned char app_policy[UPDATE_APP_POLICY_BYTES];
     unsigned char policy[sizeof(GAME_POLICY_STOCK)];
+    unsigned char stream_ref[STREAM_REF_PATCH_BYTES];
+    unsigned char output_pool_tail[OUTPUT_POOL_TAIL_PATCH_BYTES];
+    unsigned char stream_event[STREAM_EVENT_PATCH_MAX_BYTES];
     int update_ok = mem_r(pid, base + g_auxiliary.update_off +
                           UPDATE_FLAGS_PATCH_OFF,
                           update, sizeof(update)) == 0 &&
-                    memcmp(update, UPDATE_FLAGS_FAST, sizeof(update)) == 0;
-    const unsigned char *wanted_policy = want_policy_relaxed ?
-                                         GAME_POLICY_RELAXED :
-                                         GAME_POLICY_STOCK;
+                    memcmp(update, UPDATE_FLAGS_GAME, sizeof(update)) == 0;
+    const unsigned char *wanted_app_policy = want_app_policy_relaxed ?
+        g_auxiliary.app_policy_relaxed : g_auxiliary.app_policy_stock;
+    int app_policy_ok = mem_r(pid, base + g_auxiliary.update_off +
+                              UPDATE_APP_POLICY_PATCH_OFF,
+                              app_policy, sizeof(app_policy)) == 0 &&
+                        memcmp(app_policy, wanted_app_policy,
+                               UPDATE_APP_POLICY_BYTES) == 0;
+    const unsigned char *wanted_policy = GAME_POLICY_RELAXED;
     int policy_ok = mem_r(pid, base + g_auxiliary.policy_off +
                           GAME_POLICY_PATCH_OFF,
                           policy, sizeof(policy)) == 0 &&
                     memcmp(policy, wanted_policy, sizeof(policy)) == 0;
-    if (verbose || !update_ok || !policy_ok) {
-        fprintf(stderr,
-                "[a2h_patch] auxiliary live update_fast=%s game_auto_pause=%s policy=%s final=%s\n",
-                update_ok ? "yes" : "no",
-                want_policy_relaxed ? "disabled" : "enabled",
-                policy_ok ? (want_policy_relaxed ? "relaxed" : "stock") :
-                            "mismatch",
-                update_ok && policy_ok ? "OK" : "FAIL");
+    int stream_ref_ok = mem_r(
+        pid, base + g_auxiliary.stream_event_off + STREAM_REF_PATCH_OFF,
+        stream_ref, sizeof(stream_ref)) == 0 &&
+        memcmp(stream_ref, g_auxiliary.stream_ref_patched,
+               sizeof(stream_ref)) == 0;
+    int output_pool_ok = mem_r(
+        pid, base + g_auxiliary.output_pool_off +
+             OUTPUT_POOL_TAIL_PATCH_OFF,
+        output_pool_tail, sizeof(output_pool_tail)) == 0 &&
+        memcmp(output_pool_tail, g_auxiliary.output_pool_tail_patched,
+               sizeof(output_pool_tail)) == 0;
+    unsigned int stream_events_ok = 0;
+    for (size_t i = 0; i < STREAM_EVENT_PATCH_COUNT; ++i) {
+        uintptr_t address = base + g_auxiliary.stream_event_off +
+                            STREAM_EVENT_PATCH_OFFSETS[i];
+        size_t event_size = STREAM_EVENT_PATCH_SIZES[i];
+        if (mem_r(pid, address, stream_event, event_size) == 0 &&
+            memcmp(stream_event, STREAM_EVENT_RECOMPUTE[i],
+                   event_size) == 0) {
+            stream_events_ok++;
+        }
     }
-    return update_ok && policy_ok;
+    int final_ok = update_ok && app_policy_ok && policy_ok && stream_ref_ok &&
+                   output_pool_ok &&
+                   stream_events_ok == STREAM_EVENT_PATCH_COUNT;
+    if (verbose || !final_ok) {
+        fprintf(stderr,
+                "[a2h_patch] auxiliary live output_flags=%s stream_handoff=%s output_pool=%s stream_events=%u/%u game_auto_pause=%s app_policy=%s output_policy=%s final=%s\n",
+                update_ok ? "game+spatial" : "mismatch",
+                stream_ref_ok ? "handoff" : "mismatch",
+                output_pool_ok ? "event-tail" : "mismatch",
+                stream_events_ok, STREAM_EVENT_PATCH_COUNT,
+                want_app_policy_relaxed ? "disabled" : "enabled",
+                app_policy_ok ? (want_app_policy_relaxed ?
+                                 "relaxed" : "stock") :
+                                "mismatch",
+                policy_ok ? "multi-speaker" : "mismatch",
+                final_ok ? "OK" : "FAIL");
+    }
+    return final_ok;
 }
 
 typedef struct {
     uintptr_t update_addr;
+    uintptr_t app_policy_addr;
     uintptr_t policy_addr;
+    uintptr_t stream_ref_addr;
+    uintptr_t output_pool_addr;
+    uintptr_t stream_event_addr[STREAM_EVENT_PATCH_COUNT];
     unsigned char update_before[sizeof(UPDATE_FLAGS_STOCK)];
+    unsigned char app_policy_before[UPDATE_APP_POLICY_BYTES];
     unsigned char policy_before[sizeof(GAME_POLICY_STOCK)];
+    unsigned char stream_ref_before[STREAM_REF_PATCH_BYTES];
+    unsigned char output_pool_before[OUTPUT_POOL_TAIL_PATCH_BYTES];
+    unsigned char stream_event_before[STREAM_EVENT_PATCH_COUNT]
+                                     [STREAM_EVENT_PATCH_MAX_BYTES];
     int valid;
 } auxiliary_transaction_t;
 
@@ -2529,26 +3332,54 @@ static int auxiliary_transaction_begin(pid_t pid, uintptr_t base,
     if (!tx || !g_auxiliary.valid) return 0;
     memset(tx, 0, sizeof(*tx));
     tx->update_addr = base + g_auxiliary.update_off + UPDATE_FLAGS_PATCH_OFF;
+    tx->app_policy_addr = base + g_auxiliary.update_off +
+                          UPDATE_APP_POLICY_PATCH_OFF;
     tx->policy_addr = base + g_auxiliary.policy_off + GAME_POLICY_PATCH_OFF;
+    tx->stream_ref_addr = base + g_auxiliary.stream_event_off +
+                          STREAM_REF_PATCH_OFF;
+    tx->output_pool_addr = base + g_auxiliary.output_pool_off +
+                           OUTPUT_POOL_TAIL_PATCH_OFF;
     if (mem_r(pid, tx->update_addr, tx->update_before,
               sizeof(tx->update_before)) != 0 ||
+        mem_r(pid, tx->app_policy_addr, tx->app_policy_before,
+              sizeof(tx->app_policy_before)) != 0 ||
         mem_r(pid, tx->policy_addr, tx->policy_before,
-              sizeof(tx->policy_before)) != 0) {
+              sizeof(tx->policy_before)) != 0 ||
+        mem_r(pid, tx->stream_ref_addr, tx->stream_ref_before,
+              sizeof(tx->stream_ref_before)) != 0 ||
+        mem_r(pid, tx->output_pool_addr, tx->output_pool_before,
+              sizeof(tx->output_pool_before)) != 0) {
         fprintf(stderr, "[a2h_patch] auxiliary transaction snapshot FAIL\n");
         return 0;
     }
+    for (size_t i = 0; i < STREAM_EVENT_PATCH_COUNT; ++i) {
+        tx->stream_event_addr[i] = base + g_auxiliary.stream_event_off +
+                                   STREAM_EVENT_PATCH_OFFSETS[i];
+        if (mem_r(pid, tx->stream_event_addr[i],
+                  tx->stream_event_before[i],
+                  STREAM_EVENT_PATCH_SIZES[i]) != 0) {
+            fprintf(stderr,
+                    "[a2h_patch] auxiliary transaction snapshot FAIL stream_event=%lu\n",
+                    (unsigned long)i);
+            return 0;
+        }
+    }
     tx->valid = 1;
     fprintf(stderr,
-            "[a2h_patch] auxiliary transaction snapshot OK update_bytes=%lu policy_bytes=%lu\n",
+            "[a2h_patch] auxiliary transaction snapshot OK update_bytes=%lu app_policy_bytes=%lu output_policy_bytes=%lu stream_handoff_bytes=%lu output_pool_bytes=%lu stream_events=%u\n",
             (unsigned long)sizeof(tx->update_before),
-            (unsigned long)sizeof(tx->policy_before));
+            (unsigned long)sizeof(tx->app_policy_before),
+            (unsigned long)sizeof(tx->policy_before),
+            (unsigned long)sizeof(tx->stream_ref_before),
+            (unsigned long)sizeof(tx->output_pool_before),
+            STREAM_EVENT_PATCH_COUNT);
     return 1;
 }
 
 static int write_code_twice(pid_t pid, uintptr_t base, uintptr_t addr,
                             const unsigned char *wanted, size_t len,
                             const char *label) {
-    unsigned char verify[sizeof(UPDATE_FLAGS_STOCK)];
+    unsigned char verify[AUXILIARY_PATCH_MAX_BYTES];
     if (!wanted || !label || !len || len > sizeof(verify)) return 0;
     int first_write = mem_w(pid, addr, wanted, len) == 0 &&
                       mem_r(pid, addr, verify, len) == 0 &&
@@ -2579,7 +3410,7 @@ static int write_code_twice(pid_t pid, uintptr_t base, uintptr_t addr,
 static int restore_code_snapshot(pid_t pid, uintptr_t base, uintptr_t addr,
                                  const unsigned char *before, size_t len,
                                  const char *label) {
-    unsigned char verify[sizeof(UPDATE_FLAGS_STOCK)];
+    unsigned char verify[AUXILIARY_PATCH_MAX_BYTES];
     if (!before || !label || !len || len > sizeof(verify)) return 0;
     int write_ok = mem_w(pid, addr, before, len) == 0 &&
                    mem_r(pid, addr, verify, len) == 0 &&
@@ -2597,64 +3428,161 @@ static int restore_code_snapshot(pid_t pid, uintptr_t base, uintptr_t addr,
 static int auxiliary_transaction_restore(pid_t pid, uintptr_t base,
                                           const auxiliary_transaction_t *tx) {
     if (!tx || !tx->valid) return 0;
-    int update_ok = restore_code_snapshot(
-        pid, base, tx->update_addr, tx->update_before,
-        sizeof(tx->update_before), "updateA2HMode");
+    /* Disconnect the only external branch into the helper before restoring
+     * the helper bytes themselves. */
+    int output_pool_ok = restore_code_snapshot(
+        pid, base, tx->output_pool_addr, tx->output_pool_before,
+        sizeof(tx->output_pool_before), "output-pool-event-tail");
+    int stream_ok = 1;
+    for (size_t i = 0; i < STREAM_EVENT_PATCH_COUNT; ++i) {
+        char label[48];
+        snprintf(label, sizeof(label), "stream-app-event.%lu",
+                 (unsigned long)i);
+        int item_ok = restore_code_snapshot(
+            pid, base, tx->stream_event_addr[i],
+            tx->stream_event_before[i], STREAM_EVENT_PATCH_SIZES[i],
+            label);
+        stream_ok = item_ok && stream_ok;
+    }
+    int stream_ref_ok = restore_code_snapshot(
+        pid, base, tx->stream_ref_addr, tx->stream_ref_before,
+        sizeof(tx->stream_ref_before), "stream-handoff-helper");
     int policy_ok = restore_code_snapshot(
         pid, base, tx->policy_addr, tx->policy_before,
         sizeof(tx->policy_before), "isA2HAllowed");
-    return update_ok && policy_ok;
+    int app_policy_ok = restore_code_snapshot(
+        pid, base, tx->app_policy_addr, tx->app_policy_before,
+        sizeof(tx->app_policy_before), "updateA2HMode.app-policy");
+    int update_ok = restore_code_snapshot(
+        pid, base, tx->update_addr, tx->update_before,
+        sizeof(tx->update_before), "updateA2HMode");
+    return output_pool_ok && stream_ok && stream_ref_ok && policy_ok &&
+           app_policy_ok && update_ok;
 }
 
 static int auxiliary_cache_preflight(pid_t pid, uintptr_t base) {
     if (!g_auxiliary.valid) return 0;
     int update = remote_icache_flush(
         pid, base, base + g_auxiliary.update_off + UPDATE_FLAGS_PATCH_OFF,
-        sizeof(UPDATE_FLAGS_FAST));
+        UPDATE_APP_POLICY_PATCH_OFF + UPDATE_APP_POLICY_BYTES -
+        UPDATE_FLAGS_PATCH_OFF);
     int policy = remote_icache_flush(
         pid, base, base + g_auxiliary.policy_off + GAME_POLICY_PATCH_OFF,
         sizeof(GAME_POLICY_STOCK));
+    int stream_events = remote_icache_flush(
+        pid, base, base + g_auxiliary.stream_event_off +
+        STREAM_EVENT_PATCH_OFFSETS[0],
+        STREAM_EVENT_PATCH_OFFSETS[STREAM_EVENT_PATCH_COUNT - 1] +
+        STREAM_EVENT_PATCH_SIZES[STREAM_EVENT_PATCH_COUNT - 1] -
+        STREAM_EVENT_PATCH_OFFSETS[0]);
+    int output_pool = remote_icache_flush(
+        pid, base, base + g_auxiliary.output_pool_off +
+        OUTPUT_POOL_TAIL_PATCH_OFF, OUTPUT_POOL_TAIL_PATCH_BYTES);
     int ok = (update & ICACHE_REMOTE_IVAU) != 0 &&
-             (policy & ICACHE_REMOTE_IVAU) != 0;
+             (policy & ICACHE_REMOTE_IVAU) != 0 &&
+             (stream_events & ICACHE_REMOTE_IVAU) != 0 &&
+             (output_pool & ICACHE_REMOTE_IVAU) != 0;
     fprintf(stderr,
-            "[a2h_patch] auxiliary cache preflight update=%s policy=%s\n",
+            "[a2h_patch] auxiliary cache preflight update=%s policy=%s stream_events=%s output_pool=%s\n",
             (update & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL",
-            (policy & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL");
+            (policy & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL",
+            (stream_events & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL",
+            (output_pool & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL");
     return ok;
 }
 
 static int apply_auxiliary_targets(pid_t pid, uintptr_t base,
-                                   int want_policy_relaxed) {
+                                   int want_app_policy_relaxed) {
     if (!g_auxiliary.valid) return 0;
     uintptr_t update_addr = base + g_auxiliary.update_off +
                             UPDATE_FLAGS_PATCH_OFF;
+    uintptr_t app_policy_addr = base + g_auxiliary.update_off +
+                                UPDATE_APP_POLICY_PATCH_OFF;
     uintptr_t policy_addr = base + g_auxiliary.policy_off +
                             GAME_POLICY_PATCH_OFF;
-    unsigned char current[sizeof(UPDATE_FLAGS_STOCK)];
+    unsigned char current[AUXILIARY_PATCH_MAX_BYTES];
     int update_ready = mem_r(pid, update_addr, current,
-                             sizeof(UPDATE_FLAGS_FAST)) == 0 &&
-                       memcmp(current, UPDATE_FLAGS_FAST,
-                              sizeof(UPDATE_FLAGS_FAST)) == 0;
+                             sizeof(UPDATE_FLAGS_GAME)) == 0 &&
+                       memcmp(current, UPDATE_FLAGS_GAME,
+                              sizeof(UPDATE_FLAGS_GAME)) == 0;
     if (!update_ready) {
         update_ready = write_code_twice(pid, base, update_addr,
-                                        UPDATE_FLAGS_FAST,
-                                        sizeof(UPDATE_FLAGS_FAST),
-                                        "updateA2HMode.fast");
+                                        UPDATE_FLAGS_GAME,
+                                        sizeof(UPDATE_FLAGS_GAME),
+                                        "updateA2HMode.game-spatial");
     }
-    const unsigned char *policy = want_policy_relaxed ?
-                                  GAME_POLICY_RELAXED : GAME_POLICY_STOCK;
+    const unsigned char *app_policy = want_app_policy_relaxed ?
+        g_auxiliary.app_policy_relaxed : g_auxiliary.app_policy_stock;
+    int app_policy_ready = mem_r(pid, app_policy_addr, current,
+                                 UPDATE_APP_POLICY_BYTES) == 0 &&
+                           memcmp(current, app_policy,
+                                  UPDATE_APP_POLICY_BYTES) == 0;
+    if (update_ready && !app_policy_ready) {
+        app_policy_ready = write_code_twice(
+            pid, base, app_policy_addr, app_policy,
+            UPDATE_APP_POLICY_BYTES,
+            want_app_policy_relaxed ?
+                "updateA2HMode.app-policy.relaxed" :
+                "updateA2HMode.app-policy.stock");
+    }
+    const unsigned char *policy = GAME_POLICY_RELAXED;
     int policy_ready = mem_r(pid, policy_addr, current,
                              sizeof(GAME_POLICY_STOCK)) == 0 &&
                        memcmp(current, policy,
                               sizeof(GAME_POLICY_STOCK)) == 0;
-    if (update_ready && !policy_ready) {
+    if (update_ready && app_policy_ready && !policy_ready) {
         policy_ready = write_code_twice(
             pid, base, policy_addr, policy, sizeof(GAME_POLICY_STOCK),
-            want_policy_relaxed ? "isA2HAllowed.relaxed" :
-                                  "isA2HAllowed.stock");
+            "isA2HAllowed.multi-speaker");
     }
-    return update_ready && policy_ready &&
-           verify_auxiliary_targets(pid, base, want_policy_relaxed, 1);
+    uintptr_t stream_ref_addr = base + g_auxiliary.stream_event_off +
+                                STREAM_REF_PATCH_OFF;
+    int stream_ref_ready = update_ready && app_policy_ready && policy_ready &&
+        mem_r(pid, stream_ref_addr, current, STREAM_REF_PATCH_BYTES) == 0 &&
+        memcmp(current, g_auxiliary.stream_ref_patched,
+               STREAM_REF_PATCH_BYTES) == 0;
+    if (update_ready && app_policy_ready && policy_ready &&
+        !stream_ref_ready) {
+        stream_ref_ready = write_code_twice(
+            pid, base, stream_ref_addr, g_auxiliary.stream_ref_patched,
+            STREAM_REF_PATCH_BYTES, "stream-handoff-helper");
+    }
+    uintptr_t output_pool_addr = base + g_auxiliary.output_pool_off +
+                                 OUTPUT_POOL_TAIL_PATCH_OFF;
+    int output_pool_ready = stream_ref_ready &&
+        mem_r(pid, output_pool_addr, current,
+              OUTPUT_POOL_TAIL_PATCH_BYTES) == 0 &&
+        memcmp(current, g_auxiliary.output_pool_tail_patched,
+               OUTPUT_POOL_TAIL_PATCH_BYTES) == 0;
+    if (stream_ref_ready && !output_pool_ready) {
+        output_pool_ready = write_code_twice(
+            pid, base, output_pool_addr,
+            g_auxiliary.output_pool_tail_patched,
+            OUTPUT_POOL_TAIL_PATCH_BYTES, "output-pool-event-tail");
+    }
+    int stream_ready = update_ready && app_policy_ready && policy_ready &&
+                       stream_ref_ready && output_pool_ready;
+    for (size_t i = 0; stream_ready && i < STREAM_EVENT_PATCH_COUNT; ++i) {
+        uintptr_t address = base + g_auxiliary.stream_event_off +
+                            STREAM_EVENT_PATCH_OFFSETS[i];
+        size_t event_size = STREAM_EVENT_PATCH_SIZES[i];
+        int item_ready = mem_r(pid, address, current, event_size) == 0 &&
+                         memcmp(current, STREAM_EVENT_RECOMPUTE[i],
+                                event_size) == 0;
+        if (!item_ready) {
+            char label[48];
+            snprintf(label, sizeof(label), "stream-app-event.%lu",
+                     (unsigned long)i);
+            item_ready = write_code_twice(
+                pid, base, address, STREAM_EVENT_RECOMPUTE[i],
+                event_size, label);
+        }
+        stream_ready = item_ready;
+    }
+    return update_ready && app_policy_ready && policy_ready &&
+           stream_ref_ready && output_pool_ready && stream_ready &&
+           verify_auxiliary_targets(pid, base,
+                                    want_app_policy_relaxed, 1);
 }
 
 // Prefer a unique stock prologue. Patched candidates must also be unambiguous

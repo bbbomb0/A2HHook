@@ -31,6 +31,20 @@ OFFICIAL = (
 EXPECTED_RELEASE = ("v1.5.6", "1560")
 
 HAL_CASES = {
+    "OS2.0.208.0.VONCNXM": {
+        "relative": "devices/25060RK16C__dali/OS2.0.208.0.VONCNXM/originals/hal/audio.primary.mediatek(os2.0.208).so",
+        "sha256": "ebd8b02f5508efc1ce253c5a809300489d93f367b8ef266e6a630d1a42e69733",
+        "size": 4437728,
+        "build_id": "349d72e91436b550d5a1e3da2a1cc02b",
+        "symbol": 0x3E3B90,
+        "symbol_size": 160,
+        "update": 0x3974A0,
+        "stream": 0x361870,
+        "policy": 0x396C60,
+        "output_pool": 0x3A45C0,
+        "app_call": 0x41ED60,
+        "delete_call": 0x415BB0,
+    },
     "OS2.0.218.0.VONCNXM": {
         "relative": "devices/25060RK16C__dali/OS2.0.218.0.VONCNXM/originals/hal/audio.primary.mediatek(os2.0.218).so",
         "sha256": "ba543c1fd331d20ca149ae38c80600acc331d7a3d09bad6582ca485163cf9d13",
@@ -38,6 +52,12 @@ HAL_CASES = {
         "build_id": "b83078b3502a148fb846652aa3bf1f7d",
         "symbol": 0x3E4280,
         "symbol_size": 160,
+        "update": 0x397B20,
+        "stream": 0x361F00,
+        "policy": 0x3972E0,
+        "output_pool": 0x3A4C70,
+        "app_call": 0x41F460,
+        "delete_call": 0x4162A0,
     },
     "OS3.0.302.0.WONCNXM": {
         "relative": "devices/25060RK16C__dali/OS3.0.302.0.WONCNXM/originals/hal/audio.primary.mediatek.so",
@@ -46,6 +66,12 @@ HAL_CASES = {
         "build_id": "fb4737aed1aed36ca755604fad655461",
         "symbol": 0x3E3FC0,
         "symbol_size": 160,
+        "update": 0x397800,
+        "stream": 0x361B20,
+        "policy": 0x396FC0,
+        "output_pool": 0x3A4950,
+        "app_call": 0x41F1B0,
+        "delete_call": 0x415FE0,
     },
     "OS3.0.305.0.WONCNXM": {
         "relative": "devices/25060RK16C__dali/OS3.0.305.0.WONCNXM/originals/hal/audio.primary.mediatek.so",
@@ -54,8 +80,70 @@ HAL_CASES = {
         "build_id": "ad3569054ba54d7178354e85fbad3ce6",
         "symbol": 0x3E4020,
         "symbol_size": 160,
+        "update": 0x397860,
+        "stream": 0x361B80,
+        "policy": 0x397020,
+        "output_pool": 0x3A49B0,
+        "app_call": 0x41F210,
+        "delete_call": 0x416040,
     },
 }
+
+UPDATE_FLAGS_STOCK = bytes.fromhex(
+    "c8011837680e41f9006977f8080040f9088940f900013fd6"
+    "08304039e8002037"
+)
+UPDATE_APP_STOCK_TEMPLATE = bytes.fromhex(
+    "689e42f91f0500f181010054689a42f9094140390a1140f9"
+    "084500913f01007200018a9a0000000017000052c8024039"
+    "a800083714000014"
+)
+UPDATE_APP_DISK_TEMPLATE = bytes.fromhex(
+    "689e42f91f0500f181010054689a42f9094140390a1140f9"
+    "084500913f01007200018a9a0000000017000052c8024039"
+    "a80008371400001437008052c802403928020836a3e8ffd0"
+)
+STREAM_EVENT_STOCK = {
+    0x1F94: bytes.fromhex("08d40f3640070091"),
+    0x22B4: bytes.fromhex("d8fdff17"),
+}
+STREAM_REF_PATCH_OFF = 0x2030
+STREAM_REF_PATCH_BYTES = 148
+STREAM_REF_DELETE_BL_OFF = 0x10
+STREAM_UPDATE_CALL_TEMPLATE = bytes.fromhex(
+    "600a40f90000000085fdff17"
+)
+STREAM_APP_MAP_MANAGER_ADD = bytes.fromhex("00831491")
+OUTPUT_POOL_MANAGER_ARG_MOV = bytes.fromhex("f60300aa")
+STREAM_REF_STOCK_TEMPLATE = bytes.fromhex(
+    "e8034939152840b968000036e02b41f920c9029415040034"
+    "480600b008c546f90801403908ce0f36f5cb40f9760a40f9"
+    "e003099141070091f70309917d1efc97f73700f9420600b0"
+    "428046f9c0821491e1030991e3a30191e4ff0891d5eb0294"
+    "072840b9c3ecfff0639c259141edff9021c0339122ecfff0"
+    "42ac0b916000805204cf8052e50303aae60315aa25c90294"
+    "79000014"
+)
+STREAM_REF_VARIABLE_WORD_MASKS = {
+    0x10: 0xFC000000,
+    0x18: 0x9F00001F,
+    0x3C: 0xFC000000,
+    0x44: 0x9F00001F,
+    0x5C: 0xFC000000,
+    0x68: 0xFFC003FF,
+    0x70: 0xFFC003FF,
+    0x74: 0x9F00001F,
+    0x78: 0xFFC003FF,
+    0x8C: 0xFC000000,
+}
+GAME_POLICY_STOCK = bytes.fromhex(
+    "1f011a6a291540f94a791f53ab835ff840059f1a"
+)
+OUTPUT_POOL_TAIL_STOCK = bytes.fromhex("281740f9")
+OUTPUT_POOL_TAIL_STOCK_TEMPLATE = bytes.fromhex(
+    "281740f9a9835ff81f0109eb010f0054f44f5ba9f6575aa9"
+    "f85f59a9fa6758a9fc6f57a9fd7b56a9ff030791c0035fd6"
+)
 
 TEXT_RELEASE_FILES = (
     "LICENSE",
@@ -74,6 +162,49 @@ TEXT_RELEASE_FILES = (
     "companion/app/src/main/AndroidManifest.xml",
     "webroot/index.html",
 )
+
+
+def decode_aarch64_bl(site: int, instruction: int) -> int | None:
+    if instruction & 0xFC000000 != 0x94000000:
+        return None
+    immediate = instruction & 0x03FFFFFF
+    if immediate & 0x02000000:
+        immediate -= 0x04000000
+    return site + immediate * 4
+
+
+def stream_ref_stock_shape(data: bytes) -> bool:
+    if len(data) != STREAM_REF_PATCH_BYTES:
+        return False
+    for offset in range(0, STREAM_REF_PATCH_BYTES, 4):
+        current = struct.unpack_from("<I", data, offset)[0]
+        expected = struct.unpack_from("<I", STREAM_REF_STOCK_TEMPLATE,
+                                      offset)[0]
+        mask = STREAM_REF_VARIABLE_WORD_MASKS.get(offset, 0xFFFFFFFF)
+        if current & mask != expected & mask:
+            return False
+    return True
+
+
+def exact_plt_entry(data: bytes, program_headers: list[dict],
+                    target: int) -> bool:
+    file_offset = None
+    for segment in program_headers:
+        start = int(segment["vaddr"])
+        end = start + int(segment["filesz"])
+        if segment["type"] == 1 and start <= target <= end - 16:
+            file_offset = int(segment["offset"]) + target - start
+            break
+    if file_offset is None:
+        return False
+    adrp, ldr, add, branch = struct.unpack_from("<IIII", data, file_offset)
+    return (
+        adrp & 0x9F00001F == 0x90000010
+        and ldr & 0xFFC003FF == 0xF9400211
+        and add & 0xFFC003FF == 0x91000210
+        and branch == 0xD61F0220
+        and ((ldr >> 10) & 0xFFF) << 3 == (add >> 10) & 0xFFF
+    )
 
 
 @dataclass
@@ -352,7 +483,7 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     )
     watcher_contract = (
         "watch_tick_seconds=2" in watcher
-        and "watch_stable_ticks=2" in watcher
+        and "watch_stable_ticks=3" in watcher
         and "watch_health_ticks=15" in watcher
         and "applier_busy" in watcher
         and "snapshot-state" in watcher
@@ -468,6 +599,14 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     manifest_area = extract_function(packager, "FILES = (", "EXECUTABLE =")
     leaked = [item for item in forbidden if item in manifest_area]
     report.check(not leaked, "release manifest isolation", "tests and legacy injection excluded", f"forbidden manifest entries: {leaked}")
+    report.check(
+        "ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)" in packager
+        and "ZipInfo(filename=relative, date_time=ZIP_TIMESTAMP)" in packager
+        and "ZipInfo.from_file" not in packager,
+        "reproducible release timestamp contract",
+        "all ZIP members use a fixed DOS timestamp instead of source mtimes",
+        "release ZIP still inherits source mtimes or lacks a fixed timestamp",
+    )
 
     build_script = (root / "build.sh").read_text(encoding="utf-8")
     clean_block = extract_function(build_script, "        clean)", "        zip)")
@@ -1752,6 +1891,20 @@ def check_hal_fixtures(root: Path, report: Report, archive: Path) -> None:
             report.add("FAIL", f"HAL fixture {system}", str(exc))
             continue
         symbol = actual["a2h"]["is_A2H_app_symbol"] or {}
+        lifecycle = actual["a2h"].get("lifecycle_symbols", {})
+        lifecycle_expected = {
+            "updateA2HMode": (int(expected["update"]), 568),
+            "stream_setParameters": (int(expected["stream"]), 12040),
+            "isA2HAllowed": (int(expected["policy"]), 700),
+            "updateOutputPoolActive": (int(expected["output_pool"]), 1128),
+        }
+        lifecycle_matched = all(
+            key in lifecycle
+            and int(lifecycle[key].get("value", "0"), 0) == value
+            and lifecycle[key].get("size") == size
+            and lifecycle[key].get("file_offset") is not None
+            for key, (value, size) in lifecycle_expected.items()
+        )
         matched = (
             actual["file"]["sha256"] == expected["sha256"]
             and actual["file"]["size"] == expected["size"]
@@ -1759,12 +1912,148 @@ def check_hal_fixtures(root: Path, report: Report, archive: Path) -> None:
             and int(symbol.get("value", "0"), 0) == expected["symbol"]
             and symbol.get("size") == expected["symbol_size"]
             and symbol.get("state") == "stock"
+            and lifecycle_matched
         )
         report.check(
             matched,
             f"HAL fixture {system}",
-            f"sha/build-id/symbol=0x{expected['symbol']:x}/160 verified",
-            json.dumps({"file": actual["file"], "build_id": actual["elf"]["gnu_build_id"], "symbol": symbol}, ensure_ascii=False),
+            f"sha/build-id/is_A2H_app=0x{expected['symbol']:x}/160 and lifecycle symbols verified",
+            json.dumps({"file": actual["file"], "build_id": actual["elf"]["gnu_build_id"], "symbol": symbol, "lifecycle": lifecycle}, ensure_ascii=False),
+        )
+        if not lifecycle_matched:
+            continue
+
+        data = path.read_bytes()
+        update_file = int(lifecycle["updateA2HMode"]["file_offset"], 0)
+        stream_file = int(lifecycle["stream_setParameters"]["file_offset"], 0)
+        policy_file = int(lifecycle["isA2HAllowed"]["file_offset"], 0)
+        app_disk = data[update_file + 0x130 : update_file + 0x178]
+        stock_shape = (
+            len(app_disk) == 72
+            and app_disk[:0x24] == UPDATE_APP_DISK_TEMPLATE[:0x24]
+            and app_disk[0x28:] == UPDATE_APP_DISK_TEMPLATE[0x28:]
+        )
+        stock_call = struct.unpack_from("<I", app_disk, 0x24)[0] if stock_shape else 0
+        stock_site = int(expected["update"]) + 0x154
+        immediate = stock_call & 0x03FFFFFF
+        if immediate & 0x02000000:
+            immediate -= 0x04000000
+        call_target = stock_site + immediate * 4
+        call_ok = (
+            (stock_call & 0xFC000000) == 0x94000000
+            and call_target == int(expected["app_call"])
+        )
+
+        plt_ok = exact_plt_entry(
+            data, actual["elf"]["program_headers"], call_target
+        )
+        stream_ref = data[
+            stream_file + STREAM_REF_PATCH_OFF :
+            stream_file + STREAM_REF_PATCH_OFF + STREAM_REF_PATCH_BYTES
+        ]
+        stream_ref_shape = stream_ref_stock_shape(stream_ref)
+        delete_instruction = (
+            struct.unpack_from("<I", stream_ref,
+                               STREAM_REF_DELETE_BL_OFF)[0]
+            if stream_ref_shape else 0
+        )
+        delete_target = decode_aarch64_bl(
+            int(expected["stream"]) + STREAM_REF_PATCH_OFF +
+            STREAM_REF_DELETE_BL_OFF,
+            delete_instruction,
+        )
+        delete_ok = (
+            delete_target == int(expected["delete_call"])
+            and delete_target is not None
+            and exact_plt_entry(
+                data, actual["elf"]["program_headers"], delete_target
+            )
+        )
+
+        allowed_instruction = struct.unpack_from(
+            "<I", data, update_file + 0x1D4
+        )[0]
+        allowed_target = decode_aarch64_bl(
+            int(expected["update"]) + 0x1D4, allowed_instruction
+        )
+        allowed_ok = (
+            allowed_target is not None
+            and exact_plt_entry(
+                data, actual["elf"]["program_headers"], allowed_target
+            )
+        )
+        stream_update_instruction = struct.unpack_from(
+            "<I", data, stream_file + 0x23FC
+        )[0]
+        stream_update_target = decode_aarch64_bl(
+            int(expected["stream"]) + 0x23FC, stream_update_instruction
+        )
+        stream_update_ok = (
+            stream_update_target is not None
+            and exact_plt_entry(
+                data, actual["elf"]["program_headers"], stream_update_target
+            )
+        )
+        stream_update_context = data[
+            stream_file + 0x23F8 : stream_file + 0x2404
+        ]
+        stream_update_shape = (
+            len(stream_update_context) == len(STREAM_UPDATE_CALL_TEMPLATE)
+            and stream_update_context[:4] == STREAM_UPDATE_CALL_TEMPLATE[:4]
+            and stream_update_context[8:] == STREAM_UPDATE_CALL_TEMPLATE[8:]
+        )
+        output_file = int(lifecycle["updateOutputPoolActive"]["file_offset"], 0)
+        output_tail = data[
+            output_file + 0x278 : output_file + 0x278 +
+            len(OUTPUT_POOL_TAIL_STOCK_TEMPLATE)
+        ]
+        output_ok = (
+            len(output_tail) == len(OUTPUT_POOL_TAIL_STOCK_TEMPLATE)
+            and output_tail == OUTPUT_POOL_TAIL_STOCK_TEMPLATE
+        )
+        manager_registers_ok = (
+            data[stream_file + 0x1F58 : stream_file + 0x1F5C]
+            == STREAM_APP_MAP_MANAGER_ADD
+            and data[output_file + 0x38 : output_file + 0x3C]
+            == OUTPUT_POOL_MANAGER_ARG_MOV
+        )
+
+        def padding_refs(blob: bytes) -> list[tuple[int, int]]:
+            refs: list[tuple[int, int]] = []
+            for segment in actual["elf"]["program_headers"]:
+                if int(segment["type"]) != 1 or not (int(segment["flags"]) & 1):
+                    continue
+                start = int(segment["offset"])
+                end = min(start + int(segment["filesz"]), len(blob))
+                for file_offset in range(start, end - 3, 4):
+                    instruction = struct.unpack_from("<I", blob, file_offset)[0]
+                    if instruction & 0x3B000000 == 0x39000000:
+                        scale = (instruction >> 30) & 0x3
+                        displacement = ((instruction >> 10) & 0xFFF) << scale
+                        if 0x519 <= displacement <= 0x51F:
+                            refs.append((file_offset, displacement))
+            return refs
+
+        padding_hits = padding_refs(data)
+
+        regions_ok = (
+            data[update_file + 8 : update_file + 12] == bytes.fromhex("f71300f9")
+            and data[update_file + 0xDC : update_file + 0xFC] == UPDATE_FLAGS_STOCK
+            and stock_shape and call_ok and plt_ok and allowed_ok
+            and stream_update_ok and stream_update_shape
+            and output_ok and manager_registers_ok and not padding_hits
+            and all(
+                data[stream_file + offset : stream_file + offset + len(wanted)] == wanted
+                for offset, wanted in STREAM_EVENT_STOCK.items()
+            )
+            and stream_ref_shape and delete_ok
+            and data[policy_file + 0x1DC : policy_file + 0x1F0] == GAME_POLICY_STOCK
+        )
+        report.check(
+            regions_ok,
+            f"HAL lifecycle regions {system}",
+            f"handoff/committed-app clear/output-pool/2 events and BL targets 0x{call_target:x}/{delete_target!r} verified",
+            f"stock_shape={stock_shape} call_ok={call_ok} plt_ok={plt_ok} allowed_ok={allowed_ok} stream_update_ok={stream_update_ok} stream_update_shape={stream_update_shape} output_ok={output_ok} manager_registers_ok={manager_registers_ok} padding_hits={padding_hits}",
         )
 
     source = (root / "src/patcher_v3.c").read_text(encoding="utf-8")
@@ -1775,6 +2064,33 @@ def check_hal_fixtures(root: Path, report: Report, archive: Path) -> None:
         if f"0X{int(item['symbol']):X}" not in source_upper
     ]
     report.check(not missing_offsets, "profile fixture offsets", "all archived offsets appear in patcher profiles", f"missing offsets for {missing_offsets}")
+    lifecycle_contracts = (
+        "#define UPDATE_APP_POLICY_BYTES 72u" in source
+        and "build_update_app_policy_overlay" in source
+        and "exact_aarch64_plt_entry" in source
+        and "g_auxiliary.app_policy_stock" in source
+        and "g_auxiliary.app_policy_relaxed" in source
+        and "#define STREAM_REF_PATCH_BYTES 148u" in source
+        and "build_stream_ref_overlay" in source
+        and "g_auxiliary.stream_ref_patched" in source
+        and "HANDOFF_FLAG_OFF 0x519u" in source
+        and "OUTPUT_POOL_TAIL_PATCH_OFF 0x278u" in source
+        and "STREAM_APP_MAP_MANAGER_OFF 0x1F58u" in source
+        and "OUTPUT_POOL_MANAGER_ARG_OFF 0x38u" in source
+        and "STREAM_UPDATE_CALL_BYTES 12u" in source
+        and "g_auxiliary.output_pool_tail_patched" in source
+        and "output_pool_tail_patched" in source
+        and "STREAM_EVENT_PATCH_COUNT 2u" in source
+        and "STREAM_EVENT_PATCH_MAX_BYTES 8u" in source
+        and "STREAM_EVENT_PATCH_SIZES" in source
+        and "#define ELF_SYMBOL_MAX_BYTES 16384u" in source
+    )
+    report.check(
+        lifecycle_contracts,
+        "cross-ROM game lifecycle ownership",
+        "72-byte handoff policy plus 148-byte helper/output overlay and committed-app clear event present",
+        "required lifecycle ownership markers are missing",
+    )
 
 
 def main() -> int:
