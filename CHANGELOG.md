@@ -2,18 +2,22 @@
 
 ## v1.5.6
 
-- 修复部分游戏使用 `FAST` / `FAST|RAW` 低延迟输出时，即使包名已在全局或白名单范围内仍无法进入音乐触感链路的问题；继续排除 MMAP、VOIP 和通话输出。
-- WebUI 新增“游戏时暂停”开关，默认开启并保持小米官方多活动流暂停策略；关闭后，只放宽“必须恰好一个活动输出”的限制，仍要求所有活动输出走扬声器，并保留通话模式、外接路由、振动流和 HAL 总开关保护。
-- `is_A2H_app`、`updateA2HMode()` 与 `isA2HAllowed()` 组成统一严格事务：唯一 ELF 符号、函数大小、RX 范围和完整函数所有权验证通过后才写入；两次写入、两次 EL0 I-cache 同步、最终复核及跨函数失败回滚保持一致。
-- 新增标准 Android `TileService` 伴生 APK。控制中心磁贴点击复用 `a2h_apply toggle` 切换全局/白名单，长按打开 APK内置的同版 WebUI；不使用无障碍、前台服务、网络权限、轮询或 KernelSU 私有 WebUI token，兼容正常提供 `su -c` 的 KernelSU/ReKernelSU/ReSukiSU 环境。
-- 伴生 WebView 仅加载固定 APK本地资源，禁用网络、明文、file/content 访问与 WebView 调试；正式 APK使用稳定作者证书和 APK Signature Scheme v3，安装失败不会阻断核心模块。
-- 修复伴生 WebUI 请求拦截器误拦截自身根页面导致长按磁贴进入空白页的问题；页面加载失败时使用不透明明暗背景，磁贴 Root 失败日志补充可诊断原因。首次使用磁贴仍需由用户在 KernelSU/ReSukiSU 中手动授权伴生应用 Root。
-- 伴生 APK 的 WebUI 按系统 `statusBars` WindowInsets 动态增加顶部安全间距，避免 Android 15/16 强制 edge-to-edge 后标题、图标与状态栏或挖孔区域重叠；不使用固定像素，旋转与不同状态栏高度会自动重算。
-- 修复 30 秒轻量健康探测调用 `snapshot-state` 时无条件 `touch` 两份现有日志、导致内容未变化但文件 mtime 周期刷新的问题；日志现在仅在不存在时创建，稳态探测不再产生日志元数据写入。
-- `state` 与 `game_auto_pause` 的 WebUI/队列提交改为先完整校验、同锁快照和失败回滚，避免第二个配置文件写入失败时只保存一半状态。
-- 安装脚本自动安装伴生 APK，卸载模块时只卸载固定包名 `io.github.bbbomb0.a2hhook`；模块打包器和独立校验器加入 APK、策略配置、卸载脚本、GPL 正文、资产一致性与签名块检查。
-- 项目原创代码从本版本起迁移为 `GPL-3.0-or-later`。衍生分发必须继续开源并提供对应源码；贡献进入官方仓库须经维护者书面批准。历史 MIT tag 与附件保持不变，既有 MIT 权利不追溯撤销。
-- 版本迭代为 `v1.5.6` / `versionCode=1560`；OS3.0.302 作为当前实机回归目标，其他已归档 OS2/OS3 HAL 保持静态严格核验，不把静态结果描述为实机通杀。
+- 重做游戏输出识别：从低字节判断改为读取完整 32 位 output flags，同时覆盖 `FAST`、`FAST|RAW` 与 `AUDIO_OUTPUT_FLAG_SPATIALIZER`；继续排除 MMAP、VOIP、通话和非扬声器安全边界。
+- 修复游戏开场后切换正式音频流时音乐触感消失的问题。根因是新流先加入但同包名引用未增加，旧流随后退出会在新流仍播放时删除唯一应用节点；若把节点留在官方表中，又会污染下一款游戏的开场判断。本版改为在严格的同包名交接条件下写入 manager padding 的短生命周期 `handoff` 标志，官方应用表仍按原厂路径 erase；输出池变化只触发重算，新的 `+appname` 已正式提交后才清除 handoff，避免在包名登记前产生开场空窗。
+- 新增 `setParameters()+0x2030` 的 148 字节 handoff/helper 区域，并将 `updateOutputPoolActive()+0x278` 的原厂尾跳入 helper。helper 保留原栈保护、寄存器恢复和 `updateA2HMode()` 尾调用；同包名流交接期间由事件驱动重算承接临时状态，不增加定时线程或周期 ptrace。
+- 修复后台音乐与游戏并存时策略要等媒体卡片重播才更新的问题。“游戏时暂停”开启时保留 ROM 原厂行为，并在第二个应用加入的同一事件立即暂停；关闭时遍历完整活跃应用链表，任一应用命中当前全局/10 槽规则即可继续 A2H。
+- 多应用循环使用 AArch64 被调用者保存寄存器 `x23` 持有链表节点；运行时从各 ROM 原厂 `BL is_A2H_app` 解码 PLT目标并为新调用点生成对应 `BL`，不写死 OS2/OS3 位移。
+- 将 32 位输出 flags、72 字节 stock/relaxed handoff 应用策略、148 字节 handoff/helper、`updateOutputPoolActive` 尾分支、两个 appname 事件点、输出策略与 `is_A2H_app` 主补丁纳入同一协调事务。每个区域都执行磁盘/内存完整所有权、双写、两次 EL0 I-cache 同步、最终验证和失败时全量回滚；旧公开 v1.5.6 与第一代实验 handoff 都只能按各自完整 legacy 形态迁移。
+- 四份已归档 HAL（OS2.0.208、OS2.0.218、OS3.0.302、OS3.0.305）均通过唯一 ELF 符号、精确函数大小、RX 映射、ROM 专属 BL/PLT 和目标区域逐字节静态验证；仅 OS3.0.302 已完成本版实机回归。
+- 同一应用的多条扬声器输出在两种策略下都允许 A2H；WebUI 的“游戏时暂停”只控制不同应用并存策略并继续默认开启。关闭后任一活跃应用命中白名单即可继续，通话模式、非扬声器路由、振动流占用和 HAL 总开关保护不变。
+- 新增标准 Android `TileService` 伴生 APK：控制中心磁贴点击复用 `a2h_apply toggle` 切换全局/白名单，长按打开 APK内置同版 WebUI；不申请无障碍、前台服务或网络权限，不依赖 KernelSU 私有 WebUI token。
+- 修复伴生 WebUI 空白页与 Android 15/16 状态栏遮挡：WebView 只加载固定本地资源，并按系统 WindowInsets 动态留出状态栏/挖孔安全区。
+- 修复 30 秒轻量健康检查无条件刷新日志 mtime；稳定 PID/配置下只读取元数据，不执行 native check/ptrace，也不写日志。`state` 与 `game_auto_pause` 继续使用同锁快照和失败回滚。
+- 文件管理器热更新要求三次 2 秒采样保持不变，避免高负载下把多阶段保存的中间表单独应用；WebUI与磁贴继续使用即时队列，不增加交互等待。
+- 模块打包器固定所有 ZIP 成员时间戳，独立校验器与静态回归同步拒绝继承源文件 mtime 的包；同一输入和工具链可重复生成相同发布 ZIP。
+- OS3.0.302 已完成全局/白名单、原厂/放宽策略、FAST/空间音频迁移、两轮 HAL 重启和 slot 8 原子/多阶段热更新；最终 committed-app handoff 在 live HAL 上完成旧形态迁移与完整校验，HAL PID 未重启且 `TracerPid=0`，用户实机确认王者开场与后续正式页面音乐触感均正常。严格回归为 `62 PASS / 0 FAIL / 0 GAP`。
+- 项目原创代码从本版本起按 `GPL-3.0-or-later` 分发，衍生分发必须继续开源并提供对应源码；贡献进入官方仓库须经维护者书面批准。`v1.5.5-fix3` 及更早 MIT历史对象不追溯改写，当前同名 v1.5.6 公开内容以本修复构建为准。
+- 版本保持 `v1.5.6` / `versionCode=1560`；GitHub上的旧 v1.5.6 源码说明、tag目标、Release正文与 ZIP由本修复构建整体替换，不保留旧的同版本公开内容。
 
 ## v1.5.5-fix3
 

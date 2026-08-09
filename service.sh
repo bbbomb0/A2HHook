@@ -400,7 +400,10 @@ pending_raw_signature=
 pending_stable_ticks=0
 pending_busy_logged=0
 watch_tick_seconds=2
-watch_stable_ticks=2
+# External file managers can expose a multi-stage save for longer than one
+# two-second sample under load. Require two full unchanged intervals after the
+# first observation; WebUI and tile writes still use the immediate queue path.
+watch_stable_ticks=3
 watch_health_ticks=15
 config_poll_grace_ticks=0
 next_health_cycle=$watch_health_ticks

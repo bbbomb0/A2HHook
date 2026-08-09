@@ -58,6 +58,8 @@ TEXT_FILES = {
     "webroot/index.html",
 }
 
+ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
+
 
 def read_version(root: Path) -> str:
     module_prop = (root / "module.prop").read_text(encoding="utf-8")
@@ -129,7 +131,7 @@ def package(root: Path) -> Path:
                     if b"\r" in data:
                         raise ValueError(f"CRLF/CR is forbidden: {relative}")
 
-                info = zipfile.ZipInfo.from_file(source, relative)
+                info = zipfile.ZipInfo(filename=relative, date_time=ZIP_TIMESTAMP)
                 info.create_system = 3
                 info.compress_type = zipfile.ZIP_DEFLATED
                 mode = 0o100755 if relative in EXECUTABLE else 0o100644

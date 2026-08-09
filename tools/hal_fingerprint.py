@@ -55,6 +55,14 @@ OFFICIAL_PACKAGES = (
     "com.luna.music",
 )
 
+LIFECYCLE_SYMBOLS = {
+    "is_A2H_app": "is_A2H_app",
+    "updateA2HMode": "_ZN7android22AudioALSAStreamManager13updateA2HModeEv",
+    "stream_setParameters": "_ZN7android18AudioALSAStreamOut13setParametersERKNS_7String8E",
+    "isA2HAllowed": "_ZN7android22AudioALSAStreamManager12isA2HAllowedEv",
+    "updateOutputPoolActive": "_ZN7android22AudioALSAStreamManager22updateOutputPoolActiveE20audio_output_flags_tb",
+}
+
 
 def align_up(value: int, alignment: int) -> int:
     return (value + alignment - 1) & ~(alignment - 1)
@@ -239,8 +247,8 @@ def parse_elf(path: Path) -> dict[str, Any]:
                 }
             )
 
-    symbol_value: int | None = None
-    symbol_size: int | None = None
+    wanted_symbols = {name: key for key, name in LIFECYCLE_SYMBOLS.items()}
+    symbol_values: dict[str, tuple[int, int]] = {}
     for section in sections:
         if section["type"] not in (SHT_SYMTAB, SHT_DYNSYM):
             continue
@@ -259,11 +267,10 @@ def parse_elf(path: Path) -> dict[str, Any]:
         end = min(start + int(section["size"]), len(data))
         for offset in range(start, end - SYMBOL.size + 1, entry_size):
             symbol = SYMBOL.unpack_from(data, offset)
-            if c_string(strings, symbol[0]) == "is_A2H_app":
-                symbol_value = symbol[4]
-                symbol_size = symbol[5]
-                break
-        if symbol_value is not None:
+            key = wanted_symbols.get(c_string(strings, symbol[0]))
+            if key is not None and key not in symbol_values:
+                symbol_values[key] = (symbol[4], symbol[5])
+        if len(symbol_values) == len(LIFECYCLE_SYMBOLS):
             break
 
     writable_loads = [item for item in loads if item["flags"] & PF_W and item["memsz"]]
@@ -302,6 +309,7 @@ def parse_elf(path: Path) -> dict[str, Any]:
     signatures = scan_executable_signatures(data, loads)
 
     symbol: dict[str, Any] | None = None
+    symbol_value, symbol_size = symbol_values.get("is_A2H_app", (None, None))
     if symbol_value is not None:
         file_offset = vaddr_to_offset(loads, symbol_value)
         head = ""
@@ -324,6 +332,19 @@ def parse_elf(path: Path) -> dict[str, Any]:
             "state": state,
         }
 
+    lifecycle_symbols: dict[str, Any] = {}
+    for key, (value, size) in symbol_values.items():
+        file_offset = vaddr_to_offset(loads, value)
+        lifecycle_symbols[key] = {
+            "value": f"0x{value:x}",
+            "size": size,
+            "file_offset": f"0x{file_offset:x}" if file_offset is not None else None,
+            "head_32_bytes_hex": (
+                data[file_offset : file_offset + 32].hex()
+                if file_offset is not None else ""
+            ),
+        }
+
     return {
         "schema_version": 1,
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -343,6 +364,7 @@ def parse_elf(path: Path) -> dict[str, Any]:
         },
         "a2h": {
             "is_A2H_app_symbol": symbol,
+            "lifecycle_symbols": lifecycle_symbols,
             "executable_signature_hits": signatures,
             "official_package_string_offsets": package_offsets,
         },
