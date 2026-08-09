@@ -15,9 +15,18 @@ archived HAL fingerprints, the 76-byte whitelist/global capacity guard,
 profile/ELF resolver ordering, the outer whitelist transaction, the test-only
 cache-fault seam, strict stale-stub ownership, 32-bit game/spatial flags,
 72-byte stock/relaxed handoff policy, 148-byte stream handoff/helper plus
-output-pool tail branch, committed-`+appname` handoff clearing, ROM-specific
-BL/PLT generation and two event-driven appname overlays across the four
-archived HALs. With `--adb`, it
+the dynamic RX-tail 208-byte open-plus-pending/committed real-stream concurrent helper,
+exact previous-176/160 and 64/56-byte helper migration, output-pool tail branch,
+committed-`+appname` handoff clearing, ROM-specific BL/PLT generation, three
+event-driven appname/recompute overlays, and unique semantic layout derivation
+across the four archived HALs. It also executes the production policy-refresh
+transaction and requires first/same-policy applications to skip the silent
+trigger, both policy directions to trigger exactly once, and trigger failure to
+leave applied metadata uncommitted. Companion checks cover both protected
+`TileService` declarations, the independent game-policy toggle, immediate
+visual feedback contract, and clean APK install/uninstall lifecycle. The native
+harness also covers controlled
+`+0x40` layout drift and duplicate-anchor rejection. With `--adb`, it
 also runs the PID/starttime lock harness against Android `/proc`, including PID
 reuse, legacy PID-only owners, strict release ownership, and an interrupted
 lock-creation state.
@@ -37,8 +46,9 @@ suffix/marker evidence, recovers an owned safe-tail cave without external hint
 files, and executes a small instruction model against all ten matcher slots.
 The model covers slots 7 and 10, disabled/null entries, exact string boundaries,
 four ROM-specific app-policy/handoff BL generations, eleven handoff and
-map-precedence boundary cases, legacy public-v1.5.6 and first-generation
-handoff migration, plus stock/relaxed application policy transitions. It also
+map-precedence boundary cases, exact previous-176/160/64/56-byte helper ownership,
+legacy public-v1.5.6 and first-generation handoff migration, plus stock/relaxed
+application policy transitions. It also
 proves the outer function, cave and all
 auxiliary regions restore their original bytes on any failure. It
 does not attach to or modify the phone audio process.
@@ -46,8 +56,8 @@ does not attach to or modify the phone audio process.
 ## ZIP verification
 
 ```powershell
-python tests/verify_module_zip.py .\a2h_hook_v1.5.6.zip `
-  --expected-version v1.5.6 --expected-code 1560
+python tests/verify_module_zip.py .\a2h_hook_v1.5.6-fix.zip `
+  --expected-version v1.5.6-fix --expected-code 1561
 ```
 
 This independently checks the exact member list, duplicates, path portability,
@@ -61,7 +71,7 @@ Preflight only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.6
+  -ExpectedVersion v1.5.6-fix
 ```
 
 Full two-round test after the candidate module is installed and the phone has
@@ -69,7 +79,7 @@ rebooted:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.6 -Execute -AllowAudioRestart
+  -ExpectedVersion v1.5.6-fix -Execute -AllowAudioRestart
 ```
 
 The device case waits for the apply queue to become idle, backs up persistent
@@ -79,7 +89,8 @@ per-slot off/on, package-table preservation, two audio-HAL PID restarts,
 watcher re-application with one final native check per restart, and atomic plus
 multi-stage slot-8 file-manager edits. The multi-stage case requires the
 intermediate table to remain below the three-sample quiet window and produce no
-separate revision. The fast suite also runs 40 production
+separate revision. Restore removes the derived applied-policy marker and requires
+the production applier to regenerate it with the restored configuration. The fast suite also runs 40 production
 watcher cycles and rejects any steady-state native inspection or apply. A
 second watcher harness simulates an atomic save during inotify rearming and
 requires the short signature-poll grace window to detect and apply it before

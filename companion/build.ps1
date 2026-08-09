@@ -5,8 +5,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$VersionName = '1.5.6'
-$VersionCode = '1560'
+$VersionName = '1.5.6-fix'
+$VersionCode = '1561'
 $Platform = Join-Path $SdkRoot 'platforms\android-36\android.jar'
 $BuildTools = Join-Path $SdkRoot 'build-tools\36.0.0'
 $BuildDir = Join-Path $PSScriptRoot 'build'
@@ -17,6 +17,7 @@ $ResZip = Join-Path $BuildDir 'resources.zip'
 $UnsignedApk = Join-Path $BuildDir 'unsigned.apk'
 $AlignedApk = Join-Path $BuildDir 'aligned.apk'
 $OutputApk = Join-Path $PSScriptRoot 'a2h_companion.apk'
+$ArchiveTimestamp = '1980-01-01T00:00:02Z'
 
 function Assert-File([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
@@ -80,12 +81,18 @@ Invoke-Checked $Javac (@(
     '-encoding', 'UTF-8', '--release', '17',
     '-classpath', $Platform, '-d', $ClassesDir
 ) + $Sources)
-Invoke-Checked $Jar @('cf', (Join-Path $BuildDir 'classes.jar'), '-C', $ClassesDir, '.')
+Invoke-Checked $Jar @(
+    '--create', '--file', (Join-Path $BuildDir 'classes.jar'),
+    "--date=$ArchiveTimestamp", '-C', $ClassesDir, '.'
+)
 Invoke-Checked $D8 @(
     '--lib', $Platform, '--min-api', '29', '--output', $DexDir,
     (Join-Path $BuildDir 'classes.jar')
 )
-Invoke-Checked $Jar @('uf', $UnsignedApk, '-C', $DexDir, 'classes.dex')
+Invoke-Checked $Jar @(
+    '--update', '--file', $UnsignedApk,
+    "--date=$ArchiveTimestamp", '-C', $DexDir, 'classes.dex'
+)
 Invoke-Checked $ZipAlign @('-f', '-p', '4', $UnsignedApk, $AlignedApk)
 
 $env:A2H_STORE_PASSWORD = $Signing.storePassword

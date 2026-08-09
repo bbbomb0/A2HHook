@@ -28,7 +28,7 @@ OFFICIAL = (
     "com.luna.music",
 )
 
-EXPECTED_RELEASE = ("v1.5.6", "1560")
+EXPECTED_RELEASE = ("v1.5.6-fix", "1561")
 
 HAL_CASES = {
     "OS2.0.208.0.VONCNXM": {
@@ -42,8 +42,11 @@ HAL_CASES = {
         "stream": 0x361870,
         "policy": 0x396C60,
         "output_pool": 0x3A45C0,
+        "device_layout": 0x27A620,
+        "stream_open": 0x366B50,
         "app_call": 0x41ED60,
         "delete_call": 0x415BB0,
+        "strlen_call": 0x4166C0,
     },
     "OS2.0.218.0.VONCNXM": {
         "relative": "devices/25060RK16C__dali/OS2.0.218.0.VONCNXM/originals/hal/audio.primary.mediatek(os2.0.218).so",
@@ -56,8 +59,11 @@ HAL_CASES = {
         "stream": 0x361F00,
         "policy": 0x3972E0,
         "output_pool": 0x3A4C70,
+        "device_layout": 0x27A920,
+        "stream_open": 0x3671D0,
         "app_call": 0x41F460,
         "delete_call": 0x4162A0,
+        "strlen_call": 0x416DB0,
     },
     "OS3.0.302.0.WONCNXM": {
         "relative": "devices/25060RK16C__dali/OS3.0.302.0.WONCNXM/originals/hal/audio.primary.mediatek.so",
@@ -70,8 +76,11 @@ HAL_CASES = {
         "stream": 0x361B20,
         "policy": 0x396FC0,
         "output_pool": 0x3A4950,
+        "device_layout": 0x27A870,
+        "stream_open": 0x366DF0,
         "app_call": 0x41F1B0,
         "delete_call": 0x415FE0,
+        "strlen_call": 0x416AF0,
     },
     "OS3.0.305.0.WONCNXM": {
         "relative": "devices/25060RK16C__dali/OS3.0.305.0.WONCNXM/originals/hal/audio.primary.mediatek.so",
@@ -84,14 +93,34 @@ HAL_CASES = {
         "stream": 0x361B80,
         "policy": 0x397020,
         "output_pool": 0x3A49B0,
+        "device_layout": 0x27A8D0,
+        "stream_open": 0x366E50,
         "app_call": 0x41F210,
         "delete_call": 0x416040,
+        "strlen_call": 0x416B50,
     },
 }
 
 UPDATE_FLAGS_STOCK = bytes.fromhex(
     "c8011837680e41f9006977f8080040f9088940f900013fd6"
     "08304039e8002037"
+)
+UPDATE_FLAGS_GAME_HANDOFF_LEGACY = bytes.fromhex(
+    "080c40b91f091e7281010054680190371f2003d51f2003d5"
+    "1f2003d51f2003d5"
+)
+UPDATE_FLAGS_GAME_ACTIVE_FAILED = bytes.fromhex(
+    "092441f90a2841f93f010aeba0000054080c40b91f091e72"
+    "01010054e8009037"
+)
+IDLE_CLEAR_DISK_CONTEXT = bytes.fromhex(
+    "f3031f2a3a00805288034039"
+)
+IDLE_CLEAR_HELPER_FIXED = bytes.fromhex(
+    "04000014f3031f2a1f641439"
+)
+OUTPUT_FLAGS_MEMBER_SEQUENCE = bytes.fromhex(
+    "84b640b9bf0200728800360a8900162a2511881a85b600b9"
 )
 UPDATE_APP_STOCK_TEMPLATE = bytes.fromhex(
     "689e42f91f0500f181010054689a42f9094140390a1140f9"
@@ -103,10 +132,25 @@ UPDATE_APP_DISK_TEMPLATE = bytes.fromhex(
     "084500913f01007200018a9a0000000017000052c8024039"
     "a80008371400001437008052c802403928020836a3e8ffd0"
 )
-STREAM_EVENT_STOCK = {
-    0x1F94: bytes.fromhex("08d40f3640070091"),
-    0x22B4: bytes.fromhex("d8fdff17"),
-}
+STREAM_EVENT_OFFSETS = (0x1F94, 0x2170, 0x22B4)
+STREAM_EVENT_SIZES = (28, 28, 4)
+STREAM_EVENT_STOCK_TEMPLATE = (
+    bytes.fromhex(
+        "08d40f3640070091f5cb40f97b0a40f9"
+        "000000001f4000b1a2500054"
+    ),
+    bytes.fromhex(
+        "580600b018c746f90803403988010836"
+        "e6cb40f9c3ecfff0639c2591"
+    ),
+    bytes.fromhex("d8fdff17"),
+)
+STREAM_EVENT_INLINE_TEMPLATE = bytes.fromhex(
+    "1f671439089f42f91f0500f169000054"
+    "28008052086b143900000014"
+)
+STREAM_EVENT_RECOMPUTE_LEGACY = bytes.fromhex("1f67143900000014")
+STREAM_EVENT_HANDOFF_LEGACY = bytes.fromhex("1901001440070091")
 STREAM_REF_PATCH_OFF = 0x2030
 STREAM_REF_PATCH_BYTES = 148
 STREAM_REF_DELETE_BL_OFF = 0x10
@@ -137,7 +181,68 @@ STREAM_REF_VARIABLE_WORD_MASKS = {
     0x8C: 0xFC000000,
 }
 GAME_POLICY_STOCK = bytes.fromhex(
+    "7f060071e90740f9e8179f1a7f020071ea179f1a"
     "1f011a6a291540f94a791f53ab835ff840059f1a"
+)
+GAME_POLICY_CONCURRENT_TEMPLATE = bytes.fromhex(
+    "000000147f020071e8079f1aea179f1a"
+    "e90740f91f011a6a291540f94a791f53"
+    "ab835ff840059f1a"
+)
+GAME_POLICY_RELAXED = bytes.fromhex(
+    "9f6a14397f020071e8079f1aea179f1a"
+    "e90740f91f011a6a291540f94a791f53"
+    "ab835ff840059f1a"
+)
+GAME_POLICY_PUBLIC_RELAXED = bytes.fromhex(
+    "7f060071e90740f9e8179f1a7f020071"
+    "ea179f1a7f020071291540f94a791f53"
+    "ab835ff840019a1a"
+)
+UPDATE_CONCURRENT_HELPER_TEMPLATE = bytes.fromhex(
+    "08010012886a1439210000141f2003d5"
+    "886a5439c8030034953a41f9963e41f9"
+    "f60100b4170180d2180080d2a96a77f8"
+    "090100b42a2541f92b2941f97f010aeb"
+    "89000054180700111f0b0071a2010054"
+    "d60600f1f7420091a1feff54899e42f9"
+    "3f0500f1880000540000001408000014"
+    "0000001428008052886a143904000014"
+    "48008052886a1439fa031f2a00000014"
+    "1f2003d51f2003d51f2003d51f641439"
+    "1f68143900000014f40300aa00000014"
+)
+UPDATE_CONCURRENT_HELPER_BYTES = 208
+UPDATE_CONCURRENT_PREVIOUS_BYTES = 176
+UPDATE_CONCURRENT_PREVIOUS2_BYTES = 160
+UPDATE_CONCURRENT_LEGACY_BYTES = 64
+CONCURRENT_PREVIOUS_SHIFT = UPDATE_CONCURRENT_HELPER_BYTES - UPDATE_CONCURRENT_PREVIOUS_BYTES
+CONCURRENT_PREVIOUS2_SHIFT = UPDATE_CONCURRENT_HELPER_BYTES - UPDATE_CONCURRENT_PREVIOUS2_BYTES
+CONCURRENT_LEGACY_SHIFT = UPDATE_CONCURRENT_HELPER_BYTES - UPDATE_CONCURRENT_LEGACY_BYTES
+CONCURRENT_OPEN_HELPER_OFF = 0x00
+CONCURRENT_OPEN_UPDATE_BL_OFF = 0x08
+CONCURRENT_OPEN_RETURN_B_OFF = 0x10
+CONCURRENT_CORE_OFF = 0x20
+CONCURRENT_MAIN_OFF = 0x30
+CONCURRENT_PENDING_DECAY_B_OFF = 0x88
+CONCURRENT_ENTRY_B_OFF = 0x90
+CONCURRENT_POLICY_RETURN_B_OFF = 0xAC
+CONCURRENT_IDLE_RETURN_B_OFF = 0xC4
+CONCURRENT_ZERO_INIT_RETURN_B_OFF = 0xCC
+CONCURRENT_LEGACY_POLICY_RETURN_B_OFF = 0x28
+CONCURRENT_LEGACY_IDLE_RETURN_B_OFF = 0x34
+CONCURRENT_LEGACY_ZERO_INIT_RETURN_B_OFF = 0x3C
+STREAM_OPEN_EPILOGUE_EXPECTED_OFF = 0x9EC
+STREAM_OPEN_EPILOGUE_BYTES = 36
+STREAM_OPEN_EVENT_BYTES = 4
+STREAM_OPEN_THIS_MOV = 0xAA0003F3
+STREAM_OPEN_MANAGER_LOAD = 0xF9400A60
+STREAM_OPEN_EPILOGUE_STOCK = bytes.fromhex(
+    "e003142af44f54a9f65753a9f85f52a9fa6751a9fd7b4fa9"
+    "fc8340f9ff430591c0035fd6"
+)
+STREAM_OPEN_HELPER_TEMPLATE = bytes.fromhex(
+    "74000035600a40f900000094e003142a00000014"
 )
 OUTPUT_POOL_TAIL_STOCK = bytes.fromhex("281740f9")
 OUTPUT_POOL_TAIL_STOCK_TEMPLATE = bytes.fromhex(
@@ -170,6 +275,189 @@ def decode_aarch64_bl(site: int, instruction: int) -> int | None:
     immediate = instruction & 0x03FFFFFF
     if immediate & 0x02000000:
         immediate -= 0x04000000
+    return site + immediate * 4
+
+
+def encode_aarch64_bl(site: int, target: int) -> int | None:
+    delta = target - site
+    if delta & 3:
+        return None
+    immediate = delta // 4
+    if immediate < -0x02000000 or immediate > 0x01FFFFFF:
+        return None
+    return 0x94000000 | (immediate & 0x03FFFFFF)
+
+
+def encode_aarch64_b(site: int, target: int) -> int | None:
+    delta = target - site
+    if delta & 3:
+        return None
+    immediate = delta // 4
+    if immediate < -0x02000000 or immediate > 0x01FFFFFF:
+        return None
+    return 0x14000000 | (immediate & 0x03FFFFFF)
+
+
+def encode_aarch64_cbz_like(
+    site: int, target: int, shape: int,
+) -> int | None:
+    if shape & 0x7E000000 != 0x34000000:
+        return None
+    delta = target - site
+    if delta & 3:
+        return None
+    immediate = delta // 4
+    if immediate < -0x40000 or immediate > 0x3FFFF:
+        return None
+    return (shape & 0xFF00001F) | ((immediate & 0x7FFFF) << 5)
+
+
+def build_idle_clear_overlay(
+    update: int, policy: int, helper: int,
+) -> tuple[bytes, bytes, bytes] | None:
+    count_to_zero_init = encode_aarch64_cbz_like(
+        policy + 0x3C, helper + 0xC8, 0xB4000A68
+    )
+    to_helper = encode_aarch64_b(policy + 0x188, update + 0xF0)
+    to_idle_helper = encode_aarch64_b(update + 0xF4, helper + 0xBC)
+    if None in (count_to_zero_init, to_helper, to_idle_helper):
+        return None
+    update_patch = bytearray(UPDATE_FLAGS_GAME_HANDOFF_LEGACY)
+    update_patch[16:32] = bytes.fromhex(
+        "04000014f3031f2a000000141f2003d5"
+    )
+    struct.pack_into("<I", update_patch, 24, to_idle_helper)
+    return (
+        bytes(update_patch), struct.pack("<I", int(count_to_zero_init)),
+        struct.pack("<I", int(to_helper)),
+    )
+
+
+def build_concurrent_overlays(
+    helper: int, policy: int, stream: int, stream_open: int,
+    stream_open_patch_off: int, recompute_target: int,
+    update_a2h_target: int,
+) -> tuple[bytes, bytes, tuple[bytes, bytes, bytes], bytes] | None:
+    policy_to_helper = encode_aarch64_b(policy + 0x1C8, helper + 0x90)
+    pending_decay = encode_aarch64_b(helper + 0x88, helper + 0x20)
+    helper_entry = encode_aarch64_b(helper + 0x90, helper + 0x30)
+    policy_return = encode_aarch64_b(helper + 0xAC, policy + 0x1CC)
+    idle_return = encode_aarch64_b(helper + 0xC4, policy + 0x18C)
+    zero_init_return = encode_aarch64_b(helper + 0xCC, policy + 0x188)
+    event_return = encode_aarch64_b(stream + 0x1FAC, recompute_target)
+    new_node_return = encode_aarch64_b(stream + 0x2188, recompute_target)
+    recompute = encode_aarch64_b(stream + 0x22B4, recompute_target)
+    stream_open_site = stream_open + stream_open_patch_off
+    stream_open_call = encode_aarch64_bl(stream_open_site, helper)
+    stream_open_update = encode_aarch64_bl(helper + 0x08, update_a2h_target)
+    stream_open_return = encode_aarch64_b(
+        helper + 0x10, stream_open_site + STREAM_OPEN_EVENT_BYTES
+    )
+    if None in (
+        policy_to_helper, pending_decay, helper_entry, policy_return, idle_return,
+        zero_init_return,
+        event_return, new_node_return, recompute,
+        stream_open_call, stream_open_update, stream_open_return,
+    ):
+        return None
+
+    helper = bytearray(UPDATE_CONCURRENT_HELPER_BYTES)
+    helper[:len(STREAM_OPEN_HELPER_TEMPLATE)] = STREAM_OPEN_HELPER_TEMPLATE
+    for offset in range(len(STREAM_OPEN_HELPER_TEMPLATE), CONCURRENT_CORE_OFF, 4):
+        struct.pack_into("<I", helper, offset, 0xD503201F)
+    helper[CONCURRENT_CORE_OFF:CONCURRENT_CORE_OFF + UPDATE_CONCURRENT_PREVIOUS_BYTES] = UPDATE_CONCURRENT_HELPER_TEMPLATE
+    struct.pack_into("<I", helper, CONCURRENT_OPEN_UPDATE_BL_OFF,
+                     int(stream_open_update))
+    struct.pack_into("<I", helper, CONCURRENT_OPEN_RETURN_B_OFF,
+                     int(stream_open_return))
+    struct.pack_into("<I", helper, CONCURRENT_PENDING_DECAY_B_OFF,
+                     int(pending_decay))
+    struct.pack_into("<I", helper, CONCURRENT_ENTRY_B_OFF, int(helper_entry))
+    struct.pack_into("<I", helper, CONCURRENT_POLICY_RETURN_B_OFF,
+                     int(policy_return))
+    struct.pack_into("<I", helper, CONCURRENT_IDLE_RETURN_B_OFF,
+                     int(idle_return))
+    struct.pack_into("<I", helper, CONCURRENT_ZERO_INIT_RETURN_B_OFF,
+                     int(zero_init_return))
+    concurrent_policy = bytearray(GAME_POLICY_CONCURRENT_TEMPLATE)
+    struct.pack_into("<I", concurrent_policy, 0, int(policy_to_helper))
+    inline_event = bytearray(STREAM_EVENT_INLINE_TEMPLATE)
+    struct.pack_into("<I", inline_event, 24, int(event_return))
+    new_node_event = bytearray(STREAM_EVENT_INLINE_TEMPLATE)
+    struct.pack_into("<I", new_node_event, 24, int(new_node_return))
+    return (
+        bytes(helper), bytes(concurrent_policy),
+        (
+            bytes(inline_event), bytes(new_node_event),
+            struct.pack("<I", int(recompute)),
+        ),
+        struct.pack("<I", int(stream_open_call)),
+    )
+
+
+def derive_executable_tail_layout(
+    program_headers: list[dict[str, object]], file_size: int,
+) -> dict[str, int] | None:
+    loads = [item for item in program_headers if int(item["type"]) == 1]
+    executable = [item for item in loads if int(item["flags"]) & 1]
+    if not executable:
+        return None
+    selected = max(executable, key=lambda item: int(item["vaddr"]) + int(item["memsz"]))
+    vaddr = int(selected["vaddr"])
+    offset = int(selected["offset"])
+    filesz = int(selected["filesz"])
+    memsz = int(selected["memsz"])
+    if filesz > memsz or min(vaddr, offset, filesz, memsz) < 0:
+        return None
+    file_end = vaddr + filesz
+    mem_end = vaddr + memsz
+    tail_start = (max(file_end, mem_end) + 15) & ~15
+    tail_end = (mem_end + 4095) & ~4095
+    cache = (tail_end - 112) & ~15
+    concurrent = (cache - UPDATE_CONCURRENT_HELPER_BYTES) & ~15
+    claimed_end = cache + 112
+    if (
+        concurrent < tail_start
+        or concurrent + UPDATE_CONCURRENT_HELPER_BYTES > cache
+        or claimed_end > tail_end
+    ):
+        return None
+    for item in loads:
+        start = int(item["vaddr"])
+        end = start + int(item["memsz"])
+        if start < claimed_end and end > concurrent:
+            return None
+    file_offset = offset + concurrent - vaddr
+    span = claimed_end - concurrent
+    if file_offset < 0 or file_offset + span > file_size:
+        return None
+    return {
+        "file_end": file_end,
+        "mem_end": mem_end,
+        "tail_start": tail_start,
+        "tail_end": tail_end,
+        "concurrent": concurrent,
+        "cache": cache,
+        "file_offset": file_offset,
+        "span": span,
+    }
+
+
+def decode_aarch64_b_cond(site: int, instruction: int) -> int | None:
+    if instruction & 0xFF000010 != 0x54000000:
+        return None
+    immediate = (instruction >> 5) & 0x7FFFF
+    if immediate & 0x40000:
+        immediate -= 0x80000
+    return site + immediate * 4
+
+
+def decode_aarch64_test_branch(site: int, instruction: int) -> int | None:
+    if instruction & 0x7E000000 != 0x36000000:
+        return None
+    immediate = (instruction >> 5) & 0x3FFF
+    if immediate & 0x2000:
+        immediate -= 0x4000
     return site + immediate * 4
 
 
@@ -574,6 +862,15 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "snapshot-state creates missing logs without touching existing files",
         "periodic metadata probes can still refresh existing log mtimes",
     )
+    report.check(
+        "queue_latest_detached()" in applier
+        and 'A2H_REASON=tile nohup sh "$SELF" queue' in applier
+        and "toggle-fast)" in applier
+        and "toggle-game-auto-pause-fast|" in applier,
+        "quick settings detached queue contract",
+        "both tiles commit under the config lock and detach the unchanged apply queue",
+        "tile commands still wait for native worker startup or bypass the production queue",
+    )
 
     postfs = (root / "post-fs-data.sh").read_text(encoding="utf-8")
     postfs_contract = (
@@ -630,9 +927,10 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     report.check(
         "for name in state game_auto_pause packages.txt package_states config_generation .package_baseline" in installer
         and re.search(r'repair_backslash_entry\s+"\$MODDIR/config\\\\game_auto_pause"', installer) is not None
-        and 'pm install -r --user 0 "$companion_apk"' in installer,
+        and 'pm install --user 0 "$companion_apk"' in installer
+        and 'pm uninstall io.github.bbbomb0.a2hhook' in installer,
         "installer policy/companion migration",
-        "game policy survives upgrades and companion install has a boot-time fallback",
+        "game policy survives upgrades; installer clean-installs and service has a boot-time fallback",
         "installer does not preserve game policy or companion install command drifted",
     )
 
@@ -681,15 +979,17 @@ def check_companion(root: Path, report: Report) -> None:
         node.get(android + "name", "") for node in manifest.findall("uses-permission")
     }
     activity = manifest.find("application/activity")
-    service = manifest.find("application/service")
+    services = manifest.findall("application/service")
     activity_actions = {
         node.get(android + "name", "")
         for node in manifest.findall("application/activity/intent-filter/action")
     }
     service_actions = {
         node.get(android + "name", "")
-        for node in manifest.findall("application/service/intent-filter/action")
+        for service_node in services
+        for node in service_node.findall("intent-filter/action")
     }
+    service_names = {node.get(android + "name", "") for node in services}
     manifest_ok = (
         application is not None
         and application.get(android + "allowBackup") == "false"
@@ -699,9 +999,12 @@ def check_companion(root: Path, report: Report) -> None:
         and activity.get(android + "name") == ".WebUiActivity"
         and activity.get(android + "exported") == "true"
         and "android.service.quicksettings.action.QS_TILE_PREFERENCES" in activity_actions
-        and service is not None
-        and service.get(android + "name") == ".A2HTileService"
-        and service.get(android + "permission") == "android.permission.BIND_QUICK_SETTINGS_TILE"
+        and service_names == {".A2HTileService", ".A2HGameTileService"}
+        and all(
+            node.get(android + "permission") == "android.permission.BIND_QUICK_SETTINGS_TILE"
+            and node.get(android + "exported") == "true"
+            for node in services
+        )
         and "android.service.quicksettings.action.QS_TILE" in service_actions
     )
     report.check(
@@ -713,19 +1016,21 @@ def check_companion(root: Path, report: Report) -> None:
 
     build_script = (root / "companion/build.ps1").read_text(encoding="utf-8")
     report.check(
-        "$VersionName = '1.5.6'" in build_script
-        and "$VersionCode = '1560'" in build_script
+        "$VersionName = '1.5.6-fix'" in build_script
+        and "$VersionCode = '1561'" in build_script
         and "--min-sdk-version', '29'" in build_script
         and "--target-sdk-version', '35'" in build_script
         and "signing.properties" in build_script,
         "companion build metadata",
-        "version 1.5.6/1560, API 29-35, external stable signing config",
+        "version 1.5.6-fix/1561, API 29-35, external stable signing config",
         "companion build version/API/signing metadata mismatch",
     )
 
     web_activity = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/WebUiActivity.java").read_text(encoding="utf-8")
     bridge = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/A2HBridge.java").read_text(encoding="utf-8")
     tile = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/A2HTileService.java").read_text(encoding="utf-8")
+    tile_base = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/A2HToggleTileService.java").read_text(encoding="utf-8")
+    game_tile = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/A2HGameTileService.java").read_text(encoding="utf-8")
     java_security = (
         "settings.setBlockNetworkLoads(true)" in web_activity
         and "settings.setAllowFileAccess(false)" in web_activity
@@ -747,29 +1052,105 @@ def check_companion(root: Path, report: Report) -> None:
         and "addJavascriptInterface" in web_activity
         and "__a2h_exec_[0-9]+_[0-9]+" in bridge
         and "a2h_apply toggle" in tile
-        and "onStartListening" in tile
+        and "A2H 全局音乐触感" in tile
+        and "ic_a2h_tile_off" in tile
+        and "onStartListening" in tile_base
+        and "toggle-game-auto-pause" in game_tile
+        and "游戏时暂停音乐触感" in game_tile
+        and "setIcon(Icon.createWithResource" in tile_base
     )
     report.check(
         java_security,
         "companion local-root bridge boundary",
-        "fixed local assets, blocked network/file/content access, strict callback and a2h_apply toggle",
+        "fixed local assets, blocked network/file/content access, strict callback and two fast-feedback tile bridges",
         "companion WebView or tile bridge security contract is incomplete",
+    )
+
+    android_attr = "{http://schemas.android.com/apk/res/android}pathData"
+    game_icon_paths = {}
+    for state in ("on", "off"):
+        icon_root = ET.parse(
+            root / f"companion/app/src/main/res/drawable/ic_a2h_tile_game_{state}.xml"
+        ).getroot()
+        game_icon_paths[state] = [
+            node.attrib[android_attr]
+            for node in icon_root.findall("path")
+            if android_attr in node.attrib
+        ]
+    vibration_path = next(
+        (path for path in game_icon_paths["on"] if "M0.4,13.7L2,15.3" in path),
+        "",
+    )
+    vibration_segments = [
+        tuple(float(value) for value in values)
+        for values in re.findall(
+            r"M([0-9.]+),([0-9.]+)L([0-9.]+),([0-9.]+)", vibration_path
+        )
+    ]
+    vibration_geometry_ok = (
+        len(vibration_segments) == 4
+        and all(abs((x2 - x1) - (y2 - y1)) < 1e-6 for x1, y1, x2, y2 in vibration_segments)
+        and sum((x1 + x2) / 2 < 4 for x1, _, x2, _ in vibration_segments) == 2
+        and sum((x1 + x2) / 2 > 20 for x1, _, x2, _ in vibration_segments) == 2
+    )
+    controller_body = "M4,10C4.5,7.6 6.2,6.5 8,7"
+    note = "M14.1,0.8v3"
+    pause_slash = "M2.6,5.8L21.4,21.2"
+    global_icon_paths = {}
+    for state, resource in (("on", "ic_a2h_tile.xml"), ("off", "ic_a2h_tile_off.xml")):
+        icon_root = ET.parse(
+            root / f"companion/app/src/main/res/drawable/{resource}"
+        ).getroot()
+        global_icon_paths[state] = [
+            node.attrib[android_attr]
+            for node in icon_root.findall("path")
+            if android_attr in node.attrib
+        ]
+    report.check(
+        vibration_geometry_ok
+        and any(controller_body in path for path in game_icon_paths["on"])
+        and any(note in path for path in game_icon_paths["on"])
+        and any(pause_slash in path for path in game_icon_paths["on"])
+        and not any(pause_slash in path for path in game_icon_paths["off"]),
+        "game tile reference icon geometry",
+        "simple dual-grip controller, disjoint note/buttons/haptics and enabled-state pause slash",
+        f"on={game_icon_paths['on']!r} off={game_icon_paths['off']!r}",
+    )
+    report.check(
+        not any(pause_slash in path for path in global_icon_paths["on"])
+        and any(pause_slash in path for path in global_icon_paths["off"]),
+        "global tile disabled icon geometry",
+        "global mode uses the base icon; custom mode uses the same long pause slash",
+        f"on={global_icon_paths['on']!r} off={global_icon_paths['off']!r}",
     )
 
     service_script = (root / "service.sh").read_text(encoding="utf-8")
     uninstall_script = (root / "uninstall.sh").read_text(encoding="utf-8")
+    installer_script = (root / "customize.sh").read_text(encoding="utf-8")
     lifecycle_ok = (
-        "COMPANION_VERSION_CODE=1560" in service_script
+        "COMPANION_VERSION_CODE=1561" in service_script
         and "ensure_companion_installed()" in service_script
         and "ensure_companion_installed &" in service_script
-        and 'pm install -r --user 0 "$COMPANION_APK"' in service_script
-        and "pm uninstall io.github.bbbomb0.a2hhook" in uninstall_script
-        and "--user 0" not in uninstall_script
+        and 'pm install --user 0 "$COMPANION_APK"' in service_script
+        and 'pm uninstall "$COMPANION_PACKAGE"' in service_script
+        and "companion_expected_hash" in service_script
+        and "COMPANION_PACKAGE=io.github.bbbomb0.a2hhook" in uninstall_script
+        and 'pm uninstall "$COMPANION_PACKAGE"' in uninstall_script
+        and "COMPANION_CLEANUP=/data/adb/service.d/a2h_hook_companion_cleanup.sh" in uninstall_script
+        and "schedule_companion_cleanup()" in uninstall_script
+        and 'getprop sys.boot_completed' in uninstall_script
+        and "[ \"$attempt\" -lt 90 ]" in uninstall_script
+        and "[ -f /data/adb/modules_update/a2h_hook/module.prop ]" in uninstall_script
+        and "/data/adb/service.d/a2h_hook_companion_cleanup.sh" in service_script
+        and "/data/adb/service.d/a2h_hook_companion_cleanup.sh" in installer_script
+        and "a2h_apply.pending" in uninstall_script
+        and 'pm install --user 0 "$companion_apk"' in installer_script
+        and 'pm uninstall io.github.bbbomb0.a2hhook' in installer_script
     )
     report.check(
         lifecycle_ok,
         "companion install/uninstall lifecycle",
-        "version-aware boot fallback and complete fixed-package uninstall are present",
+        "version-aware boot fallback, early-boot deferred cleanup and complete fixed-package uninstall are present",
         "companion boot repair, version synchronization, or uninstall cleanup is incomplete",
     )
 
@@ -1113,6 +1494,131 @@ printf 'PASS mode/policy transaction regression\n'
         rc == 0 and "PASS mode/policy transaction regression" in output,
         "mode/policy transaction regression",
         "validation-before-lock, two-file rollback, success, and absent-file rollback passed",
+        output.strip() or f"harness exited {rc}",
+    )
+
+
+def check_policy_refresh_transaction(root: Path, report: Report, use_adb: bool) -> None:
+    applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
+    atomic_block = extract_function(applier, "commit_tmp() {", "write_default_packages() {")
+    refresh_block = extract_function(applier, "refresh_policy_state() {", "mark_pending() {")
+    if not atomic_block or not refresh_block:
+        report.add("FAIL", "game policy immediate refresh regression", "production refresh functions not found")
+        return
+
+    harness = atomic_block + refresh_block + r'''
+set -eu
+base=__POLICY_REFRESH_TEST_BASE__/a2h_policy_refresh_$$
+CFG_DIR="$base/config"
+APPLIED_GAME_POLICY="$CFG_DIR/applied_game_auto_pause"
+APPLIED_REVISION="$CFG_DIR/applied_revision"
+APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
+MAIN_LOG="$base/main.log"
+ACTION_LOG="$base/action.log"
+TRIGGER="$base/trigger"
+TRIGGER_COUNT="$base/trigger.count"
+TRIGGER_FAIL="$base/trigger.fail"
+CURRENT_MODE=disabled
+CURRENT_GAME_AUTO_PAUSE=enabled
+CURRENT_SNAPSHOT=snapshot-1
+CURRENT_REVISION=1
+ACTIVE_COUNT=6
+A2H_APPLY_ATTEMPTS=2
+apply_calls=0
+release_calls=0
+
+fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
+log() { printf '%s\n' "$*" >> "$ACTION_LOG"; }
+acquire_apply_lock() { return 0; }
+release_apply_lock() { release_calls=$((release_calls + 1)); return 0; }
+prepare_config() { return 0; }
+apply_current() { apply_calls=$((apply_calls + 1)); return 0; }
+sleep() { :; }
+cleanup() { rm -rf "$base"; }
+trap cleanup 0 1 2 15
+mkdir -p "$CFG_DIR"
+: > "$MAIN_LOG"
+: > "$ACTION_LOG"
+printf '0\n' > "$TRIGGER_COUNT"
+printf '#!%s\n' "$(command -v sh)" > "$TRIGGER"
+cat >> "$TRIGGER" <<'EOF'
+count=$(cat "$A2H_TEST_TRIGGER_COUNT")
+printf '%s\n' "$((count + 1))" > "$A2H_TEST_TRIGGER_COUNT"
+[ ! -e "$A2H_TEST_TRIGGER_FAIL" ]
+EOF
+chmod 0755 "$TRIGGER"
+export A2H_TEST_TRIGGER_COUNT="$TRIGGER_COUNT"
+export A2H_TEST_TRIGGER_FAIL="$TRIGGER_FAIL"
+
+# First successful apply initializes metadata without a synthetic stream.
+apply_stable initial >/dev/null || fail initial-apply
+[ "$(cat "$TRIGGER_COUNT")" = 0 ] || fail initial-triggered
+[ "$(cat "$APPLIED_GAME_POLICY")" = enabled ] || fail initial-policy-marker
+[ "$(cat "$APPLIED_SNAPSHOT")" = snapshot-1 ] || fail initial-snapshot
+
+# A package/mode-only snapshot update must not trigger policy recomputation.
+CURRENT_SNAPSHOT=snapshot-2
+CURRENT_REVISION=2
+apply_stable same-policy >/dev/null || fail same-policy-apply
+[ "$(cat "$TRIGGER_COUNT")" = 0 ] || fail same-policy-triggered
+
+# Both policy directions trigger exactly once after a successful apply.
+CURRENT_GAME_AUTO_PAUSE=disabled
+CURRENT_SNAPSHOT=snapshot-3
+CURRENT_REVISION=3
+apply_stable disable-policy >/dev/null || fail disable-policy-apply
+[ "$(cat "$TRIGGER_COUNT")" = 1 ] || fail disable-trigger-count
+[ "$(cat "$APPLIED_GAME_POLICY")" = disabled ] || fail disable-policy-marker
+
+CURRENT_GAME_AUTO_PAUSE=enabled
+CURRENT_SNAPSHOT=snapshot-4
+CURRENT_REVISION=4
+apply_stable enable-policy >/dev/null || fail enable-policy-apply
+[ "$(cat "$TRIGGER_COUNT")" = 2 ] || fail enable-trigger-count
+[ "$(cat "$APPLIED_GAME_POLICY")" = enabled ] || fail enable-policy-marker
+
+# A failed trigger retries but cannot commit applied metadata.
+: > "$TRIGGER_FAIL"
+CURRENT_GAME_AUTO_PAUSE=disabled
+CURRENT_SNAPSHOT=snapshot-5
+CURRENT_REVISION=5
+if apply_stable failing-trigger >/dev/null; then fail failing-trigger-accepted; fi
+[ "$(cat "$TRIGGER_COUNT")" = 4 ] || fail failing-trigger-retry-count
+[ "$(cat "$APPLIED_GAME_POLICY")" = enabled ] || fail failing-trigger-policy-committed
+[ "$(cat "$APPLIED_REVISION")" = 4 ] || fail failing-trigger-revision-committed
+[ "$(cat "$APPLIED_SNAPSHOT")" = snapshot-4 ] || fail failing-trigger-snapshot-committed
+
+rm -f "$TRIGGER_FAIL"
+apply_stable recovered-trigger >/dev/null || fail recovered-trigger-apply
+[ "$(cat "$TRIGGER_COUNT")" = 5 ] || fail recovered-trigger-count
+[ "$(cat "$APPLIED_GAME_POLICY")" = disabled ] || fail recovered-policy-marker
+[ "$(cat "$APPLIED_REVISION")" = 5 ] || fail recovered-revision
+[ "$(cat "$APPLIED_SNAPSHOT")" = snapshot-5 ] || fail recovered-snapshot
+[ "$release_calls" = 6 ] || fail apply-lock-release-count-$release_calls
+printf 'PASS game policy immediate refresh regression\n'
+'''
+
+    if use_adb:
+        adb = shutil.which("adb")
+        if not adb:
+            report.add("FAIL", "game policy immediate refresh regression", "adb requested but not found")
+            return
+        command = [adb, "shell", "sh", "-s"]
+        test_base = "/data/local/tmp"
+    else:
+        shell = locate_posix_shell()
+        if not shell:
+            report.gap("game policy immediate refresh regression", "POSIX sh is required")
+            return
+        command = [shell, "-s"]
+        test_base = "${TMPDIR:-/tmp}"
+
+    payload = harness.replace("__POLICY_REFRESH_TEST_BASE__", test_base).encode("utf-8")
+    rc, output = run_command(command, root, payload)
+    report.check(
+        rc == 0 and "PASS game policy immediate refresh regression" in output,
+        "game policy immediate refresh regression",
+        "initial/same-policy skip, bidirectional one-shot refresh, failure retry, and metadata commit ordering passed",
         output.strip() or f"harness exited {rc}",
     )
 
@@ -1897,6 +2403,8 @@ def check_hal_fixtures(root: Path, report: Report, archive: Path) -> None:
             "stream_setParameters": (int(expected["stream"]), 12040),
             "isA2HAllowed": (int(expected["policy"]), 700),
             "updateOutputPoolActive": (int(expected["output_pool"]), 1128),
+            "streamAttributeDevices": (int(expected["device_layout"]), 616),
+            "stream_open": (int(expected["stream_open"]), 0xD1C),
         }
         lifecycle_matched = all(
             key in lifecycle
@@ -1924,9 +2432,39 @@ def check_hal_fixtures(root: Path, report: Report, archive: Path) -> None:
             continue
 
         data = path.read_bytes()
+        tail_layout = derive_executable_tail_layout(
+            actual["elf"]["program_headers"], len(data)
+        )
+        helper_vaddr = int(tail_layout["concurrent"]) if tail_layout else 0
+        tail_zero_ok = bool(
+            tail_layout
+            and data[
+                int(tail_layout["file_offset"]) :
+                int(tail_layout["file_offset"]) + int(tail_layout["span"])
+            ] == bytes(int(tail_layout["span"]))
+        )
         update_file = int(lifecycle["updateA2HMode"]["file_offset"], 0)
         stream_file = int(lifecycle["stream_setParameters"]["file_offset"], 0)
         policy_file = int(lifecycle["isA2HAllowed"]["file_offset"], 0)
+        stream_open_file = int(lifecycle["stream_open"]["file_offset"], 0)
+        stream_open_vaddr = int(expected["stream_open"])
+        stream_open_tail = data[
+            stream_open_file + STREAM_OPEN_EPILOGUE_EXPECTED_OFF :
+            stream_open_file + STREAM_OPEN_EPILOGUE_EXPECTED_OFF +
+            STREAM_OPEN_EPILOGUE_BYTES
+        ]
+        stream_open_manager_hits = sum(
+            1
+            for offset in range(0, int(lifecycle["stream_open"]["size"]), 4)
+            if data[stream_open_file + offset : stream_open_file + offset + 4]
+            == struct.pack("<I", STREAM_OPEN_MANAGER_LOAD)
+        )
+        stream_open_shape = (
+            stream_open_tail == STREAM_OPEN_EPILOGUE_STOCK
+            and data[stream_open_file + 0x30 : stream_open_file + 0x34]
+            == struct.pack("<I", STREAM_OPEN_THIS_MOV)
+            and stream_open_manager_hits > 0
+        )
         app_disk = data[update_file + 0x130 : update_file + 0x178]
         stock_shape = (
             len(app_disk) == 72
@@ -2002,7 +2540,47 @@ def check_hal_fixtures(root: Path, report: Report, archive: Path) -> None:
             and stream_update_context[:4] == STREAM_UPDATE_CALL_TEMPLATE[:4]
             and stream_update_context[8:] == STREAM_UPDATE_CALL_TEMPLATE[8:]
         )
+        stream_events = tuple(
+            data[
+                stream_file + offset :
+                stream_file + offset + size
+            ]
+            for offset, size in zip(STREAM_EVENT_OFFSETS, STREAM_EVENT_SIZES)
+        )
+        new_node_words = (
+            struct.unpack("<7I", stream_events[1])
+            if len(stream_events[1]) == STREAM_EVENT_SIZES[1] else ()
+        )
+        stream_event_stock_shape = (
+            len(stream_events[0]) == STREAM_EVENT_SIZES[0]
+            and stream_events[0][:16] == STREAM_EVENT_STOCK_TEMPLATE[0][:16]
+            and stream_events[0][20:] == STREAM_EVENT_STOCK_TEMPLATE[0][20:]
+            and len(new_node_words) == 7
+            and new_node_words[0] & 0x9F00001F == 0x90000018
+            and stream_events[1][4:20] == STREAM_EVENT_STOCK_TEMPLATE[1][4:20]
+            and new_node_words[5] & 0x9F00001F == 0x90000003
+            and new_node_words[6] & 0xFFC003FF == 0x91000063
+            and stream_events[2] == STREAM_EVENT_STOCK_TEMPLATE[2]
+        )
+        strlen_instruction = (
+            struct.unpack_from("<I", stream_events[0], 16)[0]
+            if stream_event_stock_shape else 0
+        )
+        strlen_target = decode_aarch64_bl(
+            int(expected["stream"]) + STREAM_EVENT_OFFSETS[0] + 16,
+            strlen_instruction,
+        )
+        strlen_ok = (
+            strlen_target is not None
+            and strlen_target == int(expected["strlen_call"])
+            and exact_plt_entry(
+                data, actual["elf"]["program_headers"], strlen_target
+            )
+        )
         output_file = int(lifecycle["updateOutputPoolActive"]["file_offset"], 0)
+        device_layout_file = int(
+            lifecycle["streamAttributeDevices"]["file_offset"], 0
+        )
         output_tail = data[
             output_file + 0x278 : output_file + 0x278 +
             len(OUTPUT_POOL_TAIL_STOCK_TEMPLATE)
@@ -2014,9 +2592,200 @@ def check_hal_fixtures(root: Path, report: Report, archive: Path) -> None:
         manager_registers_ok = (
             data[stream_file + 0x1F58 : stream_file + 0x1F5C]
             == STREAM_APP_MAP_MANAGER_ADD
+            and data[stream_file + 0x2144 : stream_file + 0x2148]
+            == STREAM_APP_MAP_MANAGER_ADD
             and data[output_file + 0x38 : output_file + 0x3C]
             == OUTPUT_POOL_MANAGER_ARG_MOV
         )
+        policy_stream_layout_ok = tuple(
+            struct.unpack_from("<I", data, policy_file + offset)[0]
+            for offset in (0x40, 0x50, 0x64, 0x6C, 0x78, 0x7C, 0x84, 0x8C)
+        ) == (
+            0xAA0003F4, 0x5280011B, 0xF9413E88, 0x9100437B,
+            0xF9413A88, 0xF87B6908, 0xF9412517, 0xF9412919,
+        )
+        idle_overlay = build_idle_clear_overlay(
+            int(expected["update"]), int(expected["policy"]), helper_vaddr
+        )
+        generated_update = idle_overlay[0] if idle_overlay else b""
+        generated_idle_count_branch = idle_overlay[1] if idle_overlay else b""
+        generated_idle_branch = idle_overlay[2] if idle_overlay else b""
+        concurrent_overlay = build_concurrent_overlays(
+            helper_vaddr, int(expected["policy"]),
+            int(expected["stream"]),
+            stream_open_vaddr, STREAM_OPEN_EPILOGUE_EXPECTED_OFF,
+            int(expected["stream"]) + 0x23F8,
+            stream_update_target or 0,
+        )
+        generated_concurrent_helper = (
+            concurrent_overlay[0] if concurrent_overlay else b""
+        )
+        generated_concurrent_policy = (
+            concurrent_overlay[1] if concurrent_overlay else b""
+        )
+        generated_stream_events = (
+            concurrent_overlay[2]
+            if concurrent_overlay else (b"", b"", b"")
+        )
+        generated_stream_open = (
+            concurrent_overlay[3] if concurrent_overlay else b""
+        )
+        eligible_words = (
+            struct.unpack("<8I", generated_update)
+            if len(generated_update) == 32 else ()
+        )
+        eligible_overlay_ok = (
+            len(generated_update) == len(UPDATE_FLAGS_STOCK) == 32
+            and generated_update != UPDATE_FLAGS_GAME_HANDOFF_LEGACY
+            and generated_update != UPDATE_FLAGS_GAME_ACTIVE_FAILED
+            and eligible_words == (
+                0xB9400C08, 0x721E091F, 0x54000181, 0x37900168,
+                0x14000004, 0x2A1F03F3,
+                encode_aarch64_b(
+                    int(expected["update"]) + 0xF4,
+                    helper_vaddr + 0xBC,
+                ), 0xD503201F,
+            )
+            and generated_idle_branch == struct.pack(
+                "<I", encode_aarch64_b(
+                    int(expected["policy"]) + 0x188,
+                    int(expected["update"]) + 0xF0,
+                ) or 0,
+            )
+            and generated_idle_count_branch == struct.pack(
+                "<I", encode_aarch64_cbz_like(
+                    int(expected["policy"]) + 0x3C,
+                    helper_vaddr + 0xC8,
+                    0xB4000A68,
+                ) or 0,
+            )
+        )
+        concurrent_overlay_ok = (
+            len(generated_concurrent_helper) == UPDATE_CONCURRENT_HELPER_BYTES
+            and len(generated_concurrent_policy) == 40
+            and len(generated_stream_events[0]) == 28
+            and len(generated_stream_events[1]) == 28
+            and len(generated_stream_events[2]) == 4
+            and len(generated_stream_open) == STREAM_OPEN_EVENT_BYTES
+            and generated_concurrent_helper[:0x08]
+                == STREAM_OPEN_HELPER_TEMPLATE[:0x08]
+            and generated_concurrent_helper[0x0C:0x10]
+                == STREAM_OPEN_HELPER_TEMPLATE[0x0C:0x10]
+            and generated_concurrent_helper[0x14:0x20]
+                == b"\x1f\x20\x03\xd5" * 3
+            and generated_concurrent_helper[0x20:0x88]
+                == UPDATE_CONCURRENT_HELPER_TEMPLATE[:0x68]
+            and generated_concurrent_helper[0x8C:0x90]
+                == UPDATE_CONCURRENT_HELPER_TEMPLATE[0x6C:0x70]
+            and generated_concurrent_helper[0x94:0xAC]
+                == UPDATE_CONCURRENT_HELPER_TEMPLATE[0x74:0x8C]
+            and generated_concurrent_helper[0xB0:0xC4]
+                == UPDATE_CONCURRENT_HELPER_TEMPLATE[0x90:0xA4]
+            and generated_concurrent_helper[0xC8:0xCC]
+                == bytes.fromhex("f40300aa")
+            and generated_stream_open == struct.pack(
+                "<I", encode_aarch64_bl(
+                    stream_open_vaddr + STREAM_OPEN_EPILOGUE_EXPECTED_OFF,
+                    helper_vaddr,
+                ) or 0,
+            )
+            and generated_concurrent_helper[0x08:0x0C] == struct.pack(
+                "<I", encode_aarch64_bl(
+                    helper_vaddr + 0x08, stream_update_target or 0,
+                ) or 0,
+            )
+            and generated_concurrent_helper[0x10:0x14] == struct.pack(
+                "<I", encode_aarch64_b(
+                    helper_vaddr + 0x10,
+                    stream_open_vaddr + STREAM_OPEN_EPILOGUE_EXPECTED_OFF +
+                    STREAM_OPEN_EVENT_BYTES,
+                ) or 0,
+            )
+            and generated_concurrent_helper[0x88:0x8C] == struct.pack(
+                "<I", encode_aarch64_b(
+                    helper_vaddr + 0x88, helper_vaddr + 0x20,
+                ) or 0,
+            )
+            and generated_concurrent_helper[0x90:0x94] == struct.pack(
+                "<I", encode_aarch64_b(
+                    helper_vaddr + 0x90, helper_vaddr + 0x30,
+                ) or 0,
+            )
+            and generated_concurrent_helper[0xAC:0xB0] == struct.pack(
+                "<I", encode_aarch64_b(
+                    helper_vaddr + 0xAC,
+                    int(expected["policy"]) + 0x1CC,
+                ) or 0,
+            )
+            and generated_concurrent_helper[0xC4:0xC8] == struct.pack(
+                "<I", encode_aarch64_b(
+                    helper_vaddr + 0xC4,
+                    int(expected["policy"]) + 0x18C,
+                ) or 0,
+            )
+            and generated_concurrent_helper[0xCC:0xD0] == struct.pack(
+                "<I", encode_aarch64_b(
+                    helper_vaddr + 0xCC,
+                    int(expected["policy"]) + 0x188,
+                ) or 0,
+            )
+            and generated_concurrent_policy[:4] == struct.pack(
+                "<I", encode_aarch64_b(
+                    int(expected["policy"]) + 0x1C8,
+                    helper_vaddr + 0x90,
+                ) or 0,
+            )
+            and generated_concurrent_policy[4:20]
+                == GAME_POLICY_CONCURRENT_TEMPLATE[4:20]
+            and generated_concurrent_policy[20:] == GAME_POLICY_STOCK[20:]
+            and GAME_POLICY_RELAXED[20:] == GAME_POLICY_STOCK[20:]
+            and len(GAME_POLICY_PUBLIC_RELAXED) == len(GAME_POLICY_STOCK)
+            and generated_concurrent_policy != GAME_POLICY_PUBLIC_RELAXED
+            and generated_stream_events[0][:24]
+                == STREAM_EVENT_INLINE_TEMPLATE[:24]
+            and generated_stream_events[0][24:] == struct.pack(
+                "<I", encode_aarch64_b(
+                    int(expected["stream"]) + 0x1FAC,
+                    int(expected["stream"]) + 0x23F8,
+                ) or 0,
+            )
+            and generated_stream_events[1][:24]
+                == STREAM_EVENT_INLINE_TEMPLATE[:24]
+            and generated_stream_events[1][24:] == struct.pack(
+                "<I", encode_aarch64_b(
+                    int(expected["stream"]) + 0x2188,
+                    int(expected["stream"]) + 0x23F8,
+                ) or 0,
+            )
+            and generated_stream_events[2] == struct.pack(
+                "<I", encode_aarch64_b(
+                    int(expected["stream"]) + 0x22B4,
+                    int(expected["stream"]) + 0x23F8,
+                ) or 0,
+            )
+            and generated_stream_events[2]
+                == bytes.fromhex("51000014")
+        )
+        idle_control_flow_ok = (
+            data[policy_file + 0x30 : policy_file + 0x34]
+            == bytes.fromhex("083c41f9")
+            and data[policy_file + 0x3C : policy_file + 0x40]
+            == bytes.fromhex("680a00b4")
+            and data[
+                policy_file + 0x188 :
+                policy_file + 0x188 + len(IDLE_CLEAR_DISK_CONTEXT)
+            ] == IDLE_CLEAR_DISK_CONTEXT
+        )
+        stream_this_ok = (
+            data[stream_file + 0x24 : stream_file + 0x28]
+            == bytes.fromhex("f30300aa")
+        )
+        flags_member_hits = [
+            offset
+            for offset in range(len(data))
+            if data.startswith(OUTPUT_FLAGS_MEMBER_SEQUENCE, offset)
+        ]
+        flags_member_ok = len(flags_member_hits) == 1
 
         def padding_refs(blob: bytes) -> list[tuple[int, int]]:
             refs: list[tuple[int, int]] = []
@@ -2041,19 +2810,24 @@ def check_hal_fixtures(root: Path, report: Report, archive: Path) -> None:
             and data[update_file + 0xDC : update_file + 0xFC] == UPDATE_FLAGS_STOCK
             and stock_shape and call_ok and plt_ok and allowed_ok
             and stream_update_ok and stream_update_shape
-            and output_ok and manager_registers_ok and not padding_hits
-            and all(
-                data[stream_file + offset : stream_file + offset + len(wanted)] == wanted
-                for offset, wanted in STREAM_EVENT_STOCK.items()
-            )
+            and output_ok and manager_registers_ok
+            and policy_stream_layout_ok and not padding_hits
+            and eligible_overlay_ok and idle_control_flow_ok
+            and concurrent_overlay_ok and tail_zero_ok
+            and stream_this_ok and flags_member_ok
+            and stream_event_stock_shape and strlen_ok
             and stream_ref_shape and delete_ok
-            and data[policy_file + 0x1DC : policy_file + 0x1F0] == GAME_POLICY_STOCK
+            and stream_open_shape
+            and data[
+                policy_file + 0x1C8 :
+                policy_file + 0x1C8 + len(GAME_POLICY_STOCK)
+            ] == GAME_POLICY_STOCK
         )
         report.check(
             regions_ok,
             f"HAL lifecycle regions {system}",
-            f"handoff/committed-app clear/output-pool/2 events and BL targets 0x{call_target:x}/{delete_target!r} verified",
-            f"stock_shape={stock_shape} call_ok={call_ok} plt_ok={plt_ok} allowed_ok={allowed_ok} stream_update_ok={stream_update_ok} stream_update_shape={stream_update_shape} output_ok={output_ok} manager_registers_ok={manager_registers_ok} padding_hits={padding_hits}",
+            f"eligible-output+idle helpers, RX-tail concurrent helper=0x{helper_vaddr:x}, +0x51a latch, full policy tail, existing/new-node 28-byte app events, open post-commit and BL targets 0x{call_target:x}/{delete_target!r}/{strlen_target!r} verified",
+            f"stock_shape={stock_shape} call_ok={call_ok} plt_ok={plt_ok} allowed_ok={allowed_ok} stream_update_ok={stream_update_ok} stream_update_shape={stream_update_shape} stream_event_stock_shape={stream_event_stock_shape} strlen_ok={strlen_ok} output_ok={output_ok} manager_registers_ok={manager_registers_ok} policy_stream_layout_ok={policy_stream_layout_ok} eligible_overlay_ok={eligible_overlay_ok} concurrent_overlay_ok={concurrent_overlay_ok} tail_layout={tail_layout} tail_zero_ok={tail_zero_ok} stream_open_shape={stream_open_shape} open_manager_hits={stream_open_manager_hits} idle_control_flow_ok={idle_control_flow_ok} stream_this_ok={stream_this_ok} flags_member_hits={flags_member_hits} padding_hits={padding_hits}",
         )
 
     source = (root / "src/patcher_v3.c").read_text(encoding="utf-8")
@@ -2080,15 +2854,66 @@ def check_hal_fixtures(root: Path, report: Report, archive: Path) -> None:
         and "STREAM_UPDATE_CALL_BYTES 12u" in source
         and "g_auxiliary.output_pool_tail_patched" in source
         and "output_pool_tail_patched" in source
-        and "STREAM_EVENT_PATCH_COUNT 2u" in source
-        and "STREAM_EVENT_PATCH_MAX_BYTES 8u" in source
+        and "STREAM_EVENT_PATCH_COUNT 3u" in source
+        and "STREAM_EVENT_PATCH_MAX_BYTES 28u" in source
         and "STREAM_EVENT_PATCH_SIZES" in source
+        and "0x1F94u,0x2170u,0x22B4u" in source
+        and "coherent_concurrent_generation" in source
+        and "int relocated_64 =" in source
+        and "int relocated_56 =" in source
+        and "CONCURRENT_APP_FLAG_OFF 0x51Au" in source
+        and "UPDATE_CONCURRENT_HELPER_BYTES 208u" in source
+        and "UPDATE_CONCURRENT_PREVIOUS_BYTES 176u" in source
+        and "UPDATE_CONCURRENT_PREVIOUS2_BYTES 160u" in source
+        and "concurrent_helper_previous" in source
+        and "previous-160" in source
+        and "CONCURRENT_ENTRY_B_OFF 0x90u" in source
+        and "CONCURRENT_ZERO_INIT_OFF 0xC8u" in source
+        and "CONCURRENT_ZERO_INIT_RETURN_B_OFF 0xCCu" in source
+        and "POLICY_SLOT_TABLE_LOAD_OFF 0x78u" in source
+        and "POLICY_DEVICE_BEGIN_LOAD_OFF 0x84u" in source
+        and "POLICY_DEVICE_END_LOAD_OFF 0x8Cu" in source
+        and "POLICY_IDLE_COUNT_CBZ_OFF 0x3Cu" in source
+        and "g_auxiliary.idle_count_branch" in source
+        and "legacy-64" in source
+        and "legacy-56" in source
+        and "UPDATE_CONCURRENT_HELPER_OFF" not in source
+        and "derive_executable_tail_layout" in source
+        and "prepare_executable_concurrent_helper" in source
+        and "locate_update_layout" in source
+        and "locate_policy_layout" in source
+        and "locate_stream_layout" in source
+        and "locate_output_layout" in source
+        and "semantic_hits=%u" in source
+        and "g_auxiliary.concurrent_helper_off" in source
+        and "rx-tail.concurrent-helper" in source
+        and "GAME_POLICY_PATCH_BYTES 40u" in source
+        and "stream_event_strlen_target" in source
+        and "exact_aarch64_plt_entry(pid, base," in source
+        and "g_auxiliary.concurrent_helper_patched" in source
+        and "g_auxiliary.policy_concurrent" in source
+        and "g_auxiliary.stream_event_recompute_legacy" in source
+        and "g_auxiliary.stream_event_handoff_legacy" in source
+        and "STREAM_OPEN_EPILOGUE_EXPECTED_OFF 0x9ECu" in source
+        and "STREAM_OPEN_HELPER_TEMPLATE" in source
+        and "stream-open-post-commit" in source
+        and "stream_open_patched" in source
+        and "UPDATE_FLAGS_GAME_HANDOFF_LEGACY" in source
+        and "build_idle_clear_overlay" in source
+        and "IDLE_CLEAR_BRANCH_PATCH_OFF 0x188u" in source
+        and "UPDATE_IDLE_GUARD_OFF 0xECu" in source
+        and "UPDATE_IDLE_HELPER_OFF 0xF0u" in source
+        and "g_auxiliary.update_flags_patched" in source
+        and "g_auxiliary.idle_clear_branch" in source
+        and "STREAM_REF_FLAGS_LOAD_OFF 0x44u" in source
+        and "STREAM_REF_STORE_OFF 0x90u" in source
+        and "output_pool_tail_persistent_legacy" in source
         and "#define ELF_SYMBOL_MAX_BYTES 16384u" in source
     )
     report.check(
         lifecycle_contracts,
         "cross-ROM game lifecycle ownership",
-        "72-byte handoff policy plus 148-byte helper/output overlay and committed-app clear event present",
+        "72-byte app policy, guarded idle clear, unique runtime semantic layouts, dynamic RX-tail 208-byte open-plus-pending/committed real-stream helper with exact previous-176/160 and 64/56-byte migration, full 40-byte policy, two 28-byte app events, one recompute event and open post-commit event present",
         "required lifecycle ownership markers are missing",
     )
 
@@ -2111,6 +2936,7 @@ def main() -> int:
     check_lock_protocol(root, report, args.adb)
     check_config_hotupdate(root, report, args.adb)
     check_control_transaction(root, report, args.adb)
+    check_policy_refresh_transaction(root, report, args.adb)
     check_revision_metadata_repair(root, report, args.adb)
     check_last_pid_write_failure(root, report, args.adb)
     check_boot_last_pid_failure(root, report, args.adb)

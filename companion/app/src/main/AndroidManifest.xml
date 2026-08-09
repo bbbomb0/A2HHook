@@ -20,7 +20,21 @@
             android:name=".A2HTileService"
             android:exported="true"
             android:icon="@drawable/ic_a2h_tile"
-            android:label="A2H 音乐触感"
+            android:label="A2H 全局音乐触感"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <meta-data
+                android:name="android.service.quicksettings.TOGGLEABLE_TILE"
+                android:value="true" />
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".A2HGameTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_a2h_tile_game_on"
+            android:label="游戏时暂停音乐触感"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <meta-data
                 android:name="android.service.quicksettings.TOGGLEABLE_TILE"

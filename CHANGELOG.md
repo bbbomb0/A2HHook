@@ -1,5 +1,20 @@
 # 更新日志
 
+## v1.5.6-fix
+
+- 修复锁屏解锁仍会触发短暂音乐触感，以及 APP 返回时偶发震动的问题。根因不是单一系统包名，也不是必须禁用所有 `flags=0` 输出，而是媒体/游戏 handoff 在应用表和活动输出都已归零后仍可能保持为 1，使后续系统短流继承旧 A2H mode。
+- 保留 v1.5.6 的完整32位游戏 output flags、同包名多流交接与事件驱动重算；额外限制只有 `FAST`、`DEEP_BUFFER`、`COMPRESS_OFFLOAD`、`SPATIALIZER` 退出流可建立 handoff。该门禁用于阻止系统短流自行建立交接状态，但不再被误当作过期 handoff 的唯一修复。
+- 在四份 HAL 一致的 `isA2HAllowed()` 零活动路径加入 guarded idle-clear。普通 `updateA2HMode()+0xec` 会先跳过 helper；只有零活动分支跳到 `+0xf0`，执行 `mov w19,wzr`、清除 manager `+0x519` handoff，再跳回原厂 `+0x18c mov w26,#1`，完整保留返回值 `2` 的清理语义。
+- `updateA2HMode()`、`isA2HAllowed()`、`setParameters()`、`updateOutputPoolActive()` 与 `AudioALSAStreamOut::open()` 改为运行时唯一语义布局定位：函数大小和局部锚点允许整体正负漂移，实际补丁、快照、I-cache 与回滚地址使用同一组动态派生偏移，不依赖系统版本号或固定 ROM offset。208字节 RX 页尾 helper 前置包含 open 成功后重算入口，后续保留两阶段并发 helper、guard、应用策略、148字节 handoff helper、output-pool尾分支和三个 appname/重算事件点，全部纳入同一所有权与协调事务；`pending` 跨过游戏节点消失到正式第二流到达的过渡，`committed` 只在并发流确实回落后清除。任何半事务、锚点缺失/多命中或未知机器码都会安全拒绝；上一代176/160字节及旧64/56字节 helper 仅按完整机器码形态迁移。
+- 修复活动游戏中切换“游戏时暂停”后必须等待下一次流事件才生效的问题。`a2h_apply`新增最后成功应用策略标记；只有策略实际变化且patch、live check、稳定快照全部成功时，才调用一次现有共享AAudio静音trigger触发原厂`updateA2HMode()`，双向切换均可立即重算。首次开机初始化、同值应用、模式/包名保存和30秒健康探针不调用trigger；trigger失败不提交applied元数据，由队列或watcher继续重试。
+- 新增“游戏时暂停音乐触感”控制中心磁贴，点击独立切换“游戏时暂停”，长按与原磁贴一样打开 APK 内置同版 WebUI。图标采用简洁手柄、顶部音符和双侧触感线；开启暂停时由加长的粗 `\\` 斜线贯穿手柄，关闭时不带斜线，状态语义与配置一致。“A2H 全局音乐触感”在关闭全局/进入自定义模式时也使用同方向斜线。两枚磁贴均在点击后立即切换系统 active 状态与图标，后台再走原配置锁、队列、native应用和状态读回，失败才回滚视觉状态。
+- 伴生应用改为干净生命周期：安装模块时先卸载固定包名及旧数据，再安装 ZIP 内同版签名 APK；开机兜底同时比较 versionCode 与 APK SHA-256，同版本修订也不会误留旧 APK；模块卸载时完整卸载伴生应用并清理固定 pending、lock、临时配置和日志。核心 native 模块在伴生安装失败时仍可独立运行。
+- 当前公开 v1.5.6、早期 handoff、失败的 active-device-vector 候选和首版 fallthrough 错误候选仅作为完整历史迁移指纹；正式写入仍执行协调快照、双写、两次 EL0 I-cache同步、最终验证和失败全量回滚。
+- OS2.0.208、OS2.0.218、OS3.0.302、OS3.0.305 四份归档 HAL 均通过零活动控制流、动态双向分支、helper机器码、游戏生命周期区域和 ROM 自身调用目标逐字验证；合成 fixture 同时覆盖 `+0x40` 布局漂移和双命中拒绝。没有预归档 HAL 的 ROM 会直接解析目标手机当前映射的 HAL；不满足完整唯一结构时拒绝写入并保留诊断信息。
+- 自动门禁为 `66 PASS / 0 FAIL / 0 GAP`。ARM64事务故障注入覆盖24个辅助写故障、24个cache故障、6类历史迁移（含上一代176/160字节精确迁移）、4组策略/stream helper生成、4种output形态、24组生命周期语义和5组动态布局结果；新增策略刷新harness覆盖首次/同值跳过、双向一次触发、失败重试和policy->revision->snapshot提交顺序。
+- OS3.0.302 已通过8槽自定义与全局媒体播放/暂停往返、flags=0短流归零、两次锁屏/解锁无误震、多轮 APP返回、当前音轨/下一首和“游戏时暂停”开启/关闭完整矩阵。后台酷狗概念版进入王者时，开启策略在第二真实扬声器流open提交后自动保持`mode=0`且音乐继续播放，无需暂停/重播；关闭策略在相同多流过程保持`mode=1`，活动现场双向切换也能一次性立即重算。
+- 版本迭代为 `v1.5.6-fix` / `versionCode=1561`，使用独立tag、Release与 `a2h_hook_v1.5.6-fix.zip`；历史v1.5.6不覆盖、不删除。
+
 ## v1.5.6
 
 - 重做游戏输出识别：从低字节判断改为读取完整 32 位 output flags，同时覆盖 `FAST`、`FAST|RAW` 与 `AUDIO_OUTPUT_FLAG_SPATIALIZER`；继续排除 MMAP、VOIP、通话和非扬声器安全边界。

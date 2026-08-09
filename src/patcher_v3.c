@@ -1,4 +1,4 @@
-// a2h_patch v1.5.6 - universal signature/ELF scan + game audio lifecycle
+// a2h_patch v1.5.6-fix - universal signature/ELF scan + active audio lifecycle
 #define _GNU_SOURCE
 #include <stdint.h>
 #include <stdio.h>
@@ -61,7 +61,7 @@
 #define PTRACE_POKETEXT 4
 #define PTRACE_POKEDATA 5
 #define MAX_SLOTS 10
-#define A2H_VERSION "1.5.6"
+#define A2H_VERSION "1.5.6-fix"
 #define WHITELIST_CAVE_BYTES (MAX_SLOTS * 64 + 16 + MAX_SLOTS * 8 + 32)
 #define WHITELIST_STUB_WORDS 19
 #define WHITELIST_STUB_BYTES (WHITELIST_STUB_WORDS * sizeof(uint32_t))
@@ -71,6 +71,9 @@
 #define STREAM_SET_PARAMETERS_FUNC_BYTES 12040u
 #define UPDATE_OUTPUT_POOL_FUNC_BYTES 1128u
 #define UPDATE_FLAGS_PATCH_OFF 0xDCu
+#define UPDATE_IDLE_GUARD_OFF 0xECu
+#define UPDATE_IDLE_HELPER_OFF 0xF0u
+#define UPDATE_IDLE_HELPER_BRANCH_OFF 0xF4u
 #define UPDATE_APP_POLICY_PATCH_OFF 0x130u
 #define UPDATE_APP_POLICY_BYTES 72u
 #define UPDATE_APP_POLICY_DISK_BL_OFF 0x24u
@@ -78,17 +81,74 @@
 #define UPDATE_APP_POLICY_RELAXED_BL_OFF 0x28u
 #define UPDATE_APP_POLICY_LEGACY_BL_OFF 0x1Cu
 #define UPDATE_A2H_ALLOWED_BL_OFF 0x1D4u
-#define GAME_POLICY_PATCH_OFF 0x1DCu
-#define STREAM_EVENT_PATCH_COUNT 2u
-#define STREAM_EVENT_PATCH_MAX_BYTES 8u
+#define UPDATE_CONCURRENT_HELPER_BYTES 208u
+#define UPDATE_CONCURRENT_PREVIOUS_BYTES 176u
+#define UPDATE_CONCURRENT_PREVIOUS2_BYTES 160u
+#define UPDATE_CONCURRENT_LEGACY_BYTES 64u
+#define CONCURRENT_PREVIOUS_SHIFT \
+    (UPDATE_CONCURRENT_HELPER_BYTES - UPDATE_CONCURRENT_PREVIOUS_BYTES)
+#define CONCURRENT_PREVIOUS2_SHIFT \
+    (UPDATE_CONCURRENT_HELPER_BYTES - UPDATE_CONCURRENT_PREVIOUS2_BYTES)
+#define CONCURRENT_LEGACY_SHIFT \
+    (UPDATE_CONCURRENT_HELPER_BYTES - UPDATE_CONCURRENT_LEGACY_BYTES)
+#define CONCURRENT_OPEN_HELPER_OFF 0u
+#define CONCURRENT_OPEN_UPDATE_BL_OFF 8u
+#define CONCURRENT_OPEN_RETURN_B_OFF 16u
+#define CONCURRENT_CORE_OFF 0x20u
+#define CONCURRENT_MAIN_OFF 0x30u
+#define CONCURRENT_PENDING_DECAY_B_OFF 0x88u
+#define CONCURRENT_ENTRY_B_OFF 0x90u
+#define CONCURRENT_POLICY_RETURN_B_OFF 0xACu
+#define CONCURRENT_IDLE_HELPER_OFF 0xBCu
+#define CONCURRENT_IDLE_RETURN_B_OFF 0xC4u
+#define CONCURRENT_ZERO_INIT_OFF 0xC8u
+#define CONCURRENT_ZERO_INIT_RETURN_B_OFF 0xCCu
+#define CONCURRENT_LEGACY_POLICY_RETURN_B_OFF 0x28u
+#define CONCURRENT_LEGACY_IDLE_RETURN_B_OFF 0x34u
+#define CONCURRENT_LEGACY_ZERO_INIT_RETURN_B_OFF 0x3Cu
+#define GAME_POLICY_PATCH_OFF 0x1C8u
+#define GAME_POLICY_PATCH_BYTES 40u
+#define GAME_POLICY_ENTRY_BYTES 20u
+#define GAME_POLICY_HELPER_BRANCH_OFF 0u
+#define POLICY_IDLE_COUNT_LOAD_OFF 0x30u
+#define POLICY_IDLE_COUNT_CBZ_OFF 0x3Cu
+#define POLICY_MANAGER_INIT_OFF 0x40u
+#define POLICY_SLOT_INDEX_INIT_OFF 0x50u
+#define POLICY_SLOT_COUNT_RELOAD_OFF 0x64u
+#define POLICY_SLOT_INDEX_STEP_OFF 0x6Cu
+#define POLICY_SLOT_TABLE_LOAD_OFF 0x78u
+#define POLICY_SLOT_STREAM_LOAD_OFF 0x7Cu
+#define POLICY_DEVICE_BEGIN_LOAD_OFF 0x84u
+#define POLICY_DEVICE_END_LOAD_OFF 0x8Cu
+#define IDLE_CLEAR_BRANCH_PATCH_OFF 0x188u
+#define IDLE_CLEAR_RESUME_OFF 0x18Cu
+#define IDLE_CLEAR_BRANCH_BYTES 4u
+#define STREAM_EVENT_PATCH_COUNT 3u
+#define STREAM_EVENT_PATCH_MAX_BYTES 28u
+#define STREAM_REGION_EVENT0 0u
+#define STREAM_REGION_REF 1u
+#define STREAM_REGION_EVENT1 2u
+#define STREAM_REGION_EVENT2 3u
+#define POLICY_REGION_IDLE_COUNT 0u
+#define POLICY_REGION_IDLE_CLEAR 1u
+#define POLICY_REGION_GAME 2u
+#define POLICY_OVERLAY_REGION_COUNT 3u
 #define STREAM_REF_PATCH_OFF 0x2030u
 #define STREAM_REF_PATCH_BYTES 148u
 #define STREAM_REF_DELETE_BL_OFF 0x10u
+#define STREAM_REF_COUNT_CBNZ_OFF 0x18u
 #define STREAM_REF_ALLOWED_BL_OFF 0x38u
-#define STREAM_REF_STACK_COND_OFF 0x60u
+#define STREAM_REF_FLAGS_LOAD_OFF 0x44u
+#define STREAM_REF_STACK_COND_OFF 0x64u
+#define STREAM_REF_STORE_OFF 0x90u
+#define STREAM_REF_LEGACY_STACK_COND_OFF 0x60u
+#define STREAM_REF_LEGACY_IDLE_GUARD_CBNZ_OFF 0x64u
+#define STREAM_REF_LEGACY_IDLE_GUARD_CLEAR_OFF 0x68u
 #define STREAM_REF_UPDATE_B_OFF 0x8Cu
-#define STREAM_REF_HELPER_OFF 0x2084u
+#define STREAM_REF_HELPER_OFF 0x2088u
+#define STREAM_REF_LEGACY_HELPER_OFF 0x2084u
 #define STREAM_APP_MAP_MANAGER_OFF 0x1F58u
+#define STREAM_NEW_NODE_MANAGER_OFF 0x2144u
 #define STREAM_UPDATE_CALL_OFF 0x23F8u
 #define STREAM_UPDATE_BL_OFF 0x23FCu
 #define STREAM_UPDATE_CALL_BYTES 12u
@@ -98,9 +158,16 @@
 #define OUTPUT_POOL_MANAGER_ARG_OFF 0x38u
 #define OUTPUT_POOL_STACK_COND_OFF 0x0Cu
 #define OUTPUT_POOL_STACK_FAIL_OFF 0x464u
+#define STREAM_OPEN_EPILOGUE_EXPECTED_OFF 0x9ECu
+#define STREAM_OPEN_EPILOGUE_BYTES 36u
+#define STREAM_OPEN_EVENT_BYTES 4u
+#define STREAM_OPEN_THIS_MOV_OFF 0x30u
+#define STREAM_OPEN_THIS_MOV 0xAA0003F3u
+#define STREAM_OPEN_MANAGER_LOAD 0xF9400A60u
 #define HANDOFF_FLAG_OFF 0x519u
+#define CONCURRENT_APP_FLAG_OFF 0x51Au
 #define STREAM_OVERLAY_REGION_COUNT (STREAM_EVENT_PATCH_COUNT + 1u)
-#define AUXILIARY_PATCH_MAX_BYTES STREAM_REF_PATCH_BYTES
+#define AUXILIARY_PATCH_MAX_BYTES UPDATE_CONCURRENT_HELPER_BYTES
 
 struct user_pt_regs_a64 {
     uint64_t regs[31];
@@ -216,18 +283,54 @@ static const unsigned char UPDATE_FLAGS_STOCK[32]={
     0x08,0x89,0x40,0xF9,0x00,0x01,0x3F,0xD6,
     0x08,0x30,0x40,0x39,0xE8,0x00,0x20,0x37
 };
-/* Public v1.5.6 only covered low-byte FAST/DEEP/OFFLOAD flags. */
+/* Early v1.5.6 only covered low-byte FAST/DEEP/OFFLOAD flags. */
 static const unsigned char UPDATE_FLAGS_LEGACY[32]={
     0x1F,0x09,0x1E,0x72,0xA1,0x01,0x00,0x54,
     0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5,
     0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5,
     0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5
 };
-static const unsigned char UPDATE_FLAGS_GAME[32]={
+/* Eligible output objects are intentionally independent from the active
+ * stream slots inspected by isA2HAllowed(). */
+static const unsigned char UPDATE_FLAGS_GAME_HANDOFF_LEGACY[32]={
     0x08,0x0C,0x40,0xB9,0x1F,0x09,0x1E,0x72,
     0x81,0x01,0x00,0x54,0x68,0x01,0x90,0x37,
     0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5,
     0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5
+};
+static const unsigned char UPDATE_IDLE_HELPER_TEMPLATE[16]={
+    0x04,0x00,0x00,0x14, /* non-eligible output: b update+0xfc */
+    0xF3,0x03,0x1F,0x2A, /* helper: mov w19, wzr */
+    0x00,0x00,0x00,0x14, /* b update concurrent idle helper */
+    0x1F,0x20,0x03,0xD5  /* nop */
+};
+static const unsigned char UPDATE_IDLE_HELPER_GUARDED_LEGACY[16]={
+    0x04,0x00,0x00,0x14,
+    0xF3,0x03,0x1F,0x2A,
+    0x1F,0x64,0x14,0x39,
+    0x00,0x00,0x00,0x14
+};
+static const unsigned char IDLE_CLEAR_BRANCH_STOCK
+        [IDLE_CLEAR_BRANCH_BYTES]={
+    0xF3,0x03,0x1F,0x2A /* mov w19, wzr */
+};
+static const unsigned char IDLE_CLEAR_DISK_CONTEXT[12]={
+    0xF3,0x03,0x1F,0x2A, /* mov w19, wzr */
+    0x3A,0x00,0x80,0x52, /* mov w26, #1 */
+    0x88,0x03,0x40,0x39  /* ldrb w8, [x28] */
+};
+static const uint32_t POLICY_IDLE_COUNT_LOAD=0xF9413C08u;
+static const uint32_t POLICY_IDLE_COUNT_CBZ=0xB4000A68u;
+static const uint32_t POLICY_MANAGER_INIT=0xAA0003F4u;
+static const uint32_t POLICY_SLOT_INDEX_INIT=0x5280011Bu;
+static const uint32_t POLICY_SLOT_COUNT_RELOAD=0xF9413E88u;
+static const uint32_t POLICY_SLOT_INDEX_STEP=0x9100437Bu;
+static const uint32_t POLICY_SLOT_TABLE_LOAD=0xF9413A88u;
+static const uint32_t POLICY_SLOT_STREAM_LOAD=0xF87B6908u;
+static const uint32_t POLICY_DEVICE_BEGIN_LOAD=0xF9412517u;
+static const uint32_t POLICY_DEVICE_END_LOAD=0xF9412919u;
+static const unsigned char POLICY_IDLE_COUNT_CBZ_STOCK[4]={
+    0x68,0x0A,0x00,0xB4
 };
 /* The stock BL displacement differs by ROM.  Its four bytes are generated
  * from the mapped ELF after the rest of this block is matched exactly. */
@@ -274,32 +377,150 @@ static const unsigned char UPDATE_APP_POLICY_LEGACY_TEMPLATE[56]={
     0x17,0xFF,0xFF,0xB5,0x03,0x00,0x00,0x14,
     0xF7,0x03,0x1F,0x2A,0x02,0x00,0x00,0x14
 };
-static const unsigned char GAME_POLICY_STOCK[20]={
-    0x1F,0x01,0x1A,0x6A,0x29,0x15,0x40,0xF9,
-    0x4A,0x79,0x1F,0x53,0xAB,0x83,0x5F,0xF8,
-    0x40,0x05,0x9F,0x1A
+static const unsigned char GAME_POLICY_STOCK[GAME_POLICY_PATCH_BYTES]={
+    0x7F,0x06,0x00,0x71,0xE9,0x07,0x40,0xF9,
+    0xE8,0x17,0x9F,0x1A,0x7F,0x02,0x00,0x71,
+    0xEA,0x17,0x9F,0x1A,0x1F,0x01,0x1A,0x6A,
+    0x29,0x15,0x40,0xF9,0x4A,0x79,0x1F,0x53,
+    0xAB,0x83,0x5F,0xF8,0x40,0x05,0x9F,0x1A
 };
-static const unsigned char GAME_POLICY_RELAXED[20]={
-    0x7F,0x02,0x00,0x71,0x29,0x15,0x40,0xF9,
-    0x4A,0x79,0x1F,0x53,0xAB,0x83,0x5F,0xF8,
-    0x40,0x01,0x9A,0x1A
+static const unsigned char GAME_POLICY_CONCURRENT_TEMPLATE
+        [GAME_POLICY_PATCH_BYTES]={
+    0x00,0x00,0x00,0x14,0x7F,0x02,0x00,0x71,
+    0xE8,0x07,0x9F,0x1A,0xEA,0x17,0x9F,0x1A,
+    0xE9,0x07,0x40,0xF9,0x1F,0x01,0x1A,0x6A,
+    0x29,0x15,0x40,0xF9,0x4A,0x79,0x1F,0x53,
+    0xAB,0x83,0x5F,0xF8,0x40,0x05,0x9F,0x1A
+};
+static const unsigned char GAME_POLICY_RELAXED[GAME_POLICY_PATCH_BYTES]={
+    0x9F,0x6A,0x14,0x39,0x7F,0x02,0x00,0x71,
+    0xE8,0x07,0x9F,0x1A,0xEA,0x17,0x9F,0x1A,
+    0xE9,0x07,0x40,0xF9,0x1F,0x01,0x1A,0x6A,
+    0x29,0x15,0x40,0xF9,0x4A,0x79,0x1F,0x53,
+    0xAB,0x83,0x5F,0xF8,0x40,0x05,0x9F,0x1A
+};
+static const unsigned char GAME_POLICY_PUBLIC_RELAXED
+        [GAME_POLICY_PATCH_BYTES]={
+    0x7F,0x06,0x00,0x71,0xE9,0x07,0x40,0xF9,
+    0xE8,0x17,0x9F,0x1A,0x7F,0x02,0x00,0x71,
+    0xEA,0x17,0x9F,0x1A,0x7F,0x02,0x00,0x71,
+    0x29,0x15,0x40,0xF9,0x4A,0x79,0x1F,0x53,
+    0xAB,0x83,0x5F,0xF8,0x40,0x01,0x9A,0x1A
+};
+static const unsigned char UPDATE_CONCURRENT_HELPER_V3_TEMPLATE
+        [UPDATE_CONCURRENT_PREVIOUS_BYTES]={
+    0x08,0x01,0x00,0x12,0x88,0x6A,0x14,0x39,
+    0x21,0x00,0x00,0x14,0x1F,0x20,0x03,0xD5,
+    0x88,0x6A,0x54,0x39,0xC8,0x03,0x00,0x34,
+    0x95,0x3A,0x41,0xF9,0x96,0x3E,0x41,0xF9,
+    0xF6,0x01,0x00,0xB4,0x17,0x01,0x80,0xD2,
+    0x18,0x00,0x80,0xD2,0xA9,0x6A,0x77,0xF8,
+    0x09,0x01,0x00,0xB4,0x2A,0x25,0x41,0xF9,
+    0x2B,0x29,0x41,0xF9,0x7F,0x01,0x0A,0xEB,
+    0x89,0x00,0x00,0x54,0x18,0x07,0x00,0x11,
+    0x1F,0x0B,0x00,0x71,0xA2,0x01,0x00,0x54,
+    0xD6,0x06,0x00,0xF1,0xF7,0x42,0x00,0x91,
+    0xA1,0xFE,0xFF,0x54,0x89,0x9E,0x42,0xF9,
+    0x3F,0x05,0x00,0xF1,0x88,0x00,0x00,0x54,
+    0x00,0x00,0x00,0x14,0x08,0x00,0x00,0x14,
+    0x00,0x00,0x00,0x14,0x28,0x00,0x80,0x52,
+    0x88,0x6A,0x14,0x39,0x04,0x00,0x00,0x14,
+    0x48,0x00,0x80,0x52,0x88,0x6A,0x14,0x39,
+    0xFA,0x03,0x1F,0x2A,0x00,0x00,0x00,0x14,
+    0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5,
+    0x1F,0x20,0x03,0xD5,0x1F,0x64,0x14,0x39,
+    0x1F,0x68,0x14,0x39,0x00,0x00,0x00,0x14,
+    0xF4,0x03,0x00,0xAA,0x00,0x00,0x00,0x14
+};
+static const unsigned char STREAM_OPEN_EPILOGUE_STOCK
+        [STREAM_OPEN_EPILOGUE_BYTES]={
+    0xE0,0x03,0x14,0x2A,0xF4,0x4F,0x54,0xA9,
+    0xF6,0x57,0x53,0xA9,0xF8,0x5F,0x52,0xA9,
+    0xFA,0x67,0x51,0xA9,0xFD,0x7B,0x4F,0xA9,
+    0xFC,0x83,0x40,0xF9,0xFF,0x43,0x05,0x91,
+    0xC0,0x03,0x5F,0xD6
+};
+static const unsigned char STREAM_OPEN_HELPER_TEMPLATE[20]={
+    0x74,0x00,0x00,0x35,0x60,0x0A,0x40,0xF9,
+    0x00,0x00,0x00,0x94,0xE0,0x03,0x14,0x2A,
+    0x00,0x00,0x00,0x14
+};
+static const unsigned char UPDATE_CONCURRENT_HELPER_V2_TEMPLATE
+        [UPDATE_CONCURRENT_PREVIOUS_BYTES]={
+    0x88,0x6A,0x54,0x39,0xC8,0x03,0x00,0x34,
+    0x95,0x3A,0x41,0xF9,0x96,0x3E,0x41,0xF9,
+    0xF6,0x01,0x00,0xB4,0x17,0x01,0x80,0xD2,
+    0x18,0x00,0x80,0xD2,0xA9,0x6A,0x77,0xF8,
+    0x09,0x01,0x00,0xB4,0x2A,0x25,0x41,0xF9,
+    0x2B,0x29,0x41,0xF9,0x7F,0x01,0x0A,0xEB,
+    0x89,0x00,0x00,0x54,0x18,0x07,0x00,0x11,
+    0x1F,0x0B,0x00,0x71,0xA2,0x01,0x00,0x54,
+    0xD6,0x06,0x00,0xF1,0xF7,0x42,0x00,0x91,
+    0xA1,0xFE,0xFF,0x54,0x89,0x9E,0x42,0xF9,
+    0x3F,0x05,0x00,0xF1,0x88,0x00,0x00,0x54,
+    0x9F,0x6A,0x14,0x39,0x08,0x00,0x00,0x14,
+    0x00,0x00,0x00,0x14,0x28,0x00,0x80,0x52,
+    0x88,0x6A,0x14,0x39,0x04,0x00,0x00,0x14,
+    0x48,0x00,0x80,0x52,0x88,0x6A,0x14,0x39,
+    0xFA,0x03,0x1F,0x2A,0x00,0x00,0x00,0x14,
+    0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5,
+    0x1F,0x20,0x03,0xD5,0x1F,0x64,0x14,0x39,
+    0x1F,0x68,0x14,0x39,0x00,0x00,0x00,0x14,
+    0xF4,0x03,0x00,0xAA,0x00,0x00,0x00,0x14
+};
+static const unsigned char UPDATE_CONCURRENT_HELPER_V1_TEMPLATE
+        [UPDATE_CONCURRENT_LEGACY_BYTES]={
+    0x88,0x6A,0x54,0x39,0x7F,0x06,0x00,0x71,
+    0xC9,0x00,0x00,0x54,0xE8,0x00,0x00,0x34,
+    0x48,0x00,0x80,0x52,0x88,0x6A,0x14,0x39,
+    0xFA,0x03,0x1F,0x2A,0x03,0x00,0x00,0x14,
+    0x48,0x00,0x08,0x36,0x9F,0x6A,0x14,0x39,
+    0x00,0x00,0x00,0x14,0x9F,0x66,0x14,0x39,
+    0x9F,0x6A,0x14,0x39,0x00,0x00,0x00,0x14,
+    0xF4,0x03,0x00,0xAA,0x00,0x00,0x00,0x14
+};
+static const unsigned char UPDATE_CONCURRENT_HELPER_V0_TEMPLATE
+        [UPDATE_CONCURRENT_LEGACY_BYTES]={
+    0x88,0x6A,0x54,0x39,0x7F,0x06,0x00,0x71,
+    0xC9,0x00,0x00,0x54,0xE8,0x00,0x00,0x34,
+    0x48,0x00,0x80,0x52,0x88,0x6A,0x14,0x39,
+    0xFA,0x03,0x1F,0x2A,0x03,0x00,0x00,0x14,
+    0x48,0x00,0x08,0x36,0x9F,0x6A,0x14,0x39,
+    0x00,0x00,0x00,0x14,0x1F,0x64,0x14,0x39,
+    0x1F,0x68,0x14,0x39,0x00,0x00,0x00,0x14,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00
 };
 static const size_t STREAM_EVENT_PATCH_OFFSETS[STREAM_EVENT_PATCH_COUNT]={
-    0x1F94u,0x22B4u
+    0x1F94u,0x2170u,0x22B4u
 };
 static const size_t STREAM_EVENT_PATCH_SIZES[STREAM_EVENT_PATCH_COUNT]={
-    8u,4u
+    28u,28u,4u
 };
-static const unsigned char STREAM_EVENT_STOCK
+static const unsigned char STREAM_EVENT_STOCK_TEMPLATE
         [STREAM_EVENT_PATCH_COUNT][STREAM_EVENT_PATCH_MAX_BYTES]={
-    {0x08,0xD4,0x0F,0x36,0x40,0x07,0x00,0x91},
+    {0x08,0xD4,0x0F,0x36,0x40,0x07,0x00,0x91,
+     0xF5,0xCB,0x40,0xF9,0x7B,0x0A,0x40,0xF9,
+     0x00,0x00,0x00,0x00,0x1F,0x40,0x00,0xB1,
+     0xA2,0x50,0x00,0x54},
+    {0x58,0x06,0x00,0xB0,0x18,0xC7,0x46,0xF9,
+     0x08,0x03,0x40,0x39,0x88,0x01,0x08,0x36,
+     0xE6,0xCB,0x40,0xF9,0xC3,0xEC,0xFF,0xF0,
+     0x63,0x9C,0x25,0x91},
     {0xD8,0xFD,0xFF,0x17,0x00,0x00,0x00,0x00}
 };
-static const unsigned char STREAM_EVENT_RECOMPUTE
+static const unsigned char STREAM_EVENT_RECOMPUTE_LEGACY
         [STREAM_EVENT_PATCH_COUNT][STREAM_EVENT_PATCH_MAX_BYTES]={
     /* A committed +appname supersedes the transient handoff. */
     {0x1F,0x67,0x14,0x39,0x18,0x01,0x00,0x14},
+    {0},
     {0x51,0x00,0x00,0x14}
+};
+static const unsigned char STREAM_EVENT_INLINE_TEMPLATE
+        [STREAM_EVENT_PATCH_MAX_BYTES]={
+    0x1F,0x67,0x14,0x39,0x08,0x9F,0x42,0xF9,
+    0x1F,0x05,0x00,0xF1,0x69,0x00,0x00,0x54,
+    0x28,0x00,0x80,0x52,0x08,0x6B,0x14,0x39,
+    0x00,0x00,0x00,0x14
 };
 static const unsigned char STREAM_EVENT_HANDOFF_LEGACY
         [STREAM_EVENT_PATCH_MAX_BYTES]={
@@ -320,17 +541,30 @@ static const unsigned char STREAM_REF_STOCK_TEMPLATE[STREAM_REF_PATCH_BYTES]={
     0x04,0xCF,0x80,0x52,0xE5,0x03,0x03,0xAA,0xE6,0x03,0x15,0xAA,0x25,0xC9,0x02,0x94,
     0x79,0x00,0x00,0x14
 };
-static const unsigned char STREAM_REF_PATCH_TEMPLATE[STREAM_REF_PATCH_BYTES]={
+static const unsigned char STREAM_REF_FAILED_IDLE_GUARD_TEMPLATE
+        [STREAM_REF_PATCH_BYTES]={
     0xF5,0x03,0x00,0xAA,0xE8,0x03,0x49,0x39,0x68,0x00,0x00,0x36,0xE0,0x2B,0x41,0xF9,
     0x00,0x00,0x00,0x94,0xA8,0x2A,0x40,0xB9,0xC8,0x01,0x00,0x35,0x76,0x0A,0x40,0xF9,
     0xC8,0x9E,0x42,0xF9,0x1F,0x05,0x00,0xF1,0x61,0x03,0x00,0x54,0xC8,0x4E,0x54,0x39,
     0x28,0x03,0x00,0x34,0xE0,0x03,0x16,0xAA,0x00,0x00,0x00,0x94,0x1F,0x04,0x00,0x71,
     0xA1,0x02,0x00,0x54,0x28,0x00,0x80,0x52,0xC8,0x66,0x14,0x39,0x12,0x00,0x00,0x14,
     0xDE,0x00,0x00,0x14,0x28,0x17,0x40,0xF9,0xA9,0x83,0x5F,0xF8,0x1F,0x01,0x09,0xEB,
-    0x01,0x00,0x00,0x54,0x1F,0x20,0x03,0xD5,0x1F,0x20,0x03,0xD5,0xE0,0x03,0x16,0xAA,
+    0x01,0x00,0x00,0x54,0x55,0x00,0x00,0x35,0xDF,0x66,0x14,0x39,0xE0,0x03,0x16,0xAA,
     0xF4,0x4F,0x5B,0xA9,0xF6,0x57,0x5A,0xA9,0xF8,0x5F,0x59,0xA9,0xFA,0x67,0x58,0xA9,
     0xFC,0x6F,0x57,0xA9,0xFD,0x7B,0x56,0xA9,0xFF,0x03,0x07,0x91,0x00,0x00,0x00,0x14,
     0x1F,0x20,0x03,0xD5
+};
+static const unsigned char STREAM_REF_PATCH_TEMPLATE[STREAM_REF_PATCH_BYTES]={
+    0xF5,0x03,0x00,0xAA,0xE8,0x03,0x49,0x39,0x68,0x00,0x00,0x36,0xE0,0x2B,0x41,0xF9,
+    0x00,0x00,0x00,0x94,0xA8,0x2A,0x40,0xB9,0x88,0x1D,0x00,0x35,0x76,0x0A,0x40,0xF9,
+    0xC8,0x9E,0x42,0xF9,0x1F,0x05,0x00,0xF1,0x61,0x03,0x00,0x54,0xC8,0x4E,0x54,0x39,
+    0x28,0x03,0x00,0x34,0xE0,0x03,0x16,0xAA,0x00,0x00,0x00,0x94,0x1F,0x04,0x00,0x71,
+    0xA1,0x02,0x00,0x54,0x68,0xB6,0x40,0xB9,0x1F,0x09,0x1E,0x72,0x21,0x02,0x00,0x54,
+    0x08,0x02,0x90,0x37,0x10,0x00,0x00,0x14,0x28,0x17,0x40,0xF9,0xA9,0x83,0x5F,0xF8,
+    0x1F,0x01,0x09,0xEB,0x01,0x00,0x00,0x54,0x1F,0x20,0x03,0xD5,0xE0,0x03,0x16,0xAA,
+    0xF4,0x4F,0x5B,0xA9,0xF6,0x57,0x5A,0xA9,0xF8,0x5F,0x59,0xA9,0xFA,0x67,0x58,0xA9,
+    0xFC,0x6F,0x57,0xA9,0xFD,0x7B,0x56,0xA9,0xFF,0x03,0x07,0x91,0x00,0x00,0x00,0x14,
+    0xC0,0x66,0x14,0x39
 };
 static const unsigned char OUTPUT_POOL_TAIL_STOCK[OUTPUT_POOL_TAIL_PATCH_BYTES]={
     0x28,0x17,0x40,0xF9
@@ -1015,11 +1249,123 @@ static int executable_hal_map_contains(pid_t pid, uintptr_t start, uintptr_t end
     return found;
 }
 
-/* The helper may live only after the final executable PT_LOAD's p_memsz and
- * before the loader-rounded page end.  Those bytes are outside every ELF load
- * segment, yet remain executable in the target's private file mapping. */
+#define EXECUTABLE_TAIL_ALIGN 16u
+
+typedef struct {
+    uintptr_t segment_file_end;
+    uintptr_t segment_mem_end;
+    uintptr_t tail_start;
+    uintptr_t tail_end;
+    uintptr_t concurrent_off;
+    uintptr_t cache_off;
+    uint64_t concurrent_file_off;
+    uint64_t cache_file_off;
+} executable_tail_layout_t;
+
+static int checked_absolute_range(uintptr_t base, uintptr_t offset,
+                                  size_t length, uintptr_t *start,
+                                  uintptr_t *end) {
+    if (!start || !end || base > UINTPTR_MAX - offset) return 0;
+    uintptr_t absolute = base + offset;
+    if (length > (size_t)(UINTPTR_MAX - absolute)) return 0;
+    *start = absolute;
+    *end = absolute + (uintptr_t)length;
+    return 1;
+}
+
+/* Reserve the highest RX page-tail slot for the cache helper and place the
+ * lifecycle helper immediately below it. Both slots are outside every
+ * PT_LOAD, so no function body or ELF object is repurposed as a code cave. */
+static int derive_executable_tail_layout(
+        const Elf64_Phdr *ph, size_t phnum, uintptr_t page,
+        executable_tail_layout_t *layout) {
+    if (!ph || !phnum || !layout || !page || (page & (page - 1)) != 0)
+        return 0;
+    memset(layout, 0, sizeof(*layout));
+    uintptr_t segment_mem_end = 0;
+    uintptr_t segment_file_end = 0;
+    int executable_index = -1;
+    for (size_t i = 0; i < phnum; ++i) {
+        if (ph[i].p_type != PT_LOAD) continue;
+        if (ph[i].p_filesz > ph[i].p_memsz ||
+            ph[i].p_vaddr > UINTPTR_MAX - ph[i].p_memsz ||
+            ph[i].p_vaddr > UINTPTR_MAX - ph[i].p_filesz) {
+            return 0;
+        }
+        if (!(ph[i].p_flags & PF_X) || ph[i].p_memsz == 0) continue;
+        uintptr_t current_mem_end =
+            (uintptr_t)(ph[i].p_vaddr + ph[i].p_memsz);
+        if (current_mem_end > segment_mem_end) {
+            segment_mem_end = current_mem_end;
+            segment_file_end =
+                (uintptr_t)(ph[i].p_vaddr + ph[i].p_filesz);
+            executable_index = (int)i;
+        }
+    }
+    if (executable_index < 0 || !segment_mem_end ||
+        segment_mem_end > UINTPTR_MAX - (page - 1) ||
+        segment_mem_end > UINTPTR_MAX - (EXECUTABLE_TAIL_ALIGN - 1)) {
+        return 0;
+    }
+    uintptr_t occupied_end = segment_mem_end;
+    if (segment_file_end > occupied_end) occupied_end = segment_file_end;
+    uintptr_t tail_start =
+        (occupied_end + EXECUTABLE_TAIL_ALIGN - 1) &
+        ~(uintptr_t)(EXECUTABLE_TAIL_ALIGN - 1);
+    uintptr_t tail_end =
+        (segment_mem_end + page - 1) & ~(uintptr_t)(page - 1);
+    if (tail_end <= tail_start ||
+        tail_end - tail_start <
+            UPDATE_CONCURRENT_HELPER_BYTES + CACHE_HELPER_TOTAL_BYTES) {
+        return 0;
+    }
+    uintptr_t cache_off =
+        (tail_end - CACHE_HELPER_TOTAL_BYTES) &
+        ~(uintptr_t)(EXECUTABLE_TAIL_ALIGN - 1);
+    if (cache_off < UPDATE_CONCURRENT_HELPER_BYTES) return 0;
+    uintptr_t concurrent_off =
+        (cache_off - UPDATE_CONCURRENT_HELPER_BYTES) &
+        ~(uintptr_t)(EXECUTABLE_TAIL_ALIGN - 1);
+    if (concurrent_off < tail_start ||
+        concurrent_off > UINTPTR_MAX - UPDATE_CONCURRENT_HELPER_BYTES ||
+        concurrent_off + UPDATE_CONCURRENT_HELPER_BYTES > cache_off ||
+        cache_off > UINTPTR_MAX - CACHE_HELPER_TOTAL_BYTES ||
+        cache_off + CACHE_HELPER_TOTAL_BYTES > tail_end) {
+        return 0;
+    }
+    uintptr_t claimed_end = cache_off + CACHE_HELPER_TOTAL_BYTES;
+    for (size_t i = 0; i < phnum; ++i) {
+        if (ph[i].p_type != PT_LOAD) continue;
+        if (ph[i].p_vaddr > UINTPTR_MAX - ph[i].p_memsz) return 0;
+        if (ph[i].p_memsz == 0) continue;
+        uintptr_t other_start = (uintptr_t)ph[i].p_vaddr;
+        uintptr_t other_end =
+            (uintptr_t)(ph[i].p_vaddr + ph[i].p_memsz);
+        if (other_start < claimed_end && other_end > concurrent_off)
+            return 0;
+    }
+    const Elf64_Phdr *selected = &ph[executable_index];
+    uint64_t concurrent_delta =
+        (uint64_t)concurrent_off - selected->p_vaddr;
+    uint64_t cache_delta = (uint64_t)cache_off - selected->p_vaddr;
+    if (concurrent_delta > UINT64_MAX - selected->p_offset ||
+        cache_delta > UINT64_MAX - selected->p_offset) {
+        return 0;
+    }
+    layout->segment_file_end = segment_file_end;
+    layout->segment_mem_end = segment_mem_end;
+    layout->tail_start = tail_start;
+    layout->tail_end = tail_end;
+    layout->concurrent_off = concurrent_off;
+    layout->cache_off = cache_off;
+    layout->concurrent_file_off = selected->p_offset + concurrent_delta;
+    layout->cache_file_off = selected->p_offset + cache_delta;
+    return 1;
+}
+
 static uintptr_t discover_cache_helper(pid_t pid, uintptr_t base, size_t need) {
-    if (!base || !need || need > 4096 || !g_libpath[0] || !g_lib_inode) return 0;
+    if (!base || need != CACHE_HELPER_TOTAL_BYTES ||
+        !g_libpath[0] || !g_lib_inode) return 0;
     Elf64_Ehdr eh;
     if (mem_r(pid, base, &eh, sizeof(eh)) != 0 ||
         memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0 ||
@@ -1037,75 +1383,39 @@ static uintptr_t discover_cache_helper(pid_t pid, uintptr_t base, size_t need) {
         fprintf(stderr, "[a2h_patch] icache helper: program headers unreadable\n");
         return 0;
     }
-    uintptr_t segment_end = 0;
-    int executable_index = -1;
-    for (size_t i = 0; i < eh.e_phnum; ++i) {
-        if (ph[i].p_type != PT_LOAD) continue;
-        if (ph[i].p_filesz > ph[i].p_memsz ||
-            ph[i].p_vaddr > UINTPTR_MAX - ph[i].p_memsz) {
-            free(ph);
-            fprintf(stderr, "[a2h_patch] icache helper: malformed PT_LOAD index=%lu\n",
-                    (unsigned long)i);
-            return 0;
-        }
-        if (!(ph[i].p_flags & PF_X) || ph[i].p_memsz == 0) continue;
-        uintptr_t current_end = (uintptr_t)(ph[i].p_vaddr + ph[i].p_memsz);
-        if (current_end > segment_end) {
-            segment_end = current_end;
-            executable_index = (int)i;
-        }
-    }
     long page_long = sysconf(_SC_PAGESIZE);
     uintptr_t page = page_long > 0 ? (uintptr_t)page_long : 4096;
-    if (executable_index < 0 || !segment_end || (page & (page - 1)) != 0 ||
-        segment_end > UINTPTR_MAX - (page - 1) ||
-        segment_end > UINTPTR_MAX - 15) {
+    executable_tail_layout_t layout;
+    if (!derive_executable_tail_layout(ph, eh.e_phnum, page, &layout)) {
         free(ph);
         fprintf(stderr, "[a2h_patch] icache helper: executable PT_LOAD tail unavailable\n");
         return 0;
     }
-    uintptr_t tail_start = (segment_end + 15) & ~(uintptr_t)15;
-    uintptr_t tail_end = (segment_end + page - 1) & ~(page - 1);
-    if (tail_end <= tail_start || tail_end - tail_start < need) {
-        free(ph);
-        fprintf(stderr,
-                "[a2h_patch] icache helper: RX tail too small rel=0x%lx-0x%lx need=%lu\n",
-                (unsigned long)tail_start, (unsigned long)tail_end,
-                (unsigned long)need);
-        return 0;
-    }
-    uintptr_t candidate = (tail_end - need) & ~(uintptr_t)15;
-    if (candidate < tail_start || candidate > UINTPTR_MAX - need) {
-        free(ph);
-        return 0;
-    }
-    for (size_t i = 0; i < eh.e_phnum; ++i) {
-        if (ph[i].p_type != PT_LOAD || ph[i].p_memsz == 0) continue;
-        uintptr_t other_start = (uintptr_t)ph[i].p_vaddr;
-        uintptr_t other_end = (uintptr_t)(ph[i].p_vaddr + ph[i].p_memsz);
-        if (other_start < candidate + need && other_end > candidate) {
-            free(ph);
-            fprintf(stderr,
-                    "[a2h_patch] icache helper: PT_LOAD overlap index=%lu\n",
-                    (unsigned long)i);
-            return 0;
-        }
-    }
     free(ph);
-    if (base > UINTPTR_MAX - candidate || base + candidate > UINTPTR_MAX - need) return 0;
-    uintptr_t absolute = base + candidate;
+    uintptr_t concurrent_start = 0, concurrent_end = 0;
+    uintptr_t absolute = 0, cache_end = 0;
+    if (!checked_absolute_range(base, layout.concurrent_off,
+                                UPDATE_CONCURRENT_HELPER_BYTES,
+                                &concurrent_start, &concurrent_end) ||
+        !checked_absolute_range(base, layout.cache_off, need,
+                                &absolute, &cache_end)) {
+        return 0;
+    }
     uintptr_t map_start = 0, map_end = 0;
-    if (!executable_hal_map_contains(pid, absolute, absolute + need,
+    if (!executable_hal_map_contains(pid, concurrent_start, cache_end,
                                      &map_start, &map_end)) {
         fprintf(stderr,
                 "[a2h_patch] icache helper: candidate lacks exact private HAL RX map\n");
         return 0;
     }
     fprintf(stderr,
-            "[a2h_patch] icache helper: ELF RX tail rel=0x%lx abs=0x%lx bytes=%lu map=0x%lx-0x%lx\n",
-            (unsigned long)candidate, (unsigned long)absolute,
-            (unsigned long)need, (unsigned long)map_start,
-            (unsigned long)map_end);
+            "[a2h_patch] icache helper: ELF RX tail file_end=0x%lx mem_end=0x%lx concurrent=0x%lx cache=0x%lx abs=0x%lx bytes=%lu map=0x%lx-0x%lx\n",
+            (unsigned long)layout.segment_file_end,
+            (unsigned long)layout.segment_mem_end,
+            (unsigned long)layout.concurrent_off,
+            (unsigned long)layout.cache_off,
+            (unsigned long)absolute, (unsigned long)need,
+            (unsigned long)map_start, (unsigned long)map_end);
     return absolute;
 }
 
@@ -2279,7 +2589,7 @@ static int parse_unique_func_symbol(int fd, uint64_t file_size,
                                     size_t expected_size,
                                     elf_a2h_symbol_t *out) {
     Elf64_Ehdr eh;
-    if (!out || !symbol_name || !symbol_name[0] || !expected_size ||
+    if (!out || !symbol_name || !symbol_name[0] ||
         !pread_exact(fd, &eh, sizeof(eh), 0) ||
         memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0 ||
         eh.e_ident[EI_CLASS] != ELFCLASS64 ||
@@ -2358,7 +2668,8 @@ static int parse_unique_func_symbol(int fd, uint64_t file_size,
                 sh[sym->st_shndx].sh_type != SHT_PROGBITS ||
                 !(sh[sym->st_shndx].sh_flags & SHF_ALLOC) ||
                 !(sh[sym->st_shndx].sh_flags & SHF_EXECINSTR) ||
-                sym->st_size != expected_size ||
+                sym->st_size == 0 ||
+                (expected_size && sym->st_size != expected_size) ||
                 sym->st_size > ELF_SYMBOL_MAX_BYTES ||
                 sym->st_value > UINTPTR_MAX || sym->st_size > UINTPTR_MAX - sym->st_value ||
                 sh[sym->st_shndx].sh_size >
@@ -2410,9 +2721,11 @@ static int parse_unique_func_symbol(int fd, uint64_t file_size,
     free(ph); free(sh);
     if (invalid || (named > 0 && unique != 1)) {
         fprintf(stderr,
-                "[a2h_patch] ELF symbol rejected name=%s named=%d unique=%d invalid=%d expected_size=%lu\n",
+                "[a2h_patch] ELF symbol rejected name=%s named=%d unique=%d invalid=%d expected_size=%s%lu\n",
                 symbol_name, named, unique, invalid,
-                (unsigned long)expected_size);
+                expected_size ? "" : "any<=",
+                (unsigned long)(expected_size ? expected_size :
+                                ELF_SYMBOL_MAX_BYTES));
         return ELF_RESOLVE_REJECTED;
     }
     if (named == 0) {
@@ -2440,7 +2753,7 @@ static int resolve_func_by_elf_symbol(pid_t pid, uintptr_t base,
     if (fd < 0) return 0;
     elf_a2h_symbol_t sym;
     int parsed = parse_unique_func_symbol(fd, file_size, "is_A2H_app",
-                                          A2H_APP_FUNC_BYTES, &sym);
+                                          0, &sym);
     if (parsed != ELF_RESOLVE_VERIFIED) {
         close(fd);
         return parsed;
@@ -2530,7 +2843,19 @@ typedef struct {
     uintptr_t update_off;
     uintptr_t policy_off;
     uintptr_t stream_event_off;
+    uintptr_t stream_open_off;
     uintptr_t output_pool_off;
+    uintptr_t concurrent_helper_off;
+    size_t update_flags_patch_off;
+    size_t update_app_policy_patch_off;
+    size_t policy_idle_count_cbz_off;
+    size_t policy_idle_clear_off;
+    size_t policy_game_off;
+    size_t stream_ref_patch_off;
+    size_t stream_event_patch_offsets[STREAM_EVENT_PATCH_COUNT];
+    size_t stream_open_patch_off;
+    size_t stream_update_call_off;
+    size_t output_pool_tail_patch_off;
     unsigned char app_policy_disk[UPDATE_APP_POLICY_BYTES];
     unsigned char app_policy_stock[UPDATE_APP_POLICY_BYTES];
     unsigned char app_policy_relaxed[UPDATE_APP_POLICY_BYTES];
@@ -2539,16 +2864,44 @@ typedef struct {
     uintptr_t allowed_call_target;
     unsigned char stream_ref_stock[STREAM_REF_PATCH_BYTES];
     unsigned char stream_ref_patched[STREAM_REF_PATCH_BYTES];
-    unsigned char stream_ref_handoff_legacy[STREAM_REF_PATCH_BYTES];
+    unsigned char stream_ref_persistent_legacy[STREAM_REF_PATCH_BYTES];
+    unsigned char stream_ref_failed_idle_guard[STREAM_REF_PATCH_BYTES];
     unsigned char stream_ref_legacy[STREAM_REF_PATCH_BYTES];
     uintptr_t stream_ref_delete_target;
     uintptr_t stream_ref_update_target;
+    uintptr_t stream_event_strlen_target;
     uintptr_t output_pool_stack_fail_target;
     unsigned char output_pool_tail_patched[OUTPUT_POOL_TAIL_PATCH_BYTES];
+    unsigned char output_pool_tail_persistent_legacy
+        [OUTPUT_POOL_TAIL_PATCH_BYTES];
+    unsigned char update_flags_patched[sizeof(UPDATE_FLAGS_STOCK)];
+    unsigned char update_flags_guarded_legacy[sizeof(UPDATE_FLAGS_STOCK)];
+    unsigned char concurrent_helper_disk[UPDATE_CONCURRENT_HELPER_BYTES];
+    unsigned char concurrent_helper_patched[UPDATE_CONCURRENT_HELPER_BYTES];
+    unsigned char concurrent_helper_previous[UPDATE_CONCURRENT_HELPER_BYTES];
+    unsigned char concurrent_helper_previous2[UPDATE_CONCURRENT_HELPER_BYTES];
+    unsigned char concurrent_helper_legacy[UPDATE_CONCURRENT_HELPER_BYTES];
+    unsigned char concurrent_helper_legacy2[UPDATE_CONCURRENT_HELPER_BYTES];
+    unsigned char policy_concurrent[GAME_POLICY_PATCH_BYTES];
+    unsigned char stream_event_stock[STREAM_EVENT_PATCH_COUNT]
+                                    [STREAM_EVENT_PATCH_MAX_BYTES];
+    unsigned char stream_event_patched[STREAM_EVENT_PATCH_COUNT]
+                                      [STREAM_EVENT_PATCH_MAX_BYTES];
+    unsigned char stream_event_recompute_legacy[STREAM_EVENT_PATCH_COUNT]
+                                               [STREAM_EVENT_PATCH_MAX_BYTES];
+    unsigned char stream_event_handoff_legacy[STREAM_EVENT_PATCH_MAX_BYTES];
+    unsigned char stream_open_stock[STREAM_OPEN_EVENT_BYTES];
+    unsigned char stream_open_patched[STREAM_OPEN_EVENT_BYTES];
+    unsigned char idle_count_branch[sizeof(POLICY_IDLE_COUNT_CBZ_STOCK)];
+    unsigned char idle_clear_branch[IDLE_CLEAR_BRANCH_BYTES];
     int update_flags_state;
+    int concurrent_helper_state;
     int update_app_policy_state;
+    int idle_count_state;
+    int idle_clear_state;
     int policy_relaxed;
     int stream_ref_state;
+    int stream_open_state;
     int output_pool_state;
     unsigned int stream_events_patched;
     int valid;
@@ -2556,37 +2909,12 @@ typedef struct {
 
 static auxiliary_targets_t g_auxiliary={0};
 
-static int exact_function_overlay(const unsigned char *disk,
-                                  const unsigned char *live,
-                                  size_t func_size, size_t patch_off,
-                                  const unsigned char *stock,
-                                  const unsigned char *patched,
-                                  size_t patch_size, int *is_patched) {
-    if (!disk || !live || !stock || !patched || !is_patched ||
-        patch_off > func_size || patch_size > func_size - patch_off ||
-        memcmp(disk + patch_off, stock, patch_size) != 0 ||
-        memcmp(live, disk, patch_off) != 0 ||
-        memcmp(live + patch_off + patch_size,
-               disk + patch_off + patch_size,
-               func_size - patch_off - patch_size) != 0) {
-        return 0;
-    }
-    if (memcmp(live + patch_off, stock, patch_size) == 0) {
-        *is_patched = 0;
-        return 1;
-    }
-    if (memcmp(live + patch_off, patched, patch_size) == 0) {
-        *is_patched = 1;
-        return 1;
-    }
-    return 0;
-}
-
 typedef struct {
     size_t patch_off;
     const unsigned char *stock;
     const unsigned char *patched;
     const unsigned char *alternate;
+    const unsigned char *alternate2;
     const unsigned char *legacy;
     size_t patch_size;
 } owned_overlay_region_t;
@@ -2595,8 +2923,151 @@ enum {
     OVERLAY_STOCK = 0,
     OVERLAY_PATCHED = 1,
     OVERLAY_ALTERNATE = 2,
-    OVERLAY_LEGACY = 3
+    OVERLAY_ALTERNATE2 = 3,
+    OVERLAY_ALTERNATE3 = 4,
+    OVERLAY_LEGACY = 5
 };
+
+static int bytes_are_zero(const unsigned char *bytes, size_t count) {
+    if (!bytes) return 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (bytes[i] != 0) return 0;
+    }
+    return 1;
+}
+
+static int prepare_executable_concurrent_helper(
+        int fd, uint64_t file_size, pid_t pid, uintptr_t base) {
+    Elf64_Ehdr eh;
+    if (fd < 0 || !base ||
+        !pread_exact(fd, &eh, sizeof(eh), 0) ||
+        memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0 ||
+        eh.e_ident[EI_CLASS] != ELFCLASS64 ||
+        eh.e_ident[EI_DATA] != ELFDATA2LSB ||
+        eh.e_phentsize != sizeof(Elf64_Phdr) ||
+        eh.e_phnum == 0 || eh.e_phnum > 128 ||
+        !file_range_ok(eh.e_phoff,
+                       (uint64_t)eh.e_phnum * sizeof(Elf64_Phdr),
+                       file_size)) {
+        fprintf(stderr,
+                "[a2h_patch] concurrent helper rejected: invalid ELF headers\n");
+        return 0;
+    }
+    size_t ph_bytes = (size_t)eh.e_phnum * sizeof(Elf64_Phdr);
+    Elf64_Phdr *ph = (Elf64_Phdr *)malloc(ph_bytes);
+    if (!ph || !pread_exact(fd, ph, ph_bytes, eh.e_phoff)) {
+        free(ph);
+        fprintf(stderr,
+                "[a2h_patch] concurrent helper rejected: program headers unreadable\n");
+        return 0;
+    }
+    long page_long = sysconf(_SC_PAGESIZE);
+    uintptr_t page = page_long > 0 ? (uintptr_t)page_long : 4096;
+    executable_tail_layout_t layout;
+    int derived = derive_executable_tail_layout(
+        ph, eh.e_phnum, page, &layout);
+    free(ph);
+    if (!derived || layout.cache_off < layout.concurrent_off ||
+        layout.cache_off > UINTPTR_MAX - CACHE_HELPER_TOTAL_BYTES) {
+        fprintf(stderr,
+                "[a2h_patch] concurrent helper rejected: RX tail layout unavailable\n");
+        return 0;
+    }
+    size_t span = (size_t)(layout.cache_off + CACHE_HELPER_TOTAL_BYTES -
+                           layout.concurrent_off);
+    if (span < UPDATE_CONCURRENT_HELPER_BYTES || span > 4096 ||
+        layout.cache_file_off < layout.concurrent_file_off ||
+        layout.cache_file_off - layout.concurrent_file_off !=
+            layout.cache_off - layout.concurrent_off ||
+        !file_range_ok(layout.concurrent_file_off, span, file_size)) {
+        fprintf(stderr,
+                "[a2h_patch] concurrent helper rejected: disk tail range invalid\n");
+        return 0;
+    }
+    unsigned char *disk_span = (unsigned char *)malloc(span);
+    if (!disk_span ||
+        !pread_exact(fd, disk_span, span, layout.concurrent_file_off) ||
+        !bytes_are_zero(disk_span, span)) {
+        free(disk_span);
+        fprintf(stderr,
+                "[a2h_patch] concurrent helper rejected: disk RX tail is not zero\n");
+        return 0;
+    }
+    memcpy(g_auxiliary.concurrent_helper_disk, disk_span,
+           UPDATE_CONCURRENT_HELPER_BYTES);
+    free(disk_span);
+    uintptr_t concurrent_start = 0, concurrent_end = 0;
+    uintptr_t cache_start = 0, cache_end = 0;
+    if (!checked_absolute_range(base, layout.concurrent_off,
+                                UPDATE_CONCURRENT_HELPER_BYTES,
+                                &concurrent_start, &concurrent_end) ||
+        !checked_absolute_range(base, layout.cache_off,
+                                CACHE_HELPER_TOTAL_BYTES,
+                                &cache_start, &cache_end) ||
+        concurrent_end > cache_start ||
+        !executable_hal_map_contains(pid, concurrent_start, cache_end,
+                                     NULL, NULL)) {
+        fprintf(stderr,
+                "[a2h_patch] concurrent helper rejected: exact HAL RX map missing\n");
+        return 0;
+    }
+    g_auxiliary.concurrent_helper_off = layout.concurrent_off;
+    fprintf(stderr,
+            "[a2h_patch] concurrent helper RX slot file_end=0x%lx mem_end=0x%lx slot=0x%lx cache=0x%lx bytes=%u disk=zero\n",
+            (unsigned long)layout.segment_file_end,
+            (unsigned long)layout.segment_mem_end,
+            (unsigned long)layout.concurrent_off,
+            (unsigned long)layout.cache_off,
+            UPDATE_CONCURRENT_HELPER_BYTES);
+    return 1;
+}
+
+static int resolve_owned_executable_helper(pid_t pid, uintptr_t base) {
+    unsigned char live[UPDATE_CONCURRENT_HELPER_BYTES];
+    if (!g_auxiliary.concurrent_helper_off ||
+        base > UINTPTR_MAX - g_auxiliary.concurrent_helper_off ||
+        mem_r(pid, base + g_auxiliary.concurrent_helper_off,
+              live, sizeof(live)) != 0) {
+        return 0;
+    }
+    if (memcmp(live, g_auxiliary.concurrent_helper_disk,
+               sizeof(live)) == 0) {
+        g_auxiliary.concurrent_helper_state = OVERLAY_STOCK;
+    } else if (memcmp(live, g_auxiliary.concurrent_helper_patched,
+                      sizeof(live)) == 0) {
+        g_auxiliary.concurrent_helper_state = OVERLAY_PATCHED;
+    } else if (memcmp(live, g_auxiliary.concurrent_helper_previous,
+                      sizeof(live)) == 0) {
+        g_auxiliary.concurrent_helper_state = OVERLAY_LEGACY;
+    } else if (memcmp(live, g_auxiliary.concurrent_helper_previous2,
+                      sizeof(live)) == 0) {
+        g_auxiliary.concurrent_helper_state = OVERLAY_ALTERNATE3;
+    } else if (memcmp(live, g_auxiliary.concurrent_helper_legacy,
+                      sizeof(live)) == 0) {
+        g_auxiliary.concurrent_helper_state = OVERLAY_ALTERNATE;
+    } else if (memcmp(live, g_auxiliary.concurrent_helper_legacy2,
+                      sizeof(live)) == 0) {
+        g_auxiliary.concurrent_helper_state = OVERLAY_ALTERNATE2;
+    } else {
+        fprintf(stderr,
+                "[a2h_patch] concurrent helper rejected: RX slot is foreign or partial\n");
+        return 0;
+    }
+    fprintf(stderr,
+            "[a2h_patch] concurrent helper ownership slot=0x%lx state=%s\n",
+            (unsigned long)g_auxiliary.concurrent_helper_off,
+            g_auxiliary.concurrent_helper_state == OVERLAY_PATCHED ?
+                "owned" :
+            (g_auxiliary.concurrent_helper_state == OVERLAY_LEGACY ?
+                "previous-176" :
+            (g_auxiliary.concurrent_helper_state == OVERLAY_ALTERNATE3 ?
+                "previous-160" :
+            (g_auxiliary.concurrent_helper_state == OVERLAY_ALTERNATE ?
+                "legacy-64" :
+            (g_auxiliary.concurrent_helper_state == OVERLAY_ALTERNATE2 ?
+                "legacy-56" : "stock-zero")))));
+    return 1;
+}
 
 static int decode_aarch64_bl(uintptr_t site, uint32_t instruction,
                              uintptr_t *target) {
@@ -2683,6 +3154,342 @@ static int encode_aarch64_b_cond(uintptr_t site, uintptr_t target,
     *instruction = 0x54000000u |
                    (((uint32_t)immediate & 0x7FFFFu) << 5) |
                    condition;
+    return 1;
+}
+
+static int encode_aarch64_cbz_like(uintptr_t site, uintptr_t target,
+                                   uint32_t shape,
+                                   uint32_t *instruction) {
+    if (!instruction || (shape & 0x7E000000u) != 0x34000000u ||
+        site > (uintptr_t)INT64_MAX || target > (uintptr_t)INT64_MAX) {
+        return 0;
+    }
+    int64_t delta = (int64_t)target - (int64_t)site;
+    int64_t immediate = delta / 4;
+    if ((delta & 3ll) != 0 || immediate < -0x40000ll ||
+        immediate > 0x3FFFFll) {
+        return 0;
+    }
+    *instruction = (shape & 0xFF00001Fu) |
+                   (((uint32_t)immediate & 0x7FFFFu) << 5);
+    return 1;
+}
+
+static int build_idle_clear_overlay(
+        uintptr_t update_vaddr, uintptr_t policy_vaddr,
+        uintptr_t concurrent_helper_vaddr,
+        unsigned char *update_patched,
+        unsigned char *update_guarded_legacy,
+        unsigned char *idle_count_branch,
+        unsigned char *idle_clear_branch) {
+    if (!update_vaddr || !policy_vaddr || !concurrent_helper_vaddr ||
+        !update_patched ||
+        !update_guarded_legacy || !idle_count_branch ||
+        !idle_clear_branch ||
+        UPDATE_IDLE_GUARD_OFF != UPDATE_FLAGS_PATCH_OFF + 16u ||
+        UPDATE_IDLE_HELPER_OFF != UPDATE_IDLE_GUARD_OFF + 4u ||
+        UPDATE_IDLE_HELPER_BRANCH_OFF != UPDATE_IDLE_HELPER_OFF + 4u ||
+        CONCURRENT_IDLE_HELPER_OFF >= UPDATE_CONCURRENT_HELPER_BYTES ||
+        update_vaddr > UINTPTR_MAX -
+            (UPDATE_FLAGS_PATCH_OFF + sizeof(UPDATE_FLAGS_STOCK) -
+             sizeof(uint32_t)) ||
+        policy_vaddr > UINTPTR_MAX - IDLE_CLEAR_RESUME_OFF ||
+        concurrent_helper_vaddr >
+            UINTPTR_MAX - CONCURRENT_ZERO_INIT_RETURN_B_OFF) {
+        return 0;
+    }
+    uintptr_t branch_site = policy_vaddr + IDLE_CLEAR_BRANCH_PATCH_OFF;
+    uintptr_t count_branch_site = policy_vaddr + POLICY_IDLE_COUNT_CBZ_OFF;
+    uintptr_t helper_site = update_vaddr + UPDATE_IDLE_HELPER_OFF;
+    uintptr_t helper_branch_site = update_vaddr +
+                                   UPDATE_IDLE_HELPER_BRANCH_OFF;
+    uintptr_t legacy_return_site = update_vaddr +
+                                   UPDATE_FLAGS_PATCH_OFF + 28u;
+    uintptr_t idle_helper_target = concurrent_helper_vaddr +
+                                   CONCURRENT_IDLE_HELPER_OFF;
+    uintptr_t zero_init_target = concurrent_helper_vaddr +
+                                 CONCURRENT_ZERO_INIT_OFF;
+    uintptr_t resume_target = policy_vaddr + IDLE_CLEAR_RESUME_OFF;
+    uint32_t branch_to_helper = 0;
+    uint32_t count_to_zero_init = 0;
+    uint32_t branch_to_idle_helper = 0;
+    uint32_t legacy_branch_to_resume = 0;
+    if (!encode_aarch64_cbz_like(
+            count_branch_site, zero_init_target, POLICY_IDLE_COUNT_CBZ,
+            &count_to_zero_init) ||
+        !encode_aarch64_b(branch_site, helper_site, &branch_to_helper) ||
+        !encode_aarch64_b(helper_branch_site, idle_helper_target,
+                          &branch_to_idle_helper) ||
+        !encode_aarch64_b(legacy_return_site, resume_target,
+                          &legacy_branch_to_resume)) {
+        return 0;
+    }
+    memcpy(update_patched, UPDATE_FLAGS_GAME_HANDOFF_LEGACY,
+           sizeof(UPDATE_FLAGS_GAME_HANDOFF_LEGACY));
+    memcpy(update_patched + UPDATE_IDLE_GUARD_OFF -
+           UPDATE_FLAGS_PATCH_OFF, UPDATE_IDLE_HELPER_TEMPLATE,
+           sizeof(UPDATE_IDLE_HELPER_TEMPLATE));
+    store_u32le(update_patched + UPDATE_IDLE_HELPER_BRANCH_OFF -
+                UPDATE_FLAGS_PATCH_OFF, branch_to_idle_helper);
+    memcpy(update_guarded_legacy, UPDATE_FLAGS_GAME_HANDOFF_LEGACY,
+           sizeof(UPDATE_FLAGS_GAME_HANDOFF_LEGACY));
+    memcpy(update_guarded_legacy + UPDATE_IDLE_GUARD_OFF -
+           UPDATE_FLAGS_PATCH_OFF, UPDATE_IDLE_HELPER_GUARDED_LEGACY,
+           sizeof(UPDATE_IDLE_HELPER_GUARDED_LEGACY));
+    store_u32le(update_guarded_legacy + 28u,
+                 legacy_branch_to_resume);
+    store_u32le(idle_count_branch, count_to_zero_init);
+    store_u32le(idle_clear_branch, branch_to_helper);
+    return 1;
+}
+
+static int stream_event_stock_shape(
+        const unsigned char stream_events[STREAM_EVENT_PATCH_COUNT]
+                                         [STREAM_EVENT_PATCH_MAX_BYTES]) {
+    if (!stream_events ||
+        memcmp(stream_events[0], STREAM_EVENT_STOCK_TEMPLATE[0],
+               sizeof(uint32_t) * 4u) != 0 ||
+        (load_u32le(stream_events[0] + sizeof(uint32_t) * 4u) &
+         0xFC000000u) != 0x94000000u ||
+        memcmp(stream_events[0] + sizeof(uint32_t) * 5u,
+               STREAM_EVENT_STOCK_TEMPLATE[0] + sizeof(uint32_t) * 5u,
+               STREAM_EVENT_PATCH_SIZES[0] - sizeof(uint32_t) * 5u) != 0 ||
+        (load_u32le(stream_events[1]) & 0x9F00001Fu) != 0x90000018u ||
+        memcmp(stream_events[1] + sizeof(uint32_t),
+               STREAM_EVENT_STOCK_TEMPLATE[1] + sizeof(uint32_t),
+               sizeof(uint32_t) * 4u) != 0 ||
+        (load_u32le(stream_events[1] + sizeof(uint32_t) * 5u) &
+         0x9F00001Fu) != 0x90000003u ||
+        (load_u32le(stream_events[1] + sizeof(uint32_t) * 6u) &
+         0xFFC003FFu) != 0x91000063u ||
+        memcmp(stream_events[2], STREAM_EVENT_STOCK_TEMPLATE[2],
+               STREAM_EVENT_PATCH_SIZES[2]) != 0) {
+        return 0;
+    }
+    return 1;
+}
+
+static int build_concurrent_helpers(
+        uintptr_t helper_vaddr, uintptr_t policy_vaddr,
+        uintptr_t stream_vaddr, uintptr_t stream_open_vaddr,
+        size_t stream_open_patch_off,
+        uintptr_t stream_recompute_target,
+        uintptr_t update_a2h_target,
+        const unsigned char stream_event_stock[STREAM_EVENT_PATCH_COUNT]
+                                                [STREAM_EVENT_PATCH_MAX_BYTES],
+        unsigned char *helper_patched,
+        unsigned char *helper_previous,
+        unsigned char *helper_previous2,
+        unsigned char *helper_legacy,
+        unsigned char *helper_legacy2,
+        unsigned char *policy_concurrent,
+        unsigned char stream_events[STREAM_EVENT_PATCH_COUNT]
+                                   [STREAM_EVENT_PATCH_MAX_BYTES],
+        unsigned char stream_event_recompute_legacy
+                [STREAM_EVENT_PATCH_COUNT][STREAM_EVENT_PATCH_MAX_BYTES],
+        unsigned char *stream_event_handoff_legacy,
+        unsigned char *stream_open_patched) {
+    if (!helper_vaddr || !policy_vaddr || !stream_vaddr ||
+        !stream_open_vaddr || !stream_recompute_target ||
+        !update_a2h_target || !stream_event_stock || !helper_patched ||
+        !helper_previous || !helper_previous2 ||
+        !helper_legacy || !helper_legacy2 ||
+        !policy_concurrent ||
+        !stream_events ||
+        !stream_event_recompute_legacy || !stream_event_handoff_legacy ||
+        !stream_open_patched ||
+        !stream_event_stock_shape(stream_event_stock) ||
+        helper_vaddr >
+            UINTPTR_MAX - CONCURRENT_ZERO_INIT_RETURN_B_OFF ||
+        policy_vaddr > UINTPTR_MAX -
+            (GAME_POLICY_PATCH_OFF + sizeof(uint32_t)) ||
+        stream_vaddr > UINTPTR_MAX - STREAM_EVENT_PATCH_OFFSETS[2] ||
+        stream_open_patch_off > UINTPTR_MAX - stream_open_vaddr ||
+        stream_open_vaddr + stream_open_patch_off >
+            UINTPTR_MAX - STREAM_OPEN_EVENT_BYTES) {
+        return 0;
+    }
+    uintptr_t policy_return_site = helper_vaddr +
+                                    CONCURRENT_POLICY_RETURN_B_OFF;
+    uintptr_t helper_core = helper_vaddr + CONCURRENT_CORE_OFF;
+    uintptr_t helper_main = helper_vaddr + CONCURRENT_MAIN_OFF;
+    uintptr_t pending_decay_site = helper_vaddr +
+                                     CONCURRENT_PENDING_DECAY_B_OFF;
+    uintptr_t helper_entry_site = helper_vaddr + CONCURRENT_ENTRY_B_OFF;
+    uintptr_t legacy_helper_vaddr = helper_vaddr + CONCURRENT_LEGACY_SHIFT;
+    uintptr_t legacy_policy_return_site = legacy_helper_vaddr +
+        CONCURRENT_LEGACY_POLICY_RETURN_B_OFF;
+    uintptr_t idle_return_site = helper_vaddr +
+                                  CONCURRENT_IDLE_RETURN_B_OFF;
+    uintptr_t zero_init_return_site = helper_vaddr +
+                                      CONCURRENT_ZERO_INIT_RETURN_B_OFF;
+    uintptr_t policy_branch_site = policy_vaddr + GAME_POLICY_PATCH_OFF +
+                                   GAME_POLICY_HELPER_BRANCH_OFF;
+    uintptr_t policy_helper_entry = helper_vaddr + CONCURRENT_ENTRY_B_OFF;
+    uintptr_t stream_event_sites[2] = {
+        stream_vaddr + STREAM_EVENT_PATCH_OFFSETS[0],
+        stream_vaddr + STREAM_EVENT_PATCH_OFFSETS[1]
+    };
+    uintptr_t stream_recompute_site = stream_vaddr +
+                                      STREAM_EVENT_PATCH_OFFSETS[2];
+    uintptr_t stream_open_site = stream_open_vaddr +
+                                 stream_open_patch_off;
+    uintptr_t stream_open_helper = helper_vaddr +
+                                   CONCURRENT_OPEN_HELPER_OFF;
+    uintptr_t stream_open_update_site = helper_vaddr +
+                                        CONCURRENT_OPEN_UPDATE_BL_OFF;
+    uintptr_t stream_open_return_site = helper_vaddr +
+                                        CONCURRENT_OPEN_RETURN_B_OFF;
+    uint32_t policy_return = 0;
+    uint32_t pending_decay = 0;
+    uint32_t helper_entry = 0;
+    uint32_t legacy_policy_return = 0;
+    uint32_t idle_return = 0;
+    uint32_t zero_init_return = 0;
+    uint32_t policy_to_helper = 0;
+    uint32_t stream_to_update[2] = {0};
+    uint32_t stream_recompute = 0;
+    uint32_t stream_legacy_recompute = 0;
+    uint32_t stream_open_call = 0;
+    uint32_t stream_open_update = 0;
+    uint32_t stream_open_return = 0;
+    if (!encode_aarch64_b(pending_decay_site, helper_core,
+                           &pending_decay) ||
+        !encode_aarch64_b(helper_entry_site, helper_main,
+                           &helper_entry) ||
+        !encode_aarch64_b(
+            policy_return_site,
+            policy_vaddr + GAME_POLICY_PATCH_OFF + sizeof(uint32_t),
+            &policy_return) ||
+        !encode_aarch64_b(
+            legacy_policy_return_site,
+            policy_vaddr + GAME_POLICY_PATCH_OFF + sizeof(uint32_t),
+            &legacy_policy_return) ||
+        !encode_aarch64_b(idle_return_site,
+                           policy_vaddr + IDLE_CLEAR_RESUME_OFF,
+                           &idle_return) ||
+        !encode_aarch64_b(zero_init_return_site,
+                           policy_vaddr + IDLE_CLEAR_BRANCH_PATCH_OFF,
+                           &zero_init_return) ||
+        !encode_aarch64_b(policy_branch_site, policy_helper_entry,
+                           &policy_to_helper) ||
+        !encode_aarch64_b(
+            stream_event_sites[0] + STREAM_EVENT_PATCH_SIZES[0] -
+                sizeof(uint32_t),
+            stream_recompute_target, &stream_to_update[0]) ||
+        !encode_aarch64_b(
+            stream_event_sites[1] + STREAM_EVENT_PATCH_SIZES[1] -
+                sizeof(uint32_t),
+            stream_recompute_target, &stream_to_update[1]) ||
+        !encode_aarch64_b(stream_recompute_site, stream_recompute_target,
+                           &stream_recompute) ||
+        !encode_aarch64_b(stream_event_sites[0] + sizeof(uint32_t),
+                           stream_recompute_target,
+                           &stream_legacy_recompute) ||
+        !encode_aarch64_bl(stream_open_site, stream_open_helper,
+                           &stream_open_call) ||
+        !encode_aarch64_bl(stream_open_update_site, update_a2h_target,
+                           &stream_open_update) ||
+        !encode_aarch64_b(stream_open_return_site,
+                          stream_open_site + STREAM_OPEN_EVENT_BYTES,
+                          &stream_open_return)) {
+        return 0;
+    }
+    memset(helper_patched, 0, UPDATE_CONCURRENT_HELPER_BYTES);
+    memcpy(helper_patched, STREAM_OPEN_HELPER_TEMPLATE,
+           sizeof(STREAM_OPEN_HELPER_TEMPLATE));
+    for (size_t off = sizeof(STREAM_OPEN_HELPER_TEMPLATE);
+         off < CONCURRENT_CORE_OFF; off += sizeof(uint32_t)) {
+        store_u32le(helper_patched + off, 0xD503201Fu);
+    }
+    memcpy(helper_patched + CONCURRENT_CORE_OFF,
+           UPDATE_CONCURRENT_HELPER_V3_TEMPLATE,
+           UPDATE_CONCURRENT_PREVIOUS_BYTES);
+    store_u32le(helper_patched + CONCURRENT_OPEN_UPDATE_BL_OFF,
+                 stream_open_update);
+    store_u32le(helper_patched + CONCURRENT_OPEN_RETURN_B_OFF,
+                 stream_open_return);
+    store_u32le(helper_patched + CONCURRENT_PENDING_DECAY_B_OFF,
+                 pending_decay);
+    store_u32le(helper_patched + CONCURRENT_ENTRY_B_OFF, helper_entry);
+    store_u32le(helper_patched + CONCURRENT_POLICY_RETURN_B_OFF,
+                 policy_return);
+    store_u32le(helper_patched + CONCURRENT_IDLE_RETURN_B_OFF,
+                 idle_return);
+    store_u32le(helper_patched + CONCURRENT_ZERO_INIT_RETURN_B_OFF,
+                 zero_init_return);
+    memset(helper_previous, 0, UPDATE_CONCURRENT_HELPER_BYTES);
+    memset(helper_previous2, 0, UPDATE_CONCURRENT_HELPER_BYTES);
+    memset(helper_legacy, 0, UPDATE_CONCURRENT_HELPER_BYTES);
+    memset(helper_legacy2, 0, UPDATE_CONCURRENT_HELPER_BYTES);
+    memcpy(helper_previous + CONCURRENT_PREVIOUS_SHIFT,
+           UPDATE_CONCURRENT_HELPER_V3_TEMPLATE,
+           UPDATE_CONCURRENT_PREVIOUS_BYTES);
+    store_u32le(helper_previous + CONCURRENT_PENDING_DECAY_B_OFF,
+                 pending_decay);
+    store_u32le(helper_previous + CONCURRENT_ENTRY_B_OFF, helper_entry);
+    store_u32le(helper_previous + CONCURRENT_POLICY_RETURN_B_OFF,
+                 policy_return);
+    store_u32le(helper_previous + CONCURRENT_IDLE_RETURN_B_OFF,
+                 idle_return);
+    store_u32le(helper_previous + CONCURRENT_ZERO_INIT_RETURN_B_OFF,
+                 zero_init_return);
+    memcpy(helper_previous2 + CONCURRENT_PREVIOUS2_SHIFT,
+           UPDATE_CONCURRENT_HELPER_V2_TEMPLATE,
+           UPDATE_CONCURRENT_PREVIOUS2_BYTES);
+    store_u32le(helper_previous2 + CONCURRENT_ENTRY_B_OFF, helper_entry);
+    store_u32le(helper_previous2 + CONCURRENT_POLICY_RETURN_B_OFF,
+                 policy_return);
+    store_u32le(helper_previous2 + CONCURRENT_IDLE_RETURN_B_OFF,
+                 idle_return);
+    store_u32le(helper_previous2 + CONCURRENT_ZERO_INIT_RETURN_B_OFF,
+                 zero_init_return);
+    memcpy(helper_legacy + CONCURRENT_LEGACY_SHIFT,
+           UPDATE_CONCURRENT_HELPER_V1_TEMPLATE,
+           UPDATE_CONCURRENT_LEGACY_BYTES);
+    memcpy(helper_legacy2 + CONCURRENT_LEGACY_SHIFT,
+           UPDATE_CONCURRENT_HELPER_V0_TEMPLATE,
+           UPDATE_CONCURRENT_LEGACY_BYTES);
+    store_u32le(helper_legacy + CONCURRENT_LEGACY_SHIFT +
+                CONCURRENT_LEGACY_POLICY_RETURN_B_OFF,
+                legacy_policy_return);
+    store_u32le(helper_legacy + CONCURRENT_LEGACY_SHIFT +
+                CONCURRENT_LEGACY_IDLE_RETURN_B_OFF,
+                idle_return);
+    store_u32le(helper_legacy + CONCURRENT_LEGACY_SHIFT +
+                CONCURRENT_LEGACY_ZERO_INIT_RETURN_B_OFF,
+                zero_init_return);
+    store_u32le(helper_legacy2 + CONCURRENT_LEGACY_SHIFT +
+                CONCURRENT_LEGACY_POLICY_RETURN_B_OFF,
+                legacy_policy_return);
+    store_u32le(helper_legacy2 + CONCURRENT_LEGACY_SHIFT +
+                CONCURRENT_LEGACY_IDLE_RETURN_B_OFF,
+                idle_return);
+    memcpy(policy_concurrent, GAME_POLICY_CONCURRENT_TEMPLATE,
+           GAME_POLICY_PATCH_BYTES);
+    store_u32le(policy_concurrent + GAME_POLICY_HELPER_BRANCH_OFF,
+                 policy_to_helper);
+    memset(stream_events, 0, STREAM_EVENT_PATCH_COUNT *
+           STREAM_EVENT_PATCH_MAX_BYTES);
+    for (size_t i = 0; i < 2u; ++i) {
+        memcpy(stream_events[i], STREAM_EVENT_INLINE_TEMPLATE,
+               STREAM_EVENT_PATCH_SIZES[i]);
+        store_u32le(stream_events[i] + STREAM_EVENT_PATCH_SIZES[i] -
+                    sizeof(uint32_t), stream_to_update[i]);
+    }
+    store_u32le(stream_events[2], stream_recompute);
+    store_u32le(stream_open_patched, stream_open_call);
+    memcpy(stream_event_recompute_legacy, stream_event_stock,
+           STREAM_EVENT_PATCH_COUNT * STREAM_EVENT_PATCH_MAX_BYTES);
+    memcpy(stream_event_recompute_legacy[0],
+           STREAM_EVENT_RECOMPUTE_LEGACY[0], sizeof(uint32_t));
+    store_u32le(stream_event_recompute_legacy[0] + sizeof(uint32_t),
+                 stream_legacy_recompute);
+    store_u32le(stream_event_recompute_legacy[2], stream_recompute);
+    memcpy(stream_event_handoff_legacy, stream_event_stock[0],
+           STREAM_EVENT_PATCH_SIZES[0]);
+    memcpy(stream_event_handoff_legacy, STREAM_EVENT_HANDOFF_LEGACY,
+           sizeof(STREAM_EVENT_HANDOFF_LEGACY));
     return 1;
 }
 
@@ -2792,12 +3599,16 @@ static int build_stream_ref_overlay(
         uintptr_t stream_vaddr, const unsigned char *stock,
         uintptr_t allowed_target, uintptr_t update_target,
         uintptr_t output_vaddr, const unsigned char *output_tail,
-        unsigned char *patched, unsigned char *handoff_legacy,
+        unsigned char *patched, unsigned char *persistent_legacy,
+        unsigned char *failed_idle_guard,
         unsigned char *legacy,
-        unsigned char *output_patched, uintptr_t *delete_target,
+        unsigned char *output_patched,
+        unsigned char *output_persistent_legacy,
+        uintptr_t *delete_target,
         uintptr_t *stack_fail_target) {
-    if (!stock || !output_tail || !patched || !handoff_legacy || !legacy ||
-        !output_patched || !delete_target || !stack_fail_target ||
+    if (!stock || !output_tail || !patched || !persistent_legacy ||
+        !failed_idle_guard || !legacy || !output_patched ||
+        !output_persistent_legacy || !delete_target || !stack_fail_target ||
         !allowed_target || !update_target ||
         stream_vaddr > UINTPTR_MAX - STREAM_REF_PATCH_OFF -
                        STREAM_REF_DELETE_BL_OFF ||
@@ -2812,8 +3623,12 @@ static int build_stream_ref_overlay(
                             STREAM_REF_DELETE_BL_OFF;
     uintptr_t allowed_site = stream_vaddr + STREAM_REF_PATCH_OFF +
                              STREAM_REF_ALLOWED_BL_OFF;
+    uintptr_t count_site = stream_vaddr + STREAM_REF_PATCH_OFF +
+                           STREAM_REF_COUNT_CBNZ_OFF;
     uintptr_t stack_site = stream_vaddr + STREAM_REF_PATCH_OFF +
                            STREAM_REF_STACK_COND_OFF;
+    uintptr_t legacy_stack_site = stream_vaddr + STREAM_REF_PATCH_OFF +
+                                  STREAM_REF_LEGACY_STACK_COND_OFF;
     uintptr_t update_site = stream_vaddr + STREAM_REF_PATCH_OFF +
                             STREAM_REF_UPDATE_B_OFF;
     uintptr_t output_site = output_vaddr + OUTPUT_POOL_TAIL_PATCH_OFF;
@@ -2822,9 +3637,12 @@ static int build_stream_ref_overlay(
     uint32_t stack_condition = 0;
     uint32_t delete_replacement = 0;
     uint32_t allowed_replacement = 0;
+    uint32_t count_replacement = 0;
     uint32_t stack_replacement = 0;
+    uint32_t legacy_stack_replacement = 0;
     uint32_t update_replacement = 0;
     uint32_t output_replacement = 0;
+    uint32_t output_persistent_replacement = 0;
     if (!decode_aarch64_bl(
             delete_site,
             load_u32le(stock + STREAM_REF_DELETE_BL_OFF), &target) ||
@@ -2836,24 +3654,52 @@ static int build_stream_ref_overlay(
         !encode_aarch64_bl(delete_site, target, &delete_replacement) ||
         !encode_aarch64_bl(allowed_site, allowed_target,
                            &allowed_replacement) ||
+        !encode_aarch64_cbz_like(
+            count_site, stream_vaddr + STREAM_UPDATE_CALL_OFF,
+            load_u32le(STREAM_REF_PATCH_TEMPLATE +
+                       STREAM_REF_COUNT_CBNZ_OFF),
+            &count_replacement) ||
         !encode_aarch64_b_cond(stack_site, stack_target, stack_condition,
                                &stack_replacement) ||
+        !encode_aarch64_b_cond(
+            legacy_stack_site, stack_target, stack_condition,
+            &legacy_stack_replacement) ||
         !encode_aarch64_b(update_site, update_target,
                           &update_replacement) ||
         !encode_aarch64_b(output_site,
                           stream_vaddr + STREAM_REF_HELPER_OFF,
-                          &output_replacement)) {
+                          &output_replacement) ||
+        !encode_aarch64_b(output_site,
+                          stream_vaddr + STREAM_REF_LEGACY_HELPER_OFF,
+                          &output_persistent_replacement)) {
         return 0;
     }
     memcpy(patched, STREAM_REF_PATCH_TEMPLATE, STREAM_REF_PATCH_BYTES);
     store_u32le(patched + STREAM_REF_DELETE_BL_OFF, delete_replacement);
     store_u32le(patched + STREAM_REF_ALLOWED_BL_OFF, allowed_replacement);
+    store_u32le(patched + STREAM_REF_COUNT_CBNZ_OFF, count_replacement);
     store_u32le(patched + STREAM_REF_STACK_COND_OFF, stack_replacement);
     store_u32le(patched + STREAM_REF_UPDATE_B_OFF, update_replacement);
     store_u32le(output_patched, output_replacement);
-    memcpy(handoff_legacy, patched, STREAM_REF_PATCH_BYTES);
-    store_u32le(handoff_legacy + 0x64u, 0x34000054u);
-    store_u32le(handoff_legacy + 0x68u, 0x391466DFu);
+    store_u32le(output_persistent_legacy, output_persistent_replacement);
+
+    memcpy(failed_idle_guard, STREAM_REF_FAILED_IDLE_GUARD_TEMPLATE,
+           STREAM_REF_PATCH_BYTES);
+    store_u32le(failed_idle_guard + STREAM_REF_DELETE_BL_OFF,
+                delete_replacement);
+    store_u32le(failed_idle_guard + STREAM_REF_ALLOWED_BL_OFF,
+                allowed_replacement);
+    store_u32le(failed_idle_guard + STREAM_REF_LEGACY_STACK_COND_OFF,
+                legacy_stack_replacement);
+    store_u32le(failed_idle_guard + STREAM_REF_UPDATE_B_OFF,
+                update_replacement);
+    memcpy(persistent_legacy, failed_idle_guard, STREAM_REF_PATCH_BYTES);
+    store_u32le(persistent_legacy +
+                STREAM_REF_LEGACY_IDLE_GUARD_CBNZ_OFF,
+                0xD503201Fu);
+    store_u32le(persistent_legacy +
+                STREAM_REF_LEGACY_IDLE_GUARD_CLEAR_OFF,
+                0xD503201Fu);
     memcpy(legacy, stock, STREAM_REF_PATCH_BYTES);
     memcpy(legacy + STREAM_REF_LEGACY_EVENT_OFF,
            STREAM_REF_LEGACY_EVENT_RECOMPUTE,
@@ -2863,82 +3709,588 @@ static int build_stream_ref_overlay(
     return 1;
 }
 
+static int shifted_local_offset(size_t expected, intptr_t delta,
+                                size_t function_size, size_t span,
+                                size_t *out) {
+    if (!out) return 0;
+    size_t value = 0;
+    if (delta < 0) {
+        size_t magnitude = (size_t)(-delta);
+        if (expected < magnitude) return 0;
+        value = expected - magnitude;
+    } else {
+        size_t magnitude = (size_t)delta;
+        if (expected > SIZE_MAX - magnitude) return 0;
+        value = expected + magnitude;
+    }
+    if (value > function_size || span > function_size - value) return 0;
+    *out = value;
+    return 1;
+}
+
+static int shifted_symbol_vaddr(const elf_a2h_symbol_t *sym,
+                                intptr_t delta, uintptr_t *out) {
+    if (!sym || !out) return 0;
+    if (delta < 0) {
+        uintptr_t magnitude = (uintptr_t)(-delta);
+        if (sym->vaddr < magnitude) return 0;
+        *out = sym->vaddr - magnitude;
+    } else {
+        uintptr_t magnitude = (uintptr_t)delta;
+        if (sym->vaddr > UINTPTR_MAX - magnitude) return 0;
+        *out = sym->vaddr + magnitude;
+    }
+    return 1;
+}
+
+static unsigned char *read_symbol_bytes(int fd,
+                                        const elf_a2h_symbol_t *sym) {
+    if (!sym || !sym->size || sym->size > ELF_SYMBOL_MAX_BYTES) return NULL;
+    unsigned char *bytes = (unsigned char *)malloc(sym->size);
+    if (!bytes || !pread_exact(fd, bytes, sym->size, sym->file_off)) {
+        free(bytes);
+        return NULL;
+    }
+    return bytes;
+}
+
+static int decode_aarch64_cbz_like(uintptr_t site, uint32_t instruction,
+                                   uintptr_t *target) {
+    if (!target || (instruction & 0x7E000000u) != 0x34000000u ||
+        site > (uintptr_t)INT64_MAX) {
+        return 0;
+    }
+    int64_t immediate = (int64_t)((instruction >> 5) & 0x7FFFFu);
+    if (immediate & 0x40000ll) immediate -= 0x80000ll;
+    int64_t resolved = (int64_t)site + immediate * 4;
+    if (resolved < 0 || (uint64_t)resolved > (uint64_t)UINTPTR_MAX ||
+        ((uintptr_t)resolved & 3u) != 0) {
+        return 0;
+    }
+    *target = (uintptr_t)resolved;
+    return 1;
+}
+
+static int locate_update_layout(int fd, pid_t pid, uintptr_t base,
+                                const elf_a2h_symbol_t *sym,
+                                intptr_t *out_delta) {
+    unsigned char *bytes = read_symbol_bytes(fd, sym);
+    if (!bytes || !out_delta) {
+        free(bytes);
+        return 0;
+    }
+    unsigned int hits = 0;
+    intptr_t selected = 0;
+    for (size_t app_off = 0;
+         app_off + UPDATE_APP_POLICY_BYTES <= sym->size;
+         app_off += sizeof(uint32_t)) {
+        intptr_t delta = (intptr_t)app_off -
+                         (intptr_t)UPDATE_APP_POLICY_PATCH_OFF;
+        size_t flags_off = 0;
+        size_t allowed_off = 0;
+        uintptr_t semantic_vaddr = 0;
+        unsigned char stock[UPDATE_APP_POLICY_BYTES];
+        unsigned char relaxed[UPDATE_APP_POLICY_BYTES];
+        unsigned char legacy[UPDATE_APP_POLICY_BYTES];
+        uintptr_t app_target = 0;
+        uintptr_t allowed_target = 0;
+        if (!shifted_local_offset(UPDATE_FLAGS_PATCH_OFF, delta,
+                                  sym->size, sizeof(UPDATE_FLAGS_STOCK),
+                                  &flags_off) ||
+            !shifted_local_offset(UPDATE_A2H_ALLOWED_BL_OFF, delta,
+                                  sym->size, sizeof(uint32_t),
+                                  &allowed_off) ||
+            !shifted_symbol_vaddr(sym, delta, &semantic_vaddr) ||
+            memcmp(bytes + flags_off, UPDATE_FLAGS_STOCK,
+                   sizeof(UPDATE_FLAGS_STOCK)) != 0 ||
+            !build_update_app_policy_overlay(
+                semantic_vaddr, bytes + app_off, stock, relaxed, legacy,
+                &app_target) ||
+            !decode_aarch64_bl(sym->vaddr + allowed_off,
+                               load_u32le(bytes + allowed_off),
+                               &allowed_target) ||
+            !exact_aarch64_plt_entry(pid, base, app_target) ||
+            !exact_aarch64_plt_entry(pid, base, allowed_target)) {
+            continue;
+        }
+        selected = delta;
+        hits++;
+    }
+    free(bytes);
+    if (hits != 1u) {
+        fprintf(stderr,
+                "[a2h_patch] update layout rejected: semantic_hits=%u size=%lu\n",
+                hits, (unsigned long)sym->size);
+        return 0;
+    }
+    *out_delta = selected;
+    return 1;
+}
+
+static int locate_policy_layout(int fd, const elf_a2h_symbol_t *sym,
+                                intptr_t *out_delta) {
+    unsigned char *bytes = read_symbol_bytes(fd, sym);
+    if (!bytes || !out_delta) {
+        free(bytes);
+        return 0;
+    }
+    unsigned int hits = 0;
+    intptr_t selected = 0;
+    for (size_t game_off = 0;
+         game_off + GAME_POLICY_PATCH_BYTES <= sym->size;
+         game_off += sizeof(uint32_t)) {
+        if (memcmp(bytes + game_off, GAME_POLICY_STOCK,
+                   GAME_POLICY_PATCH_BYTES) != 0) {
+            continue;
+        }
+        intptr_t delta = (intptr_t)game_off -
+                         (intptr_t)GAME_POLICY_PATCH_OFF;
+        size_t count_load_off = 0;
+        size_t count_cbz_off = 0;
+        size_t manager_init_off = 0;
+        size_t slot_index_init_off = 0;
+        size_t slot_count_reload_off = 0;
+        size_t slot_index_step_off = 0;
+        size_t slot_table_load_off = 0;
+        size_t slot_stream_load_off = 0;
+        size_t device_begin_load_off = 0;
+        size_t device_end_load_off = 0;
+        size_t idle_off = 0;
+        uintptr_t cbz_target = 0;
+        if (!shifted_local_offset(POLICY_IDLE_COUNT_LOAD_OFF, delta,
+                                  sym->size, sizeof(uint32_t) * 5u,
+                                  &count_load_off) ||
+            !shifted_local_offset(POLICY_IDLE_COUNT_CBZ_OFF, delta,
+                                  sym->size, sizeof(uint32_t) * 2u,
+                                  &count_cbz_off) ||
+            !shifted_local_offset(POLICY_MANAGER_INIT_OFF, delta,
+                                  sym->size, sizeof(uint32_t),
+                                  &manager_init_off) ||
+            !shifted_local_offset(POLICY_SLOT_INDEX_INIT_OFF, delta,
+                                  sym->size, sizeof(uint32_t),
+                                  &slot_index_init_off) ||
+            !shifted_local_offset(POLICY_SLOT_COUNT_RELOAD_OFF, delta,
+                                  sym->size, sizeof(uint32_t),
+                                  &slot_count_reload_off) ||
+            !shifted_local_offset(POLICY_SLOT_INDEX_STEP_OFF, delta,
+                                  sym->size, sizeof(uint32_t),
+                                  &slot_index_step_off) ||
+            !shifted_local_offset(POLICY_SLOT_TABLE_LOAD_OFF, delta,
+                                  sym->size, sizeof(uint32_t),
+                                  &slot_table_load_off) ||
+            !shifted_local_offset(POLICY_SLOT_STREAM_LOAD_OFF, delta,
+                                  sym->size, sizeof(uint32_t),
+                                  &slot_stream_load_off) ||
+            !shifted_local_offset(POLICY_DEVICE_BEGIN_LOAD_OFF, delta,
+                                  sym->size, sizeof(uint32_t),
+                                  &device_begin_load_off) ||
+            !shifted_local_offset(POLICY_DEVICE_END_LOAD_OFF, delta,
+                                  sym->size, sizeof(uint32_t),
+                                  &device_end_load_off) ||
+            !shifted_local_offset(IDLE_CLEAR_BRANCH_PATCH_OFF, delta,
+                                  sym->size,
+                                  sizeof(IDLE_CLEAR_DISK_CONTEXT),
+                                  &idle_off) ||
+            load_u32le(bytes + count_load_off) != POLICY_IDLE_COUNT_LOAD ||
+            load_u32le(bytes + count_cbz_off) != POLICY_IDLE_COUNT_CBZ ||
+            load_u32le(bytes + manager_init_off) != POLICY_MANAGER_INIT ||
+            load_u32le(bytes + slot_index_init_off) !=
+                POLICY_SLOT_INDEX_INIT ||
+            load_u32le(bytes + slot_count_reload_off) !=
+                POLICY_SLOT_COUNT_RELOAD ||
+            load_u32le(bytes + slot_index_step_off) !=
+                POLICY_SLOT_INDEX_STEP ||
+            load_u32le(bytes + slot_table_load_off) !=
+                POLICY_SLOT_TABLE_LOAD ||
+            load_u32le(bytes + slot_stream_load_off) !=
+                POLICY_SLOT_STREAM_LOAD ||
+            load_u32le(bytes + device_begin_load_off) !=
+                POLICY_DEVICE_BEGIN_LOAD ||
+            load_u32le(bytes + device_end_load_off) !=
+                POLICY_DEVICE_END_LOAD ||
+            memcmp(bytes + idle_off, IDLE_CLEAR_DISK_CONTEXT,
+                   sizeof(IDLE_CLEAR_DISK_CONTEXT)) != 0 ||
+            !decode_aarch64_cbz_like(
+                sym->vaddr + count_cbz_off,
+                load_u32le(bytes + count_cbz_off), &cbz_target) ||
+            cbz_target != sym->vaddr + idle_off) {
+            continue;
+        }
+        selected = delta;
+        hits++;
+    }
+    free(bytes);
+    if (hits != 1u) {
+        fprintf(stderr,
+                "[a2h_patch] policy layout rejected: semantic_hits=%u size=%lu\n",
+                hits, (unsigned long)sym->size);
+        return 0;
+    }
+    *out_delta = selected;
+    return 1;
+}
+
+static int locate_stream_layout(int fd, pid_t pid, uintptr_t base,
+                                const elf_a2h_symbol_t *sym,
+                                intptr_t *out_delta) {
+    unsigned char *bytes = read_symbol_bytes(fd, sym);
+    if (!bytes || !out_delta) {
+        free(bytes);
+        return 0;
+    }
+    unsigned int hits = 0;
+    intptr_t selected = 0;
+    for (size_t update_call_off = 0;
+         update_call_off + STREAM_UPDATE_CALL_BYTES <= sym->size;
+         update_call_off += sizeof(uint32_t)) {
+        if (memcmp(bytes + update_call_off, STREAM_UPDATE_CALL_TEMPLATE,
+                   sizeof(uint32_t)) != 0 ||
+            memcmp(bytes + update_call_off + sizeof(uint32_t) * 2u,
+                   STREAM_UPDATE_CALL_TEMPLATE + sizeof(uint32_t) * 2u,
+                   sizeof(uint32_t)) != 0) {
+            continue;
+        }
+        intptr_t delta = (intptr_t)update_call_off -
+                         (intptr_t)STREAM_UPDATE_CALL_OFF;
+        size_t manager0_off = 0;
+        size_t manager1_off = 0;
+        size_t event_offsets[STREAM_EVENT_PATCH_COUNT] = {0};
+        unsigned char events[STREAM_EVENT_PATCH_COUNT]
+                            [STREAM_EVENT_PATCH_MAX_BYTES] = {{0}};
+        uintptr_t update_target = 0;
+        uintptr_t strlen_target = 0;
+        int valid = shifted_local_offset(
+            STREAM_APP_MAP_MANAGER_OFF, delta, sym->size,
+            sizeof(uint32_t), &manager0_off) &&
+            shifted_local_offset(
+                STREAM_NEW_NODE_MANAGER_OFF, delta, sym->size,
+                sizeof(uint32_t), &manager1_off) &&
+            load_u32le(bytes + manager0_off) ==
+                STREAM_APP_MAP_MANAGER_ADD &&
+            load_u32le(bytes + manager1_off) ==
+                STREAM_APP_MAP_MANAGER_ADD &&
+            decode_aarch64_bl(
+                sym->vaddr + update_call_off + sizeof(uint32_t),
+                load_u32le(bytes + update_call_off + sizeof(uint32_t)),
+                &update_target) &&
+            exact_aarch64_plt_entry(pid, base, update_target);
+        for (size_t i = 0; valid && i < STREAM_EVENT_PATCH_COUNT; ++i) {
+            valid = shifted_local_offset(
+                STREAM_EVENT_PATCH_OFFSETS[i], delta, sym->size,
+                STREAM_EVENT_PATCH_SIZES[i], &event_offsets[i]);
+            if (valid) {
+                memcpy(events[i], bytes + event_offsets[i],
+                       STREAM_EVENT_PATCH_SIZES[i]);
+            }
+        }
+        valid = valid && stream_event_stock_shape(events) &&
+            decode_aarch64_bl(
+                sym->vaddr + event_offsets[0] + sizeof(uint32_t) * 4u,
+                load_u32le(events[0] + sizeof(uint32_t) * 4u),
+                &strlen_target) &&
+            exact_aarch64_plt_entry(pid, base, strlen_target);
+        if (!valid) continue;
+        selected = delta;
+        hits++;
+    }
+    free(bytes);
+    if (hits != 1u) {
+        fprintf(stderr,
+                "[a2h_patch] stream layout rejected: semantic_hits=%u size=%lu\n",
+                hits, (unsigned long)sym->size);
+        return 0;
+    }
+    *out_delta = selected;
+    return 1;
+}
+
+static int locate_output_layout(int fd, const elf_a2h_symbol_t *sym,
+                                intptr_t *out_delta) {
+    unsigned char *bytes = read_symbol_bytes(fd, sym);
+    if (!bytes || !out_delta) {
+        free(bytes);
+        return 0;
+    }
+    unsigned int hits = 0;
+    intptr_t selected = 0;
+    for (size_t tail_off = 0;
+         tail_off + sizeof(OUTPUT_POOL_TAIL_STOCK_TEMPLATE) <= sym->size;
+         tail_off += sizeof(uint32_t)) {
+        if (memcmp(bytes + tail_off, OUTPUT_POOL_TAIL_STOCK_TEMPLATE,
+                   sizeof(OUTPUT_POOL_TAIL_STOCK_TEMPLATE)) != 0) {
+            continue;
+        }
+        intptr_t delta = (intptr_t)tail_off -
+                         (intptr_t)OUTPUT_POOL_TAIL_PATCH_OFF;
+        size_t manager_off = 0;
+        if (!shifted_local_offset(OUTPUT_POOL_MANAGER_ARG_OFF, delta,
+                                  sym->size, sizeof(uint32_t),
+                                  &manager_off) ||
+            load_u32le(bytes + manager_off) != OUTPUT_POOL_MANAGER_ARG_MOV) {
+            continue;
+        }
+        selected = delta;
+        hits++;
+    }
+    free(bytes);
+    if (hits != 1u) {
+        fprintf(stderr,
+                "[a2h_patch] output layout rejected: semantic_hits=%u size=%lu\n",
+                hits, (unsigned long)sym->size);
+        return 0;
+    }
+    *out_delta = selected;
+    return 1;
+}
+
+static int locate_stream_open_layout(int fd, const elf_a2h_symbol_t *sym,
+                                     size_t *out_patch_off) {
+    if (fd < 0 || !sym || !out_patch_off ||
+        sym->size < STREAM_OPEN_EPILOGUE_BYTES ||
+        STREAM_OPEN_THIS_MOV_OFF > sym->size - sizeof(uint32_t)) {
+        return 0;
+    }
+    unsigned char *bytes = (unsigned char *)malloc(sym->size);
+    if (!bytes || !pread_exact(fd, bytes, sym->size, sym->file_off)) {
+        free(bytes);
+        return 0;
+    }
+    unsigned int epilogue_hits = 0;
+    unsigned int manager_load_hits = 0;
+    size_t selected = 0;
+    for (size_t off = 0; off + sizeof(uint32_t) <= sym->size;
+         off += sizeof(uint32_t)) {
+        if (load_u32le(bytes + off) == STREAM_OPEN_MANAGER_LOAD) {
+            manager_load_hits++;
+        }
+        if (off + STREAM_OPEN_EPILOGUE_BYTES <= sym->size &&
+            memcmp(bytes + off, STREAM_OPEN_EPILOGUE_STOCK,
+                   STREAM_OPEN_EPILOGUE_BYTES) == 0) {
+            selected = off;
+            epilogue_hits++;
+        }
+    }
+    int valid =
+        load_u32le(bytes + STREAM_OPEN_THIS_MOV_OFF) ==
+            STREAM_OPEN_THIS_MOV &&
+        epilogue_hits == 1u && manager_load_hits != 0u;
+    free(bytes);
+    if (!valid) {
+        fprintf(stderr,
+                "[a2h_patch] stream open layout rejected: epilogue_hits=%u manager_load_hits=%u size=%lu\n",
+                epilogue_hits, manager_load_hits,
+                (unsigned long)sym->size);
+        return 0;
+    }
+    *out_patch_off = selected;
+    fprintf(stderr,
+            "[a2h_patch] stream open layout derived patch=0x%lx delta=%ld manager_load_hits=%u\n",
+            (unsigned long)selected,
+            (long)((intptr_t)selected -
+                   (intptr_t)STREAM_OPEN_EPILOGUE_EXPECTED_OFF),
+            manager_load_hits);
+    return 1;
+}
+
 static int prepare_stream_ref_overlay(
         int fd, uint64_t file_size, pid_t pid, uintptr_t base,
-        const char *stream_name, const char *output_name) {
+        const char *stream_name, const char *stream_open_name,
+        const char *output_name,
+        const char *update_name, const char *policy_name) {
     elf_a2h_symbol_t sym = {0};
+    elf_a2h_symbol_t open_sym = {0};
     elf_a2h_symbol_t output_sym = {0};
+    elf_a2h_symbol_t update_sym = {0};
+    elf_a2h_symbol_t policy_sym = {0};
     unsigned char output_tail[sizeof(OUTPUT_POOL_TAIL_STOCK_TEMPLATE)];
     unsigned char update_context[STREAM_UPDATE_CALL_BYTES];
     uint32_t stream_app_manager = 0;
     uint32_t output_manager_arg = 0;
+    uintptr_t stream_event_strlen_target = 0;
+    intptr_t stream_delta = 0;
+    intptr_t output_delta = 0;
+    intptr_t update_delta = 0;
+    intptr_t policy_delta = 0;
+    size_t stream_ref_off = 0;
+    size_t stream_update_call_off = 0;
+    size_t stream_manager_off = 0;
+    size_t output_manager_off = 0;
+    size_t output_tail_off = 0;
+    size_t stream_open_patch_off = 0;
+    size_t stream_event_offsets[STREAM_EVENT_PATCH_COUNT] = {0};
+    uintptr_t stream_semantic_vaddr = 0;
+    uintptr_t output_semantic_vaddr = 0;
+    uintptr_t update_semantic_vaddr = 0;
+    uintptr_t policy_semantic_vaddr = 0;
     int parsed = parse_unique_func_symbol(fd, file_size, stream_name,
-                                          STREAM_SET_PARAMETERS_FUNC_BYTES,
+                                          0,
                                           &sym);
     int output_parsed = parse_unique_func_symbol(
-        fd, file_size, output_name, UPDATE_OUTPUT_POOL_FUNC_BYTES,
+        fd, file_size, output_name, 0,
         &output_sym);
+    int open_parsed = parse_unique_func_symbol(
+        fd, file_size, stream_open_name, 0,
+        &open_sym);
+    int update_parsed = parse_unique_func_symbol(
+        fd, file_size, update_name, 0,
+        &update_sym);
+    int policy_parsed = parse_unique_func_symbol(
+        fd, file_size, policy_name, 0,
+        &policy_sym);
     if (parsed != ELF_RESOLVE_VERIFIED ||
+        open_parsed != ELF_RESOLVE_VERIFIED ||
         output_parsed != ELF_RESOLVE_VERIFIED ||
-        STREAM_REF_PATCH_OFF > sym.size ||
-        STREAM_REF_PATCH_BYTES > sym.size - STREAM_REF_PATCH_OFF ||
-        STREAM_UPDATE_CALL_OFF > sym.size ||
-        sizeof(update_context) > sym.size - STREAM_UPDATE_CALL_OFF ||
-        STREAM_APP_MAP_MANAGER_OFF > sym.size ||
-        sizeof(stream_app_manager) >
-            sym.size - STREAM_APP_MAP_MANAGER_OFF ||
-        OUTPUT_POOL_MANAGER_ARG_OFF > output_sym.size ||
-        sizeof(output_manager_arg) >
-            output_sym.size - OUTPUT_POOL_MANAGER_ARG_OFF ||
-        OUTPUT_POOL_TAIL_PATCH_OFF > output_sym.size ||
-        sizeof(output_tail) >
-            output_sym.size - OUTPUT_POOL_TAIL_PATCH_OFF ||
+        update_parsed != ELF_RESOLVE_VERIFIED ||
+        policy_parsed != ELF_RESOLVE_VERIFIED ||
+        !locate_stream_layout(fd, pid, base, &sym, &stream_delta) ||
+        !locate_stream_open_layout(fd, &open_sym,
+                                   &stream_open_patch_off) ||
+        !locate_output_layout(fd, &output_sym, &output_delta) ||
+        !locate_update_layout(fd, pid, base, &update_sym,
+                              &update_delta) ||
+        !locate_policy_layout(fd, &policy_sym, &policy_delta) ||
+        update_sym.vaddr != g_auxiliary.update_off ||
+        policy_sym.vaddr != g_auxiliary.policy_off ||
+        !g_auxiliary.concurrent_helper_off ||
+        !shifted_local_offset(STREAM_REF_PATCH_OFF, stream_delta,
+                              sym.size, STREAM_REF_PATCH_BYTES,
+                              &stream_ref_off) ||
+        !shifted_local_offset(STREAM_UPDATE_CALL_OFF, stream_delta,
+                              sym.size, sizeof(update_context),
+                              &stream_update_call_off) ||
+        !shifted_local_offset(STREAM_APP_MAP_MANAGER_OFF, stream_delta,
+                              sym.size, sizeof(stream_app_manager),
+                              &stream_manager_off) ||
+        !shifted_local_offset(OUTPUT_POOL_MANAGER_ARG_OFF, output_delta,
+                              output_sym.size, sizeof(output_manager_arg),
+                              &output_manager_off) ||
+        !shifted_local_offset(OUTPUT_POOL_TAIL_PATCH_OFF, output_delta,
+                              output_sym.size, sizeof(output_tail),
+                              &output_tail_off) ||
+        !shifted_symbol_vaddr(&sym, stream_delta,
+                              &stream_semantic_vaddr) ||
+        !shifted_symbol_vaddr(&output_sym, output_delta,
+                              &output_semantic_vaddr) ||
+        !shifted_symbol_vaddr(&update_sym, update_delta,
+                              &update_semantic_vaddr) ||
+        !shifted_symbol_vaddr(&policy_sym, policy_delta,
+                              &policy_semantic_vaddr) ||
+        update_semantic_vaddr + UPDATE_FLAGS_PATCH_OFF !=
+            update_sym.vaddr + g_auxiliary.update_flags_patch_off ||
+        policy_semantic_vaddr + POLICY_IDLE_COUNT_CBZ_OFF !=
+            policy_sym.vaddr + g_auxiliary.policy_idle_count_cbz_off ||
         !pread_exact(fd, g_auxiliary.stream_ref_stock,
                      STREAM_REF_PATCH_BYTES,
-                     sym.file_off + STREAM_REF_PATCH_OFF) ||
+                     sym.file_off + stream_ref_off) ||
         !pread_exact(fd, update_context, sizeof(update_context),
-                     sym.file_off + STREAM_UPDATE_CALL_OFF) ||
+                     sym.file_off + stream_update_call_off) ||
         memcmp(update_context, STREAM_UPDATE_CALL_TEMPLATE,
-               STREAM_UPDATE_BL_OFF - STREAM_UPDATE_CALL_OFF) != 0 ||
+               sizeof(uint32_t)) != 0 ||
         memcmp(update_context + sizeof(uint32_t) * 2u,
                STREAM_UPDATE_CALL_TEMPLATE + sizeof(uint32_t) * 2u,
                sizeof(uint32_t)) != 0 ||
-        !decode_aarch64_bl(sym.vaddr + STREAM_UPDATE_BL_OFF,
+        !decode_aarch64_bl(sym.vaddr + stream_update_call_off +
+                           sizeof(uint32_t),
                            load_u32le(update_context + sizeof(uint32_t)),
                            &g_auxiliary.stream_ref_update_target) ||
         !pread_exact(fd, &stream_app_manager, sizeof(stream_app_manager),
-                     sym.file_off + STREAM_APP_MAP_MANAGER_OFF) ||
+                     sym.file_off + stream_manager_off) ||
         stream_app_manager != STREAM_APP_MAP_MANAGER_ADD ||
         !pread_exact(fd, &output_manager_arg, sizeof(output_manager_arg),
-                     output_sym.file_off + OUTPUT_POOL_MANAGER_ARG_OFF) ||
+                     output_sym.file_off + output_manager_off) ||
         output_manager_arg != OUTPUT_POOL_MANAGER_ARG_MOV ||
         !pread_exact(fd, output_tail, sizeof(output_tail),
-                     output_sym.file_off + OUTPUT_POOL_TAIL_PATCH_OFF) ||
-        !build_stream_ref_overlay(
-            sym.vaddr, g_auxiliary.stream_ref_stock,
-            g_auxiliary.allowed_call_target,
-            g_auxiliary.stream_ref_update_target,
-            output_sym.vaddr, output_tail,
-            g_auxiliary.stream_ref_patched,
-            g_auxiliary.stream_ref_handoff_legacy,
-            g_auxiliary.stream_ref_legacy,
-            g_auxiliary.output_pool_tail_patched,
-            &g_auxiliary.stream_ref_delete_target,
-            &g_auxiliary.output_pool_stack_fail_target) ||
-        !exact_aarch64_plt_entry(pid, base,
-                                 g_auxiliary.stream_ref_delete_target) ||
-        !exact_aarch64_plt_entry(pid, base,
-                                 g_auxiliary.stream_ref_update_target)) {
+                     output_sym.file_off + output_tail_off)) {
         fprintf(stderr,
-                "[a2h_patch] stream handoff overlay rejected: stock shape/branch/PLT mismatch\n");
+                "[a2h_patch] stream handoff overlay rejected: symbol/layout mismatch\n");
         return 0;
     }
+    if (!pread_exact(fd, g_auxiliary.stream_open_stock,
+                     STREAM_OPEN_EVENT_BYTES,
+                     open_sym.file_off + stream_open_patch_off) ||
+        memcmp(g_auxiliary.stream_open_stock,
+               STREAM_OPEN_EPILOGUE_STOCK,
+               STREAM_OPEN_EVENT_BYTES) != 0) {
+        fprintf(stderr,
+                "[a2h_patch] stream open overlay rejected: event bytes mismatch\n");
+        return 0;
+    }
+    for (size_t i = 0; i < STREAM_EVENT_PATCH_COUNT; ++i) {
+        if (!shifted_local_offset(
+                STREAM_EVENT_PATCH_OFFSETS[i], stream_delta, sym.size,
+                STREAM_EVENT_PATCH_SIZES[i], &stream_event_offsets[i]) ||
+            !pread_exact(fd, g_auxiliary.stream_event_stock[i],
+                         STREAM_EVENT_PATCH_SIZES[i],
+                         sym.file_off + stream_event_offsets[i])) {
+            fprintf(stderr,
+                    "[a2h_patch] stream handoff overlay rejected: event layout mismatch\n");
+            return 0;
+        }
+    }
+    if (!decode_aarch64_bl(
+            sym.vaddr + stream_event_offsets[0] +
+                sizeof(uint32_t) * 4u,
+            load_u32le(g_auxiliary.stream_event_stock[0] +
+                       sizeof(uint32_t) * 4u),
+            &stream_event_strlen_target) ||
+         !build_stream_ref_overlay(
+            stream_semantic_vaddr, g_auxiliary.stream_ref_stock,
+            g_auxiliary.allowed_call_target,
+            g_auxiliary.stream_ref_update_target,
+            output_semantic_vaddr, output_tail,
+            g_auxiliary.stream_ref_patched,
+            g_auxiliary.stream_ref_persistent_legacy,
+            g_auxiliary.stream_ref_failed_idle_guard,
+            g_auxiliary.stream_ref_legacy,
+            g_auxiliary.output_pool_tail_patched,
+            g_auxiliary.output_pool_tail_persistent_legacy,
+            &g_auxiliary.stream_ref_delete_target,
+            &g_auxiliary.output_pool_stack_fail_target) ||
+        !build_concurrent_helpers(
+            g_auxiliary.concurrent_helper_off, policy_semantic_vaddr,
+            stream_semantic_vaddr,
+            open_sym.vaddr, stream_open_patch_off,
+            sym.vaddr + stream_update_call_off,
+            g_auxiliary.stream_ref_update_target,
+             g_auxiliary.stream_event_stock,
+             g_auxiliary.concurrent_helper_patched,
+             g_auxiliary.concurrent_helper_previous,
+             g_auxiliary.concurrent_helper_previous2,
+             g_auxiliary.concurrent_helper_legacy,
+            g_auxiliary.concurrent_helper_legacy2,
+            g_auxiliary.policy_concurrent,
+            g_auxiliary.stream_event_patched,
+            g_auxiliary.stream_event_recompute_legacy,
+            g_auxiliary.stream_event_handoff_legacy,
+            g_auxiliary.stream_open_patched) ||
+         !exact_aarch64_plt_entry(pid, base,
+                                  g_auxiliary.stream_ref_delete_target) ||
+         !exact_aarch64_plt_entry(pid, base,
+                                  g_auxiliary.stream_ref_update_target) ||
+        !exact_aarch64_plt_entry(pid, base,
+                                 stream_event_strlen_target)) {
+        fprintf(stderr,
+                "[a2h_patch] stream handoff overlay rejected: stock shape/branch/event-BL/PLT mismatch\n");
+        return 0;
+    }
+    g_auxiliary.stream_event_strlen_target = stream_event_strlen_target;
+    g_auxiliary.stream_open_off = open_sym.vaddr;
+    g_auxiliary.stream_open_patch_off = stream_open_patch_off;
     g_auxiliary.output_pool_off = output_sym.vaddr;
+    g_auxiliary.stream_ref_patch_off = stream_ref_off;
+    memcpy(g_auxiliary.stream_event_patch_offsets, stream_event_offsets,
+           sizeof(stream_event_offsets));
+    g_auxiliary.stream_update_call_off = stream_update_call_off;
+    g_auxiliary.output_pool_tail_patch_off = output_tail_off;
     fprintf(stderr,
-            "[a2h_patch] stream handoff overlay generated bytes=%u delete_target=0x%lx update_target=0x%lx stack_fail=0x%lx output_pool=0x%lx\n",
+            "[a2h_patch] stream handoff overlay generated bytes=%u stream_delta=%ld output_delta=%ld open=0x%lx+0x%lx delete_target=0x%lx update_target=0x%lx event_strlen_target=0x%lx stack_fail=0x%lx output_pool=0x%lx\n",
             STREAM_REF_PATCH_BYTES,
+            (long)stream_delta, (long)output_delta,
+            (unsigned long)g_auxiliary.stream_open_off,
+            (unsigned long)g_auxiliary.stream_open_patch_off,
             (unsigned long)g_auxiliary.stream_ref_delete_target,
             (unsigned long)g_auxiliary.stream_ref_update_target,
+            (unsigned long)g_auxiliary.stream_event_strlen_target,
             (unsigned long)g_auxiliary.output_pool_stack_fail_target,
             (unsigned long)g_auxiliary.output_pool_off);
     return 1;
@@ -2949,23 +4301,35 @@ static int prepare_update_app_policy_overlay(
         const char *update_name) {
     elf_a2h_symbol_t sym = {0};
     uint32_t allowed_call = 0;
+    intptr_t layout_delta = 0;
+    size_t flags_off = 0;
+    size_t app_policy_off = 0;
+    size_t allowed_bl_off = 0;
+    uintptr_t semantic_vaddr = 0;
     int parsed = parse_unique_func_symbol(fd, file_size, update_name,
-                                          UPDATE_A2H_MODE_FUNC_BYTES, &sym);
+                                          0, &sym);
     if (parsed != ELF_RESOLVE_VERIFIED ||
-        UPDATE_APP_POLICY_PATCH_OFF > sym.size ||
-        UPDATE_APP_POLICY_BYTES > sym.size - UPDATE_APP_POLICY_PATCH_OFF ||
-        UPDATE_A2H_ALLOWED_BL_OFF > sym.size ||
-        sizeof(allowed_call) > sym.size - UPDATE_A2H_ALLOWED_BL_OFF ||
+        !locate_update_layout(fd, pid, base, &sym, &layout_delta) ||
+        !shifted_local_offset(UPDATE_FLAGS_PATCH_OFF, layout_delta,
+                              sym.size, sizeof(UPDATE_FLAGS_STOCK),
+                              &flags_off) ||
+        !shifted_local_offset(UPDATE_APP_POLICY_PATCH_OFF, layout_delta,
+                              sym.size, UPDATE_APP_POLICY_BYTES,
+                              &app_policy_off) ||
+        !shifted_local_offset(UPDATE_A2H_ALLOWED_BL_OFF, layout_delta,
+                              sym.size, sizeof(allowed_call),
+                              &allowed_bl_off) ||
+        !shifted_symbol_vaddr(&sym, layout_delta, &semantic_vaddr) ||
         !pread_exact(fd, g_auxiliary.app_policy_disk,
                      UPDATE_APP_POLICY_BYTES,
-                     sym.file_off + UPDATE_APP_POLICY_PATCH_OFF) ||
+                     sym.file_off + app_policy_off) ||
         !pread_exact(fd, &allowed_call, sizeof(allowed_call),
-                     sym.file_off + UPDATE_A2H_ALLOWED_BL_OFF) ||
-        !decode_aarch64_bl(sym.vaddr + UPDATE_A2H_ALLOWED_BL_OFF,
+                     sym.file_off + allowed_bl_off) ||
+        !decode_aarch64_bl(sym.vaddr + allowed_bl_off,
                            allowed_call,
                            &g_auxiliary.allowed_call_target) ||
         !build_update_app_policy_overlay(
-            sym.vaddr, g_auxiliary.app_policy_disk,
+            semantic_vaddr, g_auxiliary.app_policy_disk,
             g_auxiliary.app_policy_stock,
             g_auxiliary.app_policy_relaxed,
             g_auxiliary.app_policy_legacy,
@@ -2979,10 +4343,101 @@ static int prepare_update_app_policy_overlay(
         return 0;
     }
     fprintf(stderr,
-            "[a2h_patch] auxiliary app policy generated bytes=%u call_target=0x%lx allowed_target=0x%lx\n",
+            "[a2h_patch] auxiliary app policy generated bytes=%u delta=%ld call_target=0x%lx allowed_target=0x%lx\n",
             UPDATE_APP_POLICY_BYTES,
+            (long)layout_delta,
             (unsigned long)g_auxiliary.app_policy_call_target,
             (unsigned long)g_auxiliary.allowed_call_target);
+    g_auxiliary.update_off = sym.vaddr;
+    g_auxiliary.update_flags_patch_off = flags_off;
+    g_auxiliary.update_app_policy_patch_off = app_policy_off;
+    return 1;
+}
+
+static int prepare_idle_clear_overlay(
+        int fd, uint64_t file_size, pid_t pid, uintptr_t base,
+        const char *update_name,
+        const char *policy_name) {
+    elf_a2h_symbol_t update_sym = {0};
+    elf_a2h_symbol_t policy_sym = {0};
+    uint32_t count_load = 0;
+    uint32_t count_cbz = 0;
+    unsigned char idle_context[sizeof(IDLE_CLEAR_DISK_CONTEXT)];
+    intptr_t update_delta = 0;
+    intptr_t policy_delta = 0;
+    size_t update_flags_off = 0;
+    size_t count_load_off = 0;
+    size_t count_cbz_off = 0;
+    size_t idle_clear_off = 0;
+    size_t game_policy_off = 0;
+    uintptr_t update_semantic_vaddr = 0;
+    uintptr_t policy_semantic_vaddr = 0;
+    int update_parsed = parse_unique_func_symbol(
+        fd, file_size, update_name, 0,
+        &update_sym);
+    int policy_parsed = parse_unique_func_symbol(
+        fd, file_size, policy_name, 0,
+        &policy_sym);
+    if (update_parsed != ELF_RESOLVE_VERIFIED ||
+        policy_parsed != ELF_RESOLVE_VERIFIED ||
+        !locate_update_layout(fd, pid, base, &update_sym,
+                              &update_delta) ||
+        !locate_policy_layout(fd, &policy_sym, &policy_delta) ||
+        !shifted_local_offset(UPDATE_FLAGS_PATCH_OFF, update_delta,
+                              update_sym.size, sizeof(UPDATE_FLAGS_STOCK),
+                              &update_flags_off) ||
+        update_flags_off != g_auxiliary.update_flags_patch_off ||
+        !shifted_local_offset(POLICY_IDLE_COUNT_LOAD_OFF, policy_delta,
+                              policy_sym.size, sizeof(count_load),
+                              &count_load_off) ||
+        !shifted_local_offset(POLICY_IDLE_COUNT_CBZ_OFF, policy_delta,
+                              policy_sym.size, sizeof(count_cbz),
+                              &count_cbz_off) ||
+        !shifted_local_offset(IDLE_CLEAR_BRANCH_PATCH_OFF, policy_delta,
+                              policy_sym.size, sizeof(idle_context),
+                              &idle_clear_off) ||
+        !shifted_local_offset(GAME_POLICY_PATCH_OFF, policy_delta,
+                              policy_sym.size, GAME_POLICY_PATCH_BYTES,
+                              &game_policy_off) ||
+        !shifted_symbol_vaddr(&update_sym, update_delta,
+                              &update_semantic_vaddr) ||
+        !shifted_symbol_vaddr(&policy_sym, policy_delta,
+                              &policy_semantic_vaddr) ||
+        !pread_exact(fd, &count_load, sizeof(count_load),
+                     policy_sym.file_off + count_load_off) ||
+        !pread_exact(fd, &count_cbz, sizeof(count_cbz),
+                     policy_sym.file_off + count_cbz_off) ||
+        !pread_exact(fd, idle_context, sizeof(idle_context),
+                     policy_sym.file_off + idle_clear_off) ||
+        count_load != POLICY_IDLE_COUNT_LOAD ||
+        count_cbz != POLICY_IDLE_COUNT_CBZ ||
+        memcmp(idle_context, IDLE_CLEAR_DISK_CONTEXT,
+               sizeof(idle_context)) != 0 ||
+        !build_idle_clear_overlay(
+            update_semantic_vaddr, policy_semantic_vaddr,
+            g_auxiliary.concurrent_helper_off,
+            g_auxiliary.update_flags_patched,
+            g_auxiliary.update_flags_guarded_legacy,
+            g_auxiliary.idle_count_branch,
+            g_auxiliary.idle_clear_branch)) {
+        fprintf(stderr,
+                "[a2h_patch] idle clear overlay rejected: zero-output control flow mismatch\n");
+        return 0;
+    }
+    fprintf(stderr,
+            "[a2h_patch] idle clear overlay generated update_delta=%ld policy_delta=%ld helper=0x%lx branch=0x%lx resume=0x%lx bytes=%u/%u\n",
+            (long)update_delta, (long)policy_delta,
+            (unsigned long)(update_semantic_vaddr +
+                            UPDATE_IDLE_HELPER_OFF),
+            (unsigned long)(policy_sym.vaddr + idle_clear_off),
+            (unsigned long)(policy_semantic_vaddr + IDLE_CLEAR_RESUME_OFF),
+            (unsigned int)sizeof(UPDATE_IDLE_HELPER_TEMPLATE),
+            IDLE_CLEAR_BRANCH_BYTES);
+    if (update_sym.vaddr != g_auxiliary.update_off) return 0;
+    g_auxiliary.policy_off = policy_sym.vaddr;
+    g_auxiliary.policy_idle_count_cbz_off = count_cbz_off;
+    g_auxiliary.policy_idle_clear_off = idle_clear_off;
+    g_auxiliary.policy_game_off = game_policy_off;
     return 1;
 }
 
@@ -3014,6 +4469,10 @@ static int exact_multi_overlay(const unsigned char *disk,
                    memcmp(live_region, region->alternate,
                           region->patch_size) == 0) {
             states[i] = OVERLAY_ALTERNATE;
+        } else if (region->alternate2 &&
+                   memcmp(live_region, region->alternate2,
+                          region->patch_size) == 0) {
+            states[i] = OVERLAY_ALTERNATE2;
         } else if (region->legacy &&
                    memcmp(live_region, region->legacy,
                           region->patch_size) == 0) {
@@ -3024,6 +4483,70 @@ static int exact_multi_overlay(const unsigned char *disk,
         cursor = region->patch_off + region->patch_size;
     }
     return memcmp(disk + cursor, live + cursor, func_size - cursor) == 0;
+}
+
+static int coherent_concurrent_generation(
+        const int update_states[2], int helper_state,
+        const int policy_states[POLICY_OVERLAY_REGION_COUNT],
+        const int stream_states[STREAM_OVERLAY_REGION_COUNT],
+        int stream_open_state) {
+    if (!update_states || !policy_states || !stream_states) return 0;
+    int policy_owned =
+        policy_states[POLICY_REGION_GAME] == OVERLAY_PATCHED ||
+        policy_states[POLICY_REGION_GAME] == OVERLAY_ALTERNATE;
+    int final = update_states[0] == OVERLAY_PATCHED &&
+        helper_state == OVERLAY_PATCHED &&
+        stream_open_state == OVERLAY_PATCHED &&
+        policy_states[POLICY_REGION_IDLE_COUNT] == OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT0] == OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT1] == OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT2] == OVERLAY_PATCHED &&
+        policy_owned;
+    int relocated_64 = update_states[0] == OVERLAY_PATCHED &&
+        helper_state == OVERLAY_ALTERNATE &&
+        stream_open_state == OVERLAY_STOCK &&
+        policy_states[POLICY_REGION_IDLE_COUNT] == OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT0] == OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT1] == OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT2] == OVERLAY_PATCHED &&
+        policy_owned;
+    int previous_176 = update_states[0] == OVERLAY_PATCHED &&
+        helper_state == OVERLAY_LEGACY &&
+        stream_open_state == OVERLAY_STOCK &&
+        policy_states[POLICY_REGION_IDLE_COUNT] == OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT0] == OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT1] == OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT2] == OVERLAY_PATCHED &&
+        policy_owned;
+    int previous_160 = update_states[0] == OVERLAY_PATCHED &&
+        helper_state == OVERLAY_ALTERNATE3 &&
+        stream_open_state == OVERLAY_STOCK &&
+        policy_states[POLICY_REGION_IDLE_COUNT] == OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT0] == OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT1] == OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT2] == OVERLAY_PATCHED &&
+        policy_owned;
+    int relocated_56 = update_states[0] == OVERLAY_PATCHED &&
+        helper_state == OVERLAY_ALTERNATE2 &&
+        stream_open_state == OVERLAY_STOCK &&
+        policy_states[POLICY_REGION_IDLE_COUNT] == OVERLAY_STOCK &&
+        stream_states[STREAM_REGION_EVENT0] == OVERLAY_PATCHED &&
+        (stream_states[STREAM_REGION_EVENT1] == OVERLAY_STOCK ||
+         stream_states[STREAM_REGION_EVENT1] == OVERLAY_PATCHED) &&
+        stream_states[STREAM_REGION_EVENT2] == OVERLAY_PATCHED &&
+        policy_owned;
+    int historical = update_states[0] != OVERLAY_PATCHED &&
+        helper_state == OVERLAY_STOCK &&
+        stream_open_state == OVERLAY_STOCK &&
+        policy_states[POLICY_REGION_IDLE_COUNT] == OVERLAY_STOCK &&
+        stream_states[STREAM_REGION_EVENT0] != OVERLAY_PATCHED &&
+        stream_states[STREAM_REGION_EVENT1] == OVERLAY_STOCK &&
+        (stream_states[STREAM_REGION_EVENT2] == OVERLAY_STOCK ||
+         stream_states[STREAM_REGION_EVENT2] == OVERLAY_PATCHED) &&
+        (policy_states[POLICY_REGION_GAME] == OVERLAY_STOCK ||
+         policy_states[POLICY_REGION_GAME] == OVERLAY_LEGACY);
+    return final || previous_176 || previous_160 || relocated_64 || relocated_56 ||
+           historical;
 }
 
 static int resolve_owned_multi_symbol(int fd, uint64_t file_size,
@@ -3073,57 +4596,6 @@ static int resolve_owned_multi_symbol(int fd, uint64_t file_size,
     return 1;
 }
 
-static int resolve_owned_auxiliary_symbol(int fd, uint64_t file_size,
-                                           pid_t pid, uintptr_t base,
-                                           const char *name,
-                                           size_t expected_size,
-                                           size_t patch_off,
-                                           const unsigned char *stock,
-                                           const unsigned char *patched,
-                                           size_t patch_size,
-                                           uintptr_t *out_off,
-                                           int *out_patched) {
-    elf_a2h_symbol_t sym={0};
-    int parsed = parse_unique_func_symbol(fd, file_size, name,
-                                          expected_size, &sym);
-    if (parsed != ELF_RESOLVE_VERIFIED || base > UINTPTR_MAX - sym.vaddr ||
-        sym.size > UINTPTR_MAX - (base + sym.vaddr)) {
-        fprintf(stderr,
-                "[a2h_patch] auxiliary symbol rejected name=%s parse=%d\n",
-                name, parsed);
-        return 0;
-    }
-    uintptr_t absolute = base + sym.vaddr;
-    if (absolute < g_rx_start || absolute + sym.size > g_rx_end) {
-        fprintf(stderr,
-                "[a2h_patch] auxiliary symbol rejected name=%s reason=RX-range\n",
-                name);
-        return 0;
-    }
-    unsigned char *disk = (unsigned char *)malloc(sym.size);
-    unsigned char *live = (unsigned char *)malloc(sym.size);
-    int owned = disk && live &&
-                pread_exact(fd, disk, sym.size, sym.file_off) &&
-                mem_r(pid, absolute, live, sym.size) == 0 &&
-                exact_function_overlay(disk, live, sym.size, patch_off,
-                                       stock, patched, patch_size,
-                                       out_patched);
-    free(disk);
-    free(live);
-    if (!owned) {
-        fprintf(stderr,
-                "[a2h_patch] auxiliary symbol rejected name=%s reason=foreign-or-unknown-bytes\n",
-                name);
-        return 0;
-    }
-    *out_off = sym.vaddr;
-    fprintf(stderr,
-            "[a2h_patch] auxiliary symbol verified name=%s func=0x%lx size=%lu state=%s\n",
-            name, (unsigned long)sym.vaddr, (unsigned long)sym.size,
-            *out_patched ? "module-overlay" : "stock");
-    return 1;
-}
-
 static int resolve_auxiliary_targets(pid_t pid, uintptr_t base) {
     static const char update_name[] =
         "_ZN7android22AudioALSAStreamManager13updateA2HModeEv";
@@ -3131,6 +4603,8 @@ static int resolve_auxiliary_targets(pid_t pid, uintptr_t base) {
         "_ZN7android22AudioALSAStreamManager12isA2HAllowedEv";
     static const char stream_event_name[] =
         "_ZN7android18AudioALSAStreamOut13setParametersERKNS_7String8E";
+    static const char stream_open_name[] =
+        "_ZN7android18AudioALSAStreamOut4openEv";
     static const char output_pool_name[] =
         "_ZN7android22AudioALSAStreamManager22updateOutputPoolActiveE20audio_output_flags_tb";
     memset(&g_auxiliary, 0, sizeof(g_auxiliary));
@@ -3139,81 +4613,154 @@ static int resolve_auxiliary_targets(pid_t pid, uintptr_t base) {
     if (fd < 0) return 0;
     if (!prepare_update_app_policy_overlay(fd, file_size, pid, base,
                                            update_name) ||
+        !prepare_executable_concurrent_helper(fd, file_size, pid, base) ||
+        !prepare_idle_clear_overlay(fd, file_size, pid, base, update_name,
+                                    policy_name) ||
         !prepare_stream_ref_overlay(fd, file_size, pid, base,
                                     stream_event_name,
-                                    output_pool_name)) {
+                                    stream_open_name,
+                                    output_pool_name, update_name,
+                                    policy_name)) {
         close(fd);
         memset(&g_auxiliary, 0, sizeof(g_auxiliary));
         return 0;
     }
     const owned_overlay_region_t update_regions[] = {
-        {UPDATE_FLAGS_PATCH_OFF, UPDATE_FLAGS_STOCK, UPDATE_FLAGS_GAME,
-         NULL, UPDATE_FLAGS_LEGACY, sizeof(UPDATE_FLAGS_STOCK)},
-        {UPDATE_APP_POLICY_PATCH_OFF, g_auxiliary.app_policy_disk,
+        {g_auxiliary.update_flags_patch_off, UPDATE_FLAGS_STOCK,
+         g_auxiliary.update_flags_patched,
+         UPDATE_FLAGS_GAME_HANDOFF_LEGACY,
+         g_auxiliary.update_flags_guarded_legacy, UPDATE_FLAGS_LEGACY,
+         sizeof(UPDATE_FLAGS_STOCK)},
+        {g_auxiliary.update_app_policy_patch_off,
+         g_auxiliary.app_policy_disk,
          g_auxiliary.app_policy_stock, g_auxiliary.app_policy_relaxed,
-         g_auxiliary.app_policy_legacy, UPDATE_APP_POLICY_BYTES}
+         NULL, g_auxiliary.app_policy_legacy, UPDATE_APP_POLICY_BYTES}
     };
     const owned_overlay_region_t stream_regions[STREAM_OVERLAY_REGION_COUNT] = {
-        {STREAM_EVENT_PATCH_OFFSETS[0], STREAM_EVENT_STOCK[0],
-         STREAM_EVENT_RECOMPUTE[0], NULL, STREAM_EVENT_HANDOFF_LEGACY,
+        {g_auxiliary.stream_event_patch_offsets[0],
+         g_auxiliary.stream_event_stock[0],
+         g_auxiliary.stream_event_patched[0],
+         g_auxiliary.stream_event_recompute_legacy[0], NULL,
+         g_auxiliary.stream_event_handoff_legacy,
          STREAM_EVENT_PATCH_SIZES[0]},
-        {STREAM_REF_PATCH_OFF, g_auxiliary.stream_ref_stock,
+        {g_auxiliary.stream_ref_patch_off, g_auxiliary.stream_ref_stock,
          g_auxiliary.stream_ref_patched,
-         g_auxiliary.stream_ref_handoff_legacy,
+         g_auxiliary.stream_ref_persistent_legacy,
+         g_auxiliary.stream_ref_failed_idle_guard,
          g_auxiliary.stream_ref_legacy,
          STREAM_REF_PATCH_BYTES},
-        {STREAM_EVENT_PATCH_OFFSETS[1], STREAM_EVENT_STOCK[1],
-         STREAM_EVENT_RECOMPUTE[1], NULL, NULL,
-         STREAM_EVENT_PATCH_SIZES[1]}
+        {g_auxiliary.stream_event_patch_offsets[1],
+         g_auxiliary.stream_event_stock[1],
+         g_auxiliary.stream_event_patched[1],
+         g_auxiliary.stream_event_recompute_legacy[1], NULL, NULL,
+         STREAM_EVENT_PATCH_SIZES[1]},
+        {g_auxiliary.stream_event_patch_offsets[2],
+         g_auxiliary.stream_event_stock[2],
+         g_auxiliary.stream_event_patched[2],
+         g_auxiliary.stream_event_recompute_legacy[2], NULL, NULL,
+         STREAM_EVENT_PATCH_SIZES[2]}
+    };
+    const owned_overlay_region_t stream_open_region = {
+        g_auxiliary.stream_open_patch_off,
+        g_auxiliary.stream_open_stock,
+        g_auxiliary.stream_open_patched,
+        NULL, NULL, NULL, STREAM_OPEN_EVENT_BYTES
     };
     int update_states[2]={0};
     int stream_states[STREAM_OVERLAY_REGION_COUNT]={0};
     int update_ok = resolve_owned_multi_symbol(
         fd, file_size, pid, base, update_name,
-        UPDATE_A2H_MODE_FUNC_BYTES, update_regions,
+        0, update_regions,
         sizeof(update_regions) / sizeof(update_regions[0]),
         &g_auxiliary.update_off, update_states);
     int stream_ok = update_ok && resolve_owned_multi_symbol(
         fd, file_size, pid, base, stream_event_name,
-        STREAM_SET_PARAMETERS_FUNC_BYTES, stream_regions,
+        0, stream_regions,
         STREAM_OVERLAY_REGION_COUNT, &g_auxiliary.stream_event_off,
         stream_states);
-    int policy_ok = stream_ok && resolve_owned_auxiliary_symbol(
+    int stream_open_states[1] = {0};
+    int stream_open_ok = stream_ok && resolve_owned_multi_symbol(
+        fd, file_size, pid, base, stream_open_name, 0,
+        &stream_open_region, 1, &g_auxiliary.stream_open_off,
+        stream_open_states);
+    const owned_overlay_region_t policy_regions[] = {
+        {g_auxiliary.policy_idle_count_cbz_off,
+         POLICY_IDLE_COUNT_CBZ_STOCK,
+         g_auxiliary.idle_count_branch, NULL, NULL, NULL,
+         sizeof(POLICY_IDLE_COUNT_CBZ_STOCK)},
+        {g_auxiliary.policy_idle_clear_off, IDLE_CLEAR_BRANCH_STOCK,
+         g_auxiliary.idle_clear_branch, NULL, NULL, NULL,
+         IDLE_CLEAR_BRANCH_BYTES},
+        {g_auxiliary.policy_game_off, GAME_POLICY_STOCK,
+         g_auxiliary.policy_concurrent, GAME_POLICY_RELAXED,
+         NULL, GAME_POLICY_PUBLIC_RELAXED, GAME_POLICY_PATCH_BYTES}
+    };
+    int policy_states[POLICY_OVERLAY_REGION_COUNT]={0};
+    int policy_ok = stream_open_ok && resolve_owned_multi_symbol(
         fd, file_size, pid, base, policy_name,
-        IS_A2H_ALLOWED_FUNC_BYTES, GAME_POLICY_PATCH_OFF,
-        GAME_POLICY_STOCK, GAME_POLICY_RELAXED, sizeof(GAME_POLICY_STOCK),
-        &g_auxiliary.policy_off, &g_auxiliary.policy_relaxed);
-    int output_pool_patched = 0;
+        0, policy_regions,
+        sizeof(policy_regions) / sizeof(policy_regions[0]),
+        &g_auxiliary.policy_off, policy_states);
+    const owned_overlay_region_t output_pool_region = {
+        g_auxiliary.output_pool_tail_patch_off, OUTPUT_POOL_TAIL_STOCK,
+        g_auxiliary.output_pool_tail_patched,
+        g_auxiliary.output_pool_tail_persistent_legacy,
+        NULL, NULL, OUTPUT_POOL_TAIL_PATCH_BYTES
+    };
+    int output_pool_states[1]={0};
     uintptr_t output_pool_off = 0;
-    int output_pool_ok = policy_ok && resolve_owned_auxiliary_symbol(
+    int output_pool_ok = policy_ok && resolve_owned_multi_symbol(
         fd, file_size, pid, base, output_pool_name,
-        UPDATE_OUTPUT_POOL_FUNC_BYTES, OUTPUT_POOL_TAIL_PATCH_OFF,
-        OUTPUT_POOL_TAIL_STOCK, g_auxiliary.output_pool_tail_patched,
-        OUTPUT_POOL_TAIL_PATCH_BYTES, &output_pool_off,
-        &output_pool_patched) &&
+        0, &output_pool_region, 1,
+        &output_pool_off, output_pool_states) &&
         output_pool_off == g_auxiliary.output_pool_off;
+    int concurrent_helper_ok = output_pool_ok &&
+        resolve_owned_executable_helper(pid, base);
     close(fd);
     g_auxiliary.update_flags_state = update_states[0];
     g_auxiliary.update_app_policy_state = update_states[1];
+    g_auxiliary.idle_count_state =
+        policy_states[POLICY_REGION_IDLE_COUNT];
+    g_auxiliary.idle_clear_state =
+        policy_states[POLICY_REGION_IDLE_CLEAR];
+    g_auxiliary.policy_relaxed =
+        policy_states[POLICY_REGION_GAME] == OVERLAY_ALTERNATE ||
+        policy_states[POLICY_REGION_GAME] == OVERLAY_LEGACY;
     g_auxiliary.stream_ref_state = stream_states[1];
-    g_auxiliary.output_pool_state = output_pool_patched ?
-        OVERLAY_PATCHED : OVERLAY_STOCK;
-    if (stream_states[0] == OVERLAY_PATCHED)
-        g_auxiliary.stream_events_patched++;
-    if (stream_states[2] == OVERLAY_PATCHED)
-        g_auxiliary.stream_events_patched++;
+    g_auxiliary.stream_open_state = stream_open_states[0];
+    g_auxiliary.output_pool_state = output_pool_states[0];
+    static const size_t stream_event_region_indices
+            [STREAM_EVENT_PATCH_COUNT] = {
+        STREAM_REGION_EVENT0, STREAM_REGION_EVENT1, STREAM_REGION_EVENT2
+    };
+    for (size_t i = 0; i < STREAM_EVENT_PATCH_COUNT; ++i) {
+        if (stream_states[stream_event_region_indices[i]] == OVERLAY_PATCHED)
+            g_auxiliary.stream_events_patched++;
+    }
     int handoff_owned = stream_states[1] == OVERLAY_PATCHED ||
-                        stream_states[1] == OVERLAY_ALTERNATE;
-    int output_owned = output_pool_patched != 0;
+                        stream_states[1] == OVERLAY_ALTERNATE ||
+                        stream_states[1] == OVERLAY_ALTERNATE2;
+    int output_owned = g_auxiliary.output_pool_state == OVERLAY_PATCHED ||
+                       g_auxiliary.output_pool_state == OVERLAY_ALTERNATE;
     int app_policy_new = update_states[1] == OVERLAY_PATCHED ||
                          update_states[1] == OVERLAY_ALTERNATE;
     int app_policy_old = update_states[1] == OVERLAY_STOCK ||
-                         update_states[1] == OVERLAY_LEGACY;
+                          update_states[1] == OVERLAY_LEGACY;
+    int idle_helper_owned = update_states[0] == OVERLAY_PATCHED ||
+                            update_states[0] == OVERLAY_ALTERNATE2;
+    int idle_branch_owned =
+        policy_states[POLICY_REGION_IDLE_CLEAR] == OVERLAY_PATCHED;
+    int concurrent_generation = coherent_concurrent_generation(
+        update_states, g_auxiliary.concurrent_helper_state,
+        policy_states, stream_states, g_auxiliary.stream_open_state);
     int ownership_coherent = handoff_owned == output_owned &&
+        idle_helper_owned == idle_branch_owned &&
+        concurrent_generation &&
         ((handoff_owned && app_policy_new) ||
          (!handoff_owned && app_policy_old));
-    g_auxiliary.valid = update_ok && stream_ok && policy_ok &&
-                        output_pool_ok && ownership_coherent;
+    g_auxiliary.valid = update_ok && stream_ok && stream_open_ok && policy_ok &&
+                        output_pool_ok && concurrent_helper_ok &&
+                        ownership_coherent;
     if (!g_auxiliary.valid) {
         memset(&g_auxiliary, 0, sizeof(g_auxiliary));
         fprintf(stderr,
@@ -3221,9 +4768,30 @@ static int resolve_auxiliary_targets(pid_t pid, uintptr_t base) {
         return 0;
     }
     fprintf(stderr,
-            "[a2h_patch] auxiliary ownership output_flags=%s app_policy=%s stream_handoff=%s output_pool=%s stream_events=%u/%u output_policy=%s\n",
-            g_auxiliary.update_flags_state == OVERLAY_LEGACY ? "legacy-v1.5.6" :
-            (g_auxiliary.update_flags_state == OVERLAY_PATCHED ? "game" : "stock"),
+            "[a2h_patch] auxiliary ownership output_flags=%s idle_init=%s idle_clear=%s concurrent_slot=%s@0x%lx app_policy=%s stream_handoff=%s output_pool=%s stream_events=%u/%u stream_open=%s output_policy=%s\n",
+            g_auxiliary.update_flags_state == OVERLAY_LEGACY ?
+                "game-lowbyte-v1.5.6" :
+            (g_auxiliary.update_flags_state == OVERLAY_ALTERNATE2 ?
+                "game+spatial+guarded-idle-v1" :
+            (g_auxiliary.update_flags_state == OVERLAY_ALTERNATE ?
+                "game+spatial-v1.5.6" :
+            (g_auxiliary.update_flags_state == OVERLAY_PATCHED ?
+                "game+spatial+idle-helper" : "stock"))),
+            g_auxiliary.idle_count_state == OVERLAY_PATCHED ?
+                "manager-x20" : "stock-skip",
+            g_auxiliary.idle_clear_state == OVERLAY_PATCHED ?
+                "zero-output" : "stock",
+            g_auxiliary.concurrent_helper_state == OVERLAY_PATCHED ?
+                "owned" :
+            (g_auxiliary.concurrent_helper_state == OVERLAY_LEGACY ?
+                "previous-176" :
+            (g_auxiliary.concurrent_helper_state == OVERLAY_ALTERNATE3 ?
+                "previous-160" :
+            (g_auxiliary.concurrent_helper_state == OVERLAY_ALTERNATE ?
+                "legacy-64" :
+            (g_auxiliary.concurrent_helper_state == OVERLAY_ALTERNATE2 ?
+                "legacy-56" : "stock-zero")))),
+            (unsigned long)g_auxiliary.concurrent_helper_off,
             g_auxiliary.update_app_policy_state == OVERLAY_ALTERNATE ?
                 "relaxed-handoff" :
             (g_auxiliary.update_app_policy_state == OVERLAY_PATCHED ?
@@ -3232,12 +4800,17 @@ static int resolve_auxiliary_targets(pid_t pid, uintptr_t base) {
                 "legacy-relaxed" : "stock")),
             g_auxiliary.stream_ref_state == OVERLAY_PATCHED ? "handoff" :
             g_auxiliary.stream_ref_state == OVERLAY_ALTERNATE ?
-                "handoff-v1" :
+                "handoff-persistent-v1.5.6" :
+            g_auxiliary.stream_ref_state == OVERLAY_ALTERNATE2 ?
+                "handoff-failed-idle-guard" :
             (g_auxiliary.stream_ref_state == OVERLAY_LEGACY ?
              "legacy-event" : "stock"),
-            g_auxiliary.output_pool_state == OVERLAY_PATCHED ?
-                "event-tail" : "stock",
+            g_auxiliary.output_pool_state == OVERLAY_PATCHED ? "event-tail" :
+            (g_auxiliary.output_pool_state == OVERLAY_ALTERNATE ?
+                "event-tail-v1.5.6" : "stock"),
             g_auxiliary.stream_events_patched, STREAM_EVENT_PATCH_COUNT,
+            g_auxiliary.stream_open_state == OVERLAY_PATCHED ?
+                "post-commit" : "stock",
             g_auxiliary.policy_relaxed ? "relaxed" : "stock");
     return 1;
 }
@@ -3246,65 +4819,103 @@ static int verify_auxiliary_targets(pid_t pid, uintptr_t base,
                                     int want_app_policy_relaxed,
                                     int verbose) {
     if (!g_auxiliary.valid) return 0;
-    unsigned char update[sizeof(UPDATE_FLAGS_GAME)];
+    unsigned char update[sizeof(UPDATE_FLAGS_STOCK)];
     unsigned char app_policy[UPDATE_APP_POLICY_BYTES];
+    unsigned char concurrent_helper[UPDATE_CONCURRENT_HELPER_BYTES];
+    unsigned char idle_count_branch[sizeof(POLICY_IDLE_COUNT_CBZ_STOCK)];
+    unsigned char idle_clear_branch[IDLE_CLEAR_BRANCH_BYTES];
     unsigned char policy[sizeof(GAME_POLICY_STOCK)];
     unsigned char stream_ref[STREAM_REF_PATCH_BYTES];
     unsigned char output_pool_tail[OUTPUT_POOL_TAIL_PATCH_BYTES];
     unsigned char stream_event[STREAM_EVENT_PATCH_MAX_BYTES];
+    unsigned char stream_open_event[STREAM_OPEN_EVENT_BYTES];
     int update_ok = mem_r(pid, base + g_auxiliary.update_off +
-                          UPDATE_FLAGS_PATCH_OFF,
+                          g_auxiliary.update_flags_patch_off,
                           update, sizeof(update)) == 0 &&
-                    memcmp(update, UPDATE_FLAGS_GAME, sizeof(update)) == 0;
+                    memcmp(update, g_auxiliary.update_flags_patched,
+                           sizeof(update)) == 0;
     const unsigned char *wanted_app_policy = want_app_policy_relaxed ?
         g_auxiliary.app_policy_relaxed : g_auxiliary.app_policy_stock;
     int app_policy_ok = mem_r(pid, base + g_auxiliary.update_off +
-                              UPDATE_APP_POLICY_PATCH_OFF,
+                              g_auxiliary.update_app_policy_patch_off,
                               app_policy, sizeof(app_policy)) == 0 &&
                         memcmp(app_policy, wanted_app_policy,
                                UPDATE_APP_POLICY_BYTES) == 0;
-    const unsigned char *wanted_policy = GAME_POLICY_RELAXED;
+    int concurrent_helper_ok = mem_r(
+        pid, base + g_auxiliary.concurrent_helper_off,
+        concurrent_helper, sizeof(concurrent_helper)) == 0 &&
+        memcmp(concurrent_helper, g_auxiliary.concurrent_helper_patched,
+               sizeof(concurrent_helper)) == 0;
+    int idle_count_ok = mem_r(
+        pid, base + g_auxiliary.policy_off +
+             g_auxiliary.policy_idle_count_cbz_off,
+        idle_count_branch, sizeof(idle_count_branch)) == 0 &&
+        memcmp(idle_count_branch, g_auxiliary.idle_count_branch,
+               sizeof(idle_count_branch)) == 0;
+    int idle_clear_ok = mem_r(
+        pid, base + g_auxiliary.policy_off +
+             g_auxiliary.policy_idle_clear_off,
+        idle_clear_branch, sizeof(idle_clear_branch)) == 0 &&
+        memcmp(idle_clear_branch, g_auxiliary.idle_clear_branch,
+               sizeof(idle_clear_branch)) == 0;
+    const unsigned char *wanted_policy = want_app_policy_relaxed ?
+        GAME_POLICY_RELAXED : g_auxiliary.policy_concurrent;
     int policy_ok = mem_r(pid, base + g_auxiliary.policy_off +
-                          GAME_POLICY_PATCH_OFF,
+                          g_auxiliary.policy_game_off,
                           policy, sizeof(policy)) == 0 &&
                     memcmp(policy, wanted_policy, sizeof(policy)) == 0;
     int stream_ref_ok = mem_r(
-        pid, base + g_auxiliary.stream_event_off + STREAM_REF_PATCH_OFF,
+        pid, base + g_auxiliary.stream_event_off +
+             g_auxiliary.stream_ref_patch_off,
         stream_ref, sizeof(stream_ref)) == 0 &&
         memcmp(stream_ref, g_auxiliary.stream_ref_patched,
                sizeof(stream_ref)) == 0;
     int output_pool_ok = mem_r(
         pid, base + g_auxiliary.output_pool_off +
-             OUTPUT_POOL_TAIL_PATCH_OFF,
+             g_auxiliary.output_pool_tail_patch_off,
         output_pool_tail, sizeof(output_pool_tail)) == 0 &&
         memcmp(output_pool_tail, g_auxiliary.output_pool_tail_patched,
                sizeof(output_pool_tail)) == 0;
+    int stream_open_ok = mem_r(
+        pid, base + g_auxiliary.stream_open_off +
+             g_auxiliary.stream_open_patch_off,
+        stream_open_event, sizeof(stream_open_event)) == 0 &&
+        memcmp(stream_open_event, g_auxiliary.stream_open_patched,
+               sizeof(stream_open_event)) == 0;
     unsigned int stream_events_ok = 0;
     for (size_t i = 0; i < STREAM_EVENT_PATCH_COUNT; ++i) {
         uintptr_t address = base + g_auxiliary.stream_event_off +
-                            STREAM_EVENT_PATCH_OFFSETS[i];
+                            g_auxiliary.stream_event_patch_offsets[i];
         size_t event_size = STREAM_EVENT_PATCH_SIZES[i];
         if (mem_r(pid, address, stream_event, event_size) == 0 &&
-            memcmp(stream_event, STREAM_EVENT_RECOMPUTE[i],
+            memcmp(stream_event, g_auxiliary.stream_event_patched[i],
                    event_size) == 0) {
             stream_events_ok++;
         }
     }
-    int final_ok = update_ok && app_policy_ok && policy_ok && stream_ref_ok &&
-                   output_pool_ok &&
+    int final_ok = update_ok && app_policy_ok && concurrent_helper_ok &&
+                   idle_count_ok && idle_clear_ok && policy_ok &&
+                   stream_ref_ok && output_pool_ok && stream_open_ok &&
                    stream_events_ok == STREAM_EVENT_PATCH_COUNT;
     if (verbose || !final_ok) {
         fprintf(stderr,
-                "[a2h_patch] auxiliary live output_flags=%s stream_handoff=%s output_pool=%s stream_events=%u/%u game_auto_pause=%s app_policy=%s output_policy=%s final=%s\n",
-                update_ok ? "game+spatial" : "mismatch",
+                "[a2h_patch] auxiliary live output_flags=%s idle_init=%s idle_clear=%s concurrent_latch=%s stream_handoff=%s output_pool=%s stream_events=%u/%u stream_open=%s game_auto_pause=%s app_policy=%s output_policy=%s final=%s\n",
+                update_ok ? "game+spatial+idle-helper" : "mismatch",
+                idle_count_ok ? "manager-x20" : "mismatch",
+                idle_clear_ok ? "zero-output" : "mismatch",
+                concurrent_helper_ok ? "event-driven" : "mismatch",
                 stream_ref_ok ? "handoff" : "mismatch",
                 output_pool_ok ? "event-tail" : "mismatch",
                 stream_events_ok, STREAM_EVENT_PATCH_COUNT,
+                stream_open_ok ? "post-commit" : "mismatch",
                 want_app_policy_relaxed ? "disabled" : "enabled",
                 app_policy_ok ? (want_app_policy_relaxed ?
                                  "relaxed" : "stock") :
                                 "mismatch",
-                policy_ok ? "multi-speaker" : "mismatch",
+                policy_ok ? (want_app_policy_relaxed ?
+                             "multi-speaker" :
+                             "multi-speaker+concurrent-pause") :
+                            "mismatch",
                 final_ok ? "OK" : "FAIL");
     }
     return final_ok;
@@ -3313,15 +4924,23 @@ static int verify_auxiliary_targets(pid_t pid, uintptr_t base,
 typedef struct {
     uintptr_t update_addr;
     uintptr_t app_policy_addr;
+    uintptr_t concurrent_helper_addr;
+    uintptr_t idle_count_addr;
+    uintptr_t idle_clear_addr;
     uintptr_t policy_addr;
     uintptr_t stream_ref_addr;
     uintptr_t output_pool_addr;
+    uintptr_t stream_open_addr;
     uintptr_t stream_event_addr[STREAM_EVENT_PATCH_COUNT];
     unsigned char update_before[sizeof(UPDATE_FLAGS_STOCK)];
     unsigned char app_policy_before[UPDATE_APP_POLICY_BYTES];
+    unsigned char concurrent_helper_before[UPDATE_CONCURRENT_HELPER_BYTES];
+    unsigned char idle_count_before[sizeof(POLICY_IDLE_COUNT_CBZ_STOCK)];
+    unsigned char idle_clear_before[IDLE_CLEAR_BRANCH_BYTES];
     unsigned char policy_before[sizeof(GAME_POLICY_STOCK)];
     unsigned char stream_ref_before[STREAM_REF_PATCH_BYTES];
     unsigned char output_pool_before[OUTPUT_POOL_TAIL_PATCH_BYTES];
+    unsigned char stream_open_before[STREAM_OPEN_EVENT_BYTES];
     unsigned char stream_event_before[STREAM_EVENT_PATCH_COUNT]
                                      [STREAM_EVENT_PATCH_MAX_BYTES];
     int valid;
@@ -3331,30 +4950,49 @@ static int auxiliary_transaction_begin(pid_t pid, uintptr_t base,
                                         auxiliary_transaction_t *tx) {
     if (!tx || !g_auxiliary.valid) return 0;
     memset(tx, 0, sizeof(*tx));
-    tx->update_addr = base + g_auxiliary.update_off + UPDATE_FLAGS_PATCH_OFF;
+    tx->update_addr = base + g_auxiliary.update_off +
+                      g_auxiliary.update_flags_patch_off;
     tx->app_policy_addr = base + g_auxiliary.update_off +
-                          UPDATE_APP_POLICY_PATCH_OFF;
-    tx->policy_addr = base + g_auxiliary.policy_off + GAME_POLICY_PATCH_OFF;
+                          g_auxiliary.update_app_policy_patch_off;
+    tx->concurrent_helper_addr = base +
+                                 g_auxiliary.concurrent_helper_off;
+    tx->idle_count_addr = base + g_auxiliary.policy_off +
+                          g_auxiliary.policy_idle_count_cbz_off;
+    tx->idle_clear_addr = base + g_auxiliary.policy_off +
+                          g_auxiliary.policy_idle_clear_off;
+    tx->policy_addr = base + g_auxiliary.policy_off +
+                      g_auxiliary.policy_game_off;
     tx->stream_ref_addr = base + g_auxiliary.stream_event_off +
-                          STREAM_REF_PATCH_OFF;
+                          g_auxiliary.stream_ref_patch_off;
     tx->output_pool_addr = base + g_auxiliary.output_pool_off +
-                           OUTPUT_POOL_TAIL_PATCH_OFF;
+                           g_auxiliary.output_pool_tail_patch_off;
+    tx->stream_open_addr = base + g_auxiliary.stream_open_off +
+                           g_auxiliary.stream_open_patch_off;
     if (mem_r(pid, tx->update_addr, tx->update_before,
               sizeof(tx->update_before)) != 0 ||
         mem_r(pid, tx->app_policy_addr, tx->app_policy_before,
               sizeof(tx->app_policy_before)) != 0 ||
+        mem_r(pid, tx->concurrent_helper_addr,
+              tx->concurrent_helper_before,
+              sizeof(tx->concurrent_helper_before)) != 0 ||
+        mem_r(pid, tx->idle_count_addr, tx->idle_count_before,
+              sizeof(tx->idle_count_before)) != 0 ||
+        mem_r(pid, tx->idle_clear_addr, tx->idle_clear_before,
+              sizeof(tx->idle_clear_before)) != 0 ||
         mem_r(pid, tx->policy_addr, tx->policy_before,
               sizeof(tx->policy_before)) != 0 ||
         mem_r(pid, tx->stream_ref_addr, tx->stream_ref_before,
               sizeof(tx->stream_ref_before)) != 0 ||
         mem_r(pid, tx->output_pool_addr, tx->output_pool_before,
-              sizeof(tx->output_pool_before)) != 0) {
+              sizeof(tx->output_pool_before)) != 0 ||
+        mem_r(pid, tx->stream_open_addr, tx->stream_open_before,
+              sizeof(tx->stream_open_before)) != 0) {
         fprintf(stderr, "[a2h_patch] auxiliary transaction snapshot FAIL\n");
         return 0;
     }
     for (size_t i = 0; i < STREAM_EVENT_PATCH_COUNT; ++i) {
         tx->stream_event_addr[i] = base + g_auxiliary.stream_event_off +
-                                   STREAM_EVENT_PATCH_OFFSETS[i];
+                                   g_auxiliary.stream_event_patch_offsets[i];
         if (mem_r(pid, tx->stream_event_addr[i],
                   tx->stream_event_before[i],
                   STREAM_EVENT_PATCH_SIZES[i]) != 0) {
@@ -3366,13 +5004,17 @@ static int auxiliary_transaction_begin(pid_t pid, uintptr_t base,
     }
     tx->valid = 1;
     fprintf(stderr,
-            "[a2h_patch] auxiliary transaction snapshot OK update_bytes=%lu app_policy_bytes=%lu output_policy_bytes=%lu stream_handoff_bytes=%lu output_pool_bytes=%lu stream_events=%u\n",
+            "[a2h_patch] auxiliary transaction snapshot OK update_bytes=%lu app_policy_bytes=%lu concurrent_helper_bytes=%lu idle_init_bytes=%lu idle_clear_bytes=%lu output_policy_bytes=%lu stream_handoff_bytes=%lu output_pool_bytes=%lu stream_events=%u stream_open_bytes=%lu\n",
             (unsigned long)sizeof(tx->update_before),
             (unsigned long)sizeof(tx->app_policy_before),
+            (unsigned long)sizeof(tx->concurrent_helper_before),
+            (unsigned long)sizeof(tx->idle_count_before),
+            (unsigned long)sizeof(tx->idle_clear_before),
             (unsigned long)sizeof(tx->policy_before),
             (unsigned long)sizeof(tx->stream_ref_before),
             (unsigned long)sizeof(tx->output_pool_before),
-            STREAM_EVENT_PATCH_COUNT);
+            STREAM_EVENT_PATCH_COUNT,
+            (unsigned long)sizeof(tx->stream_open_before));
     return 1;
 }
 
@@ -3428,8 +5070,24 @@ static int restore_code_snapshot(pid_t pid, uintptr_t base, uintptr_t addr,
 static int auxiliary_transaction_restore(pid_t pid, uintptr_t base,
                                           const auxiliary_transaction_t *tx) {
     if (!tx || !tx->valid) return 0;
-    /* Disconnect the only external branch into the helper before restoring
-     * the helper bytes themselves. */
+    /* Disconnect every branch into the RX-tail helper before its bytes are
+     * restored. A failed disconnect intentionally leaves the owned helper in
+     * place rather than exposing zero/stock bytes through a live branch. */
+    int stream_open_ok = restore_code_snapshot(
+        pid, base, tx->stream_open_addr, tx->stream_open_before,
+        sizeof(tx->stream_open_before), "stream-open-post-commit");
+    int policy_ok = restore_code_snapshot(
+        pid, base, tx->policy_addr, tx->policy_before,
+        sizeof(tx->policy_before), "isA2HAllowed");
+    int update_ok = restore_code_snapshot(
+        pid, base, tx->update_addr, tx->update_before,
+        sizeof(tx->update_before), "updateA2HMode");
+    int idle_clear_ok = restore_code_snapshot(
+        pid, base, tx->idle_clear_addr, tx->idle_clear_before,
+        sizeof(tx->idle_clear_before), "isA2HAllowed.idle-clear");
+    int idle_count_ok = restore_code_snapshot(
+        pid, base, tx->idle_count_addr, tx->idle_count_before,
+        sizeof(tx->idle_count_before), "isA2HAllowed.idle-init");
     int output_pool_ok = restore_code_snapshot(
         pid, base, tx->output_pool_addr, tx->output_pool_before,
         sizeof(tx->output_pool_before), "output-pool-event-tail");
@@ -3447,47 +5105,69 @@ static int auxiliary_transaction_restore(pid_t pid, uintptr_t base,
     int stream_ref_ok = restore_code_snapshot(
         pid, base, tx->stream_ref_addr, tx->stream_ref_before,
         sizeof(tx->stream_ref_before), "stream-handoff-helper");
-    int policy_ok = restore_code_snapshot(
-        pid, base, tx->policy_addr, tx->policy_before,
-        sizeof(tx->policy_before), "isA2HAllowed");
+    int concurrent_helper_ok = 0;
+    if (stream_open_ok && policy_ok && update_ok &&
+        idle_clear_ok && idle_count_ok) {
+        concurrent_helper_ok = restore_code_snapshot(
+            pid, base, tx->concurrent_helper_addr,
+            tx->concurrent_helper_before,
+            sizeof(tx->concurrent_helper_before),
+            "rx-tail.concurrent-helper");
+    } else {
+        fprintf(stderr,
+                "[a2h_patch] code rollback label=rx-tail.concurrent-helper skipped=live-branch\n");
+    }
     int app_policy_ok = restore_code_snapshot(
         pid, base, tx->app_policy_addr, tx->app_policy_before,
         sizeof(tx->app_policy_before), "updateA2HMode.app-policy");
-    int update_ok = restore_code_snapshot(
-        pid, base, tx->update_addr, tx->update_before,
-        sizeof(tx->update_before), "updateA2HMode");
-    return output_pool_ok && stream_ok && stream_ref_ok && policy_ok &&
+    return stream_open_ok && idle_count_ok && idle_clear_ok &&
+           output_pool_ok && stream_ok &&
+           stream_ref_ok && policy_ok && concurrent_helper_ok &&
            app_policy_ok && update_ok;
 }
 
 static int auxiliary_cache_preflight(pid_t pid, uintptr_t base) {
     if (!g_auxiliary.valid) return 0;
     int update = remote_icache_flush(
-        pid, base, base + g_auxiliary.update_off + UPDATE_FLAGS_PATCH_OFF,
-        UPDATE_APP_POLICY_PATCH_OFF + UPDATE_APP_POLICY_BYTES -
-        UPDATE_FLAGS_PATCH_OFF);
+        pid, base, base + g_auxiliary.update_off +
+        g_auxiliary.update_flags_patch_off,
+        g_auxiliary.update_app_policy_patch_off + UPDATE_APP_POLICY_BYTES -
+        g_auxiliary.update_flags_patch_off);
+    int concurrent_helper = remote_icache_flush(
+        pid, base, base + g_auxiliary.concurrent_helper_off,
+        UPDATE_CONCURRENT_HELPER_BYTES);
     int policy = remote_icache_flush(
-        pid, base, base + g_auxiliary.policy_off + GAME_POLICY_PATCH_OFF,
-        sizeof(GAME_POLICY_STOCK));
+        pid, base, base + g_auxiliary.policy_off +
+        g_auxiliary.policy_idle_count_cbz_off,
+        g_auxiliary.policy_game_off + sizeof(GAME_POLICY_STOCK) -
+        g_auxiliary.policy_idle_count_cbz_off);
     int stream_events = remote_icache_flush(
         pid, base, base + g_auxiliary.stream_event_off +
-        STREAM_EVENT_PATCH_OFFSETS[0],
-        STREAM_EVENT_PATCH_OFFSETS[STREAM_EVENT_PATCH_COUNT - 1] +
+        g_auxiliary.stream_event_patch_offsets[0],
+        g_auxiliary.stream_event_patch_offsets[STREAM_EVENT_PATCH_COUNT - 1] +
         STREAM_EVENT_PATCH_SIZES[STREAM_EVENT_PATCH_COUNT - 1] -
-        STREAM_EVENT_PATCH_OFFSETS[0]);
+        g_auxiliary.stream_event_patch_offsets[0]);
     int output_pool = remote_icache_flush(
         pid, base, base + g_auxiliary.output_pool_off +
-        OUTPUT_POOL_TAIL_PATCH_OFF, OUTPUT_POOL_TAIL_PATCH_BYTES);
+        g_auxiliary.output_pool_tail_patch_off,
+        OUTPUT_POOL_TAIL_PATCH_BYTES);
+    int stream_open = remote_icache_flush(
+        pid, base, base + g_auxiliary.stream_open_off +
+        g_auxiliary.stream_open_patch_off, STREAM_OPEN_EVENT_BYTES);
     int ok = (update & ICACHE_REMOTE_IVAU) != 0 &&
+             (concurrent_helper & ICACHE_REMOTE_IVAU) != 0 &&
              (policy & ICACHE_REMOTE_IVAU) != 0 &&
              (stream_events & ICACHE_REMOTE_IVAU) != 0 &&
-             (output_pool & ICACHE_REMOTE_IVAU) != 0;
+             (output_pool & ICACHE_REMOTE_IVAU) != 0 &&
+             (stream_open & ICACHE_REMOTE_IVAU) != 0;
     fprintf(stderr,
-            "[a2h_patch] auxiliary cache preflight update=%s policy=%s stream_events=%s output_pool=%s\n",
+            "[a2h_patch] auxiliary cache preflight update=%s concurrent_helper=%s policy=%s stream_events=%s output_pool=%s stream_open=%s\n",
             (update & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL",
+            (concurrent_helper & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL",
             (policy & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL",
             (stream_events & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL",
-            (output_pool & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL");
+            (output_pool & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL",
+            (stream_open & ICACHE_REMOTE_IVAU) ? "OK" : "FAIL");
     return ok;
 }
 
@@ -3495,26 +5175,57 @@ static int apply_auxiliary_targets(pid_t pid, uintptr_t base,
                                    int want_app_policy_relaxed) {
     if (!g_auxiliary.valid) return 0;
     uintptr_t update_addr = base + g_auxiliary.update_off +
-                            UPDATE_FLAGS_PATCH_OFF;
+                            g_auxiliary.update_flags_patch_off;
     uintptr_t app_policy_addr = base + g_auxiliary.update_off +
-                                UPDATE_APP_POLICY_PATCH_OFF;
+                                g_auxiliary.update_app_policy_patch_off;
+    uintptr_t concurrent_helper_addr = base +
+                                        g_auxiliary.concurrent_helper_off;
     uintptr_t policy_addr = base + g_auxiliary.policy_off +
-                            GAME_POLICY_PATCH_OFF;
+                            g_auxiliary.policy_game_off;
+    uintptr_t idle_count_addr = base + g_auxiliary.policy_off +
+                                g_auxiliary.policy_idle_count_cbz_off;
+    uintptr_t idle_clear_addr = base + g_auxiliary.policy_off +
+                                g_auxiliary.policy_idle_clear_off;
     unsigned char current[AUXILIARY_PATCH_MAX_BYTES];
-    int update_ready = mem_r(pid, update_addr, current,
-                             sizeof(UPDATE_FLAGS_GAME)) == 0 &&
-                       memcmp(current, UPDATE_FLAGS_GAME,
-                              sizeof(UPDATE_FLAGS_GAME)) == 0;
-    if (!update_ready) {
+    int concurrent_helper_ready =
+        mem_r(pid, concurrent_helper_addr, current,
+              UPDATE_CONCURRENT_HELPER_BYTES) == 0 &&
+        memcmp(current, g_auxiliary.concurrent_helper_patched,
+               UPDATE_CONCURRENT_HELPER_BYTES) == 0;
+    if (!concurrent_helper_ready) {
+        concurrent_helper_ready = write_code_twice(
+            pid, base, concurrent_helper_addr,
+            g_auxiliary.concurrent_helper_patched,
+            UPDATE_CONCURRENT_HELPER_BYTES,
+            "rx-tail.concurrent-helper");
+    }
+    int idle_count_ready = concurrent_helper_ready &&
+        mem_r(pid, idle_count_addr, current,
+              sizeof(g_auxiliary.idle_count_branch)) == 0 &&
+        memcmp(current, g_auxiliary.idle_count_branch,
+               sizeof(g_auxiliary.idle_count_branch)) == 0;
+    if (concurrent_helper_ready && !idle_count_ready) {
+        idle_count_ready = write_code_twice(
+            pid, base, idle_count_addr, g_auxiliary.idle_count_branch,
+            sizeof(g_auxiliary.idle_count_branch),
+            "isA2HAllowed.idle-init");
+    }
+    int update_ready = idle_count_ready &&
+                       mem_r(pid, update_addr, current,
+                             sizeof(g_auxiliary.update_flags_patched)) == 0 &&
+                       memcmp(current, g_auxiliary.update_flags_patched,
+                              sizeof(g_auxiliary.update_flags_patched)) == 0;
+    if (concurrent_helper_ready && !update_ready) {
         update_ready = write_code_twice(pid, base, update_addr,
-                                        UPDATE_FLAGS_GAME,
-                                        sizeof(UPDATE_FLAGS_GAME),
-                                        "updateA2HMode.game-spatial");
+                                        g_auxiliary.update_flags_patched,
+                                        sizeof(g_auxiliary.update_flags_patched),
+                                        "updateA2HMode.game-spatial-idle-helper");
     }
     const unsigned char *app_policy = want_app_policy_relaxed ?
         g_auxiliary.app_policy_relaxed : g_auxiliary.app_policy_stock;
-    int app_policy_ready = mem_r(pid, app_policy_addr, current,
-                                 UPDATE_APP_POLICY_BYTES) == 0 &&
+    int app_policy_ready = update_ready &&
+                           mem_r(pid, app_policy_addr, current,
+                                  UPDATE_APP_POLICY_BYTES) == 0 &&
                            memcmp(current, app_policy,
                                   UPDATE_APP_POLICY_BYTES) == 0;
     if (update_ready && !app_policy_ready) {
@@ -3525,30 +5236,47 @@ static int apply_auxiliary_targets(pid_t pid, uintptr_t base,
                 "updateA2HMode.app-policy.relaxed" :
                 "updateA2HMode.app-policy.stock");
     }
-    const unsigned char *policy = GAME_POLICY_RELAXED;
-    int policy_ready = mem_r(pid, policy_addr, current,
+    const unsigned char *policy = want_app_policy_relaxed ?
+        GAME_POLICY_RELAXED : g_auxiliary.policy_concurrent;
+    int policy_ready = concurrent_helper_ready && app_policy_ready &&
+                       mem_r(pid, policy_addr, current,
                              sizeof(GAME_POLICY_STOCK)) == 0 &&
                        memcmp(current, policy,
                               sizeof(GAME_POLICY_STOCK)) == 0;
-    if (update_ready && app_policy_ready && !policy_ready) {
+    if (concurrent_helper_ready && !policy_ready) {
         policy_ready = write_code_twice(
             pid, base, policy_addr, policy, sizeof(GAME_POLICY_STOCK),
-            "isA2HAllowed.multi-speaker");
+            want_app_policy_relaxed ?
+                "isA2HAllowed.multi-speaker" :
+                "isA2HAllowed.concurrent-pause");
+    }
+    int idle_clear_ready = concurrent_helper_ready && policy_ready &&
+        mem_r(pid, idle_clear_addr, current,
+              IDLE_CLEAR_BRANCH_BYTES) == 0 &&
+        memcmp(current, g_auxiliary.idle_clear_branch,
+               IDLE_CLEAR_BRANCH_BYTES) == 0;
+    if (concurrent_helper_ready && policy_ready &&
+        !idle_clear_ready) {
+        idle_clear_ready = write_code_twice(
+            pid, base, idle_clear_addr, g_auxiliary.idle_clear_branch,
+            IDLE_CLEAR_BRANCH_BYTES, "isA2HAllowed.idle-clear");
     }
     uintptr_t stream_ref_addr = base + g_auxiliary.stream_event_off +
-                                STREAM_REF_PATCH_OFF;
-    int stream_ref_ready = update_ready && app_policy_ready && policy_ready &&
+                                g_auxiliary.stream_ref_patch_off;
+    int stream_ref_ready = concurrent_helper_ready && policy_ready &&
+        idle_clear_ready &&
         mem_r(pid, stream_ref_addr, current, STREAM_REF_PATCH_BYTES) == 0 &&
         memcmp(current, g_auxiliary.stream_ref_patched,
                STREAM_REF_PATCH_BYTES) == 0;
-    if (update_ready && app_policy_ready && policy_ready &&
+    if (concurrent_helper_ready && policy_ready &&
+        idle_clear_ready &&
         !stream_ref_ready) {
         stream_ref_ready = write_code_twice(
             pid, base, stream_ref_addr, g_auxiliary.stream_ref_patched,
             STREAM_REF_PATCH_BYTES, "stream-handoff-helper");
     }
     uintptr_t output_pool_addr = base + g_auxiliary.output_pool_off +
-                                 OUTPUT_POOL_TAIL_PATCH_OFF;
+                                 g_auxiliary.output_pool_tail_patch_off;
     int output_pool_ready = stream_ref_ready &&
         mem_r(pid, output_pool_addr, current,
               OUTPUT_POOL_TAIL_PATCH_BYTES) == 0 &&
@@ -3560,27 +5288,44 @@ static int apply_auxiliary_targets(pid_t pid, uintptr_t base,
             g_auxiliary.output_pool_tail_patched,
             OUTPUT_POOL_TAIL_PATCH_BYTES, "output-pool-event-tail");
     }
-    int stream_ready = update_ready && app_policy_ready && policy_ready &&
-                       stream_ref_ready && output_pool_ready;
+    int stream_ready = concurrent_helper_ready && policy_ready &&
+                       idle_clear_ready && stream_ref_ready &&
+                       output_pool_ready;
     for (size_t i = 0; stream_ready && i < STREAM_EVENT_PATCH_COUNT; ++i) {
         uintptr_t address = base + g_auxiliary.stream_event_off +
-                            STREAM_EVENT_PATCH_OFFSETS[i];
+                            g_auxiliary.stream_event_patch_offsets[i];
         size_t event_size = STREAM_EVENT_PATCH_SIZES[i];
         int item_ready = mem_r(pid, address, current, event_size) == 0 &&
-                         memcmp(current, STREAM_EVENT_RECOMPUTE[i],
+                         memcmp(current, g_auxiliary.stream_event_patched[i],
                                 event_size) == 0;
         if (!item_ready) {
             char label[48];
             snprintf(label, sizeof(label), "stream-app-event.%lu",
                      (unsigned long)i);
             item_ready = write_code_twice(
-                pid, base, address, STREAM_EVENT_RECOMPUTE[i],
+                pid, base, address, g_auxiliary.stream_event_patched[i],
                 event_size, label);
         }
         stream_ready = item_ready;
     }
-    return update_ready && app_policy_ready && policy_ready &&
-           stream_ref_ready && output_pool_ready && stream_ready &&
+    uintptr_t stream_open_addr = base + g_auxiliary.stream_open_off +
+                                 g_auxiliary.stream_open_patch_off;
+    int stream_open_ready = stream_ready &&
+        mem_r(pid, stream_open_addr, current,
+              STREAM_OPEN_EVENT_BYTES) == 0 &&
+        memcmp(current, g_auxiliary.stream_open_patched,
+               STREAM_OPEN_EVENT_BYTES) == 0;
+    if (stream_ready && !stream_open_ready) {
+        stream_open_ready = write_code_twice(
+            pid, base, stream_open_addr,
+            g_auxiliary.stream_open_patched,
+            STREAM_OPEN_EVENT_BYTES, "stream-open-post-commit");
+    }
+    return update_ready && app_policy_ready && concurrent_helper_ready &&
+           idle_count_ready &&
+           policy_ready &&
+           idle_clear_ready && stream_ref_ready && output_pool_ready &&
+           stream_ready && stream_open_ready &&
            verify_auxiliary_targets(pid, base,
                                     want_app_policy_relaxed, 1);
 }

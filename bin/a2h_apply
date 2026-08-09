@@ -8,6 +8,7 @@ MODDIR=$(cd "$SCRIPT_DIR/.." 2>/dev/null && pwd)
 [ -n "$MODDIR" ] || MODDIR=/data/adb/modules/a2h_hook
 
 PATCHER="$MODDIR/bin/a2h_patch"
+TRIGGER="$MODDIR/bin/a2h_trigger"
 CFG_DIR="$MODDIR/config"
 CFG_STATE="$CFG_DIR/state"
 CFG_GAME_POLICY="$CFG_DIR/game_auto_pause"
@@ -19,6 +20,7 @@ CFG_SNAPSHOT="$CFG_DIR/config_snapshot"
 CFG_REVISION="$CFG_DIR/revision"
 APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
 APPLIED_REVISION="$CFG_DIR/applied_revision"
+APPLIED_GAME_POLICY="$CFG_DIR/applied_game_auto_pause"
 LAST_PID_FILE="$CFG_DIR/last_pid"
 
 TMP_STATE=/data/local/tmp/a2h_state
@@ -669,6 +671,28 @@ toggle_mode() {
   return "$toggle_rc"
 }
 
+toggle_game_auto_pause() {
+  if ! acquire_config_lock 20; then
+    log "toggle game_auto_pause FAIL error=lock-timeout"
+    return 75
+  fi
+  toggle_policy_rc=0
+  normalize_game_auto_pause || toggle_policy_rc=$?
+  if [ "$toggle_policy_rc" -eq 0 ]; then
+    toggle_policy_next=enabled
+    [ "$CURRENT_GAME_AUTO_PAUSE" = "enabled" ] && toggle_policy_next=disabled
+    set_game_auto_pause_unlocked "$toggle_policy_next" || toggle_policy_rc=$?
+  fi
+  if ! release_config_lock; then
+    log "toggle game_auto_pause FAIL error=lock-release"
+    [ "$toggle_policy_rc" -eq 0 ] && toggle_policy_rc=1
+  fi
+  if [ "$toggle_policy_rc" -eq 0 ]; then
+    log "toggle game_auto_pause accepted from=$CURRENT_GAME_AUTO_PAUSE to=$toggle_policy_next"
+  fi
+  return "$toggle_policy_rc"
+}
+
 find_hal_pid() {
   hal_pid=$(pidof android.hardware.audio.service-aidl.mediatek 2>/dev/null | awk '{print $1}')
   [ -n "$hal_pid" ] && { printf '%s\n' "$hal_pid"; return 0; }
@@ -1074,9 +1098,26 @@ apply_current() {
   return 1
 }
 
+refresh_policy_state() {
+  refresh_previous=$1
+  [ -n "$refresh_previous" ] || return 0
+  [ "$refresh_previous" != "$CURRENT_GAME_AUTO_PAUSE" ] || return 0
+  if [ ! -x "$TRIGGER" ]; then
+    log "policy refresh FAIL error=missing-trigger old=$refresh_previous new=$CURRENT_GAME_AUTO_PAUSE"
+    return 1
+  fi
+  if ! "$TRIGGER" >> "$MAIN_LOG" 2>&1; then
+    log "policy refresh FAIL error=trigger old=$refresh_previous new=$CURRENT_GAME_AUTO_PAUSE"
+    return 1
+  fi
+  log "policy refresh trigger=OK old=$refresh_previous new=$CURRENT_GAME_AUTO_PAUSE"
+  return 0
+}
+
 record_applied() {
-  write_value_atomic "$APPLIED_SNAPSHOT" "$CURRENT_SNAPSHOT" 0644 || return 1
+  write_value_atomic "$APPLIED_GAME_POLICY" "$CURRENT_GAME_AUTO_PAUSE" 0644 || return 1
   write_value_atomic "$APPLIED_REVISION" "$CURRENT_REVISION" 0644 || return 1
+  write_value_atomic "$APPLIED_SNAPSHOT" "$CURRENT_SNAPSHOT" 0644 || return 1
   return 0
 }
 
@@ -1095,6 +1136,11 @@ apply_stable() {
 
   stable_try=1
   stable_rc=1
+  stable_applied_policy=$(cat "$APPLIED_GAME_POLICY" 2>/dev/null | tr -d '\r' | head -n 1)
+  case "$stable_applied_policy" in
+    enabled|disabled) ;;
+    *) stable_applied_policy= ;;
+  esac
   while [ "$stable_try" -le "$stable_max" ]; do
     if ! prepare_config; then
       log "apply FAIL reason=$stable_reason error=config-prepare attempt=$stable_try"
@@ -1119,13 +1165,16 @@ apply_stable() {
     fi
     stable_after=$CURRENT_SNAPSHOT
     if [ "$stable_patch_rc" -eq 0 ] && [ "$stable_before" = "$stable_after" ]; then
-      if record_applied; then
-        stable_rc=0
-      else
-        log "apply FAIL reason=$stable_reason error=record-applied"
-        stable_rc=2
+      if refresh_policy_state "$stable_applied_policy"; then
+        if record_applied; then
+          stable_rc=0
+        else
+          log "apply FAIL reason=$stable_reason error=record-applied"
+          stable_rc=2
+        fi
+        break
       fi
-      break
+      stable_patch_rc=1
     fi
     if [ "$stable_before" != "$stable_after" ]; then
       log "config changed during apply old=$stable_before_rev/$stable_before new=$CURRENT_REVISION/$stable_after; retry latest"
@@ -1288,6 +1337,15 @@ queue_latest() {
   return 0
 }
 
+queue_latest_detached() {
+  if command -v nohup >/dev/null 2>&1; then
+    A2H_REASON=tile nohup sh "$SELF" queue >/dev/null 2>&1 < /dev/null &
+  else
+    A2H_REASON=tile sh "$SELF" queue >/dev/null 2>&1 < /dev/null &
+  fi
+  return 0
+}
+
 show_current_unlocked() {
   prepare_config || return 2
   resolve_hal || {
@@ -1390,6 +1448,21 @@ case "$command_name" in
     queue_latest
     exit $?
     ;;
+  toggle-fast)
+    toggle_mode || exit $?
+    queue_latest_detached
+    exit $?
+    ;;
+  toggle-game-auto-pause|toggle_game_auto_pause|game-toggle)
+    toggle_game_auto_pause || exit $?
+    queue_latest
+    exit $?
+    ;;
+  toggle-game-auto-pause-fast|toggle_game_auto_pause_fast|game-toggle-fast)
+    toggle_game_auto_pause || exit $?
+    queue_latest_detached
+    exit $?
+    ;;
   show|status)
     show_current
     exit $?
@@ -1415,7 +1488,7 @@ case "$command_name" in
     exit $?
     ;;
   *)
-    printf '%s\n' 'usage: a2h_apply [queue [enabled|disabled] [enabled|disabled]|toggle|apply|enable|disable|show|status|check [global|whitelist]|snapshot|snapshot-state|busy]' >&2
+    printf '%s\n' 'usage: a2h_apply [queue [enabled|disabled] [enabled|disabled]|toggle|toggle-fast|toggle-game-auto-pause|toggle-game-auto-pause-fast|apply|enable|disable|show|status|check [global|whitelist]|snapshot|snapshot-state|busy]' >&2
     exit 2
     ;;
 esac

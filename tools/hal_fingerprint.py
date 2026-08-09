@@ -61,6 +61,8 @@ LIFECYCLE_SYMBOLS = {
     "stream_setParameters": "_ZN7android18AudioALSAStreamOut13setParametersERKNS_7String8E",
     "isA2HAllowed": "_ZN7android22AudioALSAStreamManager12isA2HAllowedEv",
     "updateOutputPoolActive": "_ZN7android22AudioALSAStreamManager22updateOutputPoolActiveE20audio_output_flags_tb",
+    "streamAttributeDevices": "_ZN7android24isEarphoneWithDualDeviceEPK18stream_attribute_t",
+    "stream_open": "_ZN7android18AudioALSAStreamOut4openEv",
 }
 
 
