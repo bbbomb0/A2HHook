@@ -577,6 +577,19 @@ def locate_posix_shell() -> str | None:
     return None
 
 
+def locate_bash_shell() -> str | None:
+    """Locate a shell that supports the timeout form used by the host FIFO harness."""
+    git_shells = [
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ]
+    candidates = git_shells + [shutil.which("bash")] if os.name == "nt" else [shutil.which("bash")]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return str(candidate)
+    return None
+
+
 def run_command(command: list[str], cwd: Path, input_bytes: bytes | None = None) -> tuple[int, str]:
     completed = subprocess.run(
         command,
@@ -2387,9 +2400,11 @@ printf 'PASS config wake FIFO regression\n'
         command = [adb, "shell", "su", "-c", "sh -s"]
         test_base = "/data/local/tmp"
     else:
-        shell = locate_posix_shell()
+        # The production helper uses `read -t`; dash accepts `read` but not this
+        # timeout option, so the host harness must run under bash explicitly.
+        shell = locate_bash_shell()
         if not shell:
-            report.gap("config wake FIFO regression", "POSIX sh is required")
+            report.gap("config wake FIFO regression", "Bash with read -t is required")
             return
         command = [shell, "-s"]
         test_base = "${TMPDIR:-/tmp}"
