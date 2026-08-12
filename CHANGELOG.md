@@ -2,11 +2,14 @@
 
 ## v1.5.7-fix
 
+- 本节与下方 `v1.5.7` 小节共同构成 `v1.5.7-fix` 相较 `v1.5.6-fix` 的完整变更：包含 WebUI/磁贴重构、配置与运行效率优化、任意普通应用包名的音轨补登记，以及本节新增的 callback-ready / AudioPolicy 租约修复。`v1.5.7` 是本次开发过程中的中间版本标识，GitHub 正式发布版本为 `v1.5.7-fix`。
 - 修复控制中心磁贴长按进入伴生 WebUI 后“跟随系统”仍固定浅色的问题：伴生宿主不再继承固定 Light 主题，改由 Android DayNight `uiMode` 作为系统主题真值，并在运行中切换主题时同步页面、原生背景和系统栏；页面自身继续负责手动浅色/深色覆盖，禁止 WebView 算法暗化二次改色。
 - 优化 KSU/ReSukiSU 内 WebUI 的交互帧优先级和配置落地：开关先完成 DOM 首帧反馈，点击与 Root 提交的短窗口暂停装饰 SVG 动画，完成后自动恢复；缺少原生震感桥时把可选 Root 震感排在配置命令入队之后，避免与保存争用同一 bridge/su。fast-controls 的模式/策略前后认证合并为每轮一份 `stat` 快照，继续保留锁内表不变校验、失败回滚、五文件事务和 native 最终验证。
 - 修复 watcher 退出或 logcat 重启时与租约 trigger 正常关闭的竞态：先撤销全部 token，并为所有 worker 提供共享且有界的优雅关闭窗口，再终止仍存活的 PID+starttime owner。该等待只发生在退出/重启，不增加稳态轮询或 SoC 空转。
 - 修复部分原生低延迟游戏有真实 `FAST` 扬声器音轨、却因系统未向 HAL 下发 `appname` 生命周期而无法进入全局/自定义 matcher 的问题。新增事件驱动音轨 watcher，从厂商 `audio_track_message` playback 事件读取实际包名，精确映射 `/data/system/packages.list` UID，并以该 UID 建立一次极短静音登记流；全局接受任意合法普通应用包，自定义只接受 10 槽中已启用的精确包名。实现不硬编码游戏、不猜前台应用、不持续轮询 `dumpsys`，以同包冷却阻止触发器事件递归，并使用 root `0711/0555` 固定运行时目录防止应用替换触发器；核心系统 UID 拒绝结果按本次开机缓存，重复系统提示音不再扫描 UID 或写日志。
 - 修复 OS3.0.305 上短 AAudio 流在 HAL 完成包名登记前已经关闭、但旧触发器仍打印成功的问题。触发器现在等待 `STARTED` 和首次静音 data callback 后才发布真实 `session ready`，持续供给静音帧并检查异步错误，结束时验证 `STOPPED` 与 close；watcher 以 AudioPolicy `portId/session` 维持租约到最后一条真实应用音轨停止，兼容字段顺序变化、`stopOutput/stoptOutput` 和 stop 无 appname。厂商事件作为通用入口与无 policy 日志时的 70 秒有界 fallback；PID+starttime owner、防自 session 递归、异常重启清理和多端口状态机均已加入回归，不按 ROM 版本或游戏包名分支。
+- 完整 ADB/NDK/四 ROM 严格套件为 `76 PASS / 0 FAIL / 0 GAP`。K80U / HyperOS OS3.0.302 / Android 16 已完成全局/自定义配置、任意包名音轨 watcher、fallback 到 callback-ready 再到真实 policy port 提升、stop 释放、主题切换和 35 秒稳态无周期 ptrace/日志增长的实机验证。OS3.0.305 结论来自问题日志、源码分析与归档 HAL 静态 fixture，仍需对应设备完成目标游戏实机验证；未声明全系统版本均已实机验证。
+- 最终发布 APK 为 161,041 bytes，`a2h_hook_v1.5.7-fix.zip` 为 578,677 bytes；相较 638,651-byte 优化前基线减少 59,974 bytes（约 9.4%）。发布 ZIP SHA-256 为 `C415043ABF883E64D04B7B40256A24B7541E2CB8A2D59D1848138ACFA86A7613`。
 - 版本迭代为 `v1.5.7-fix / versionCode=1571`，生成独立 `a2h_hook_v1.5.7-fix.zip`；用户指定的 v1.5.7 正确回滚 ZIP 保持原文件和哈希，不覆盖、不删除。
 
 ## v1.5.7
@@ -22,7 +25,7 @@
 - 主页旧“A2”方块与关于页蓝底标识统一替换为透明底“双音轨环 + 双音符 + 连续弧形触感波”项目图标，完全移除三角/箭头元素。纯 CSS/SVG 图标只保留前台可见时的较快、大幅无限循环；循环只使用 `transform/opacity`，离开对应页面、进入后台或系统启用减少动态效果时立即停止，无定时器、帧循环、滤镜或后台服务。
 - 项目地址使用 GitHub 图标；QQ群使用无眼睛、嘴部等表情细节的腾讯 QQ 纯色企鹅轮廓，图标保持静态并继承当前明暗主题。
 - 四档交互震感滑块收敛为单一“强劲震感”开关。开启时开关、按钮和页面动作统一使用 HyperOS 强反馈，失败仍按原边界回退且不影响 Root 配置事务。
-- 性能与体积收尾：配置队列保留五文件原子事务和完整 native 校验；patcher 能力按二进制版本缓存，现代 patcher 成功后不再额外执行第二次完整 ptrace check，单次进程内复用严格 ELF 符号结果。模块自身严格提交会生成带 schema 的配置指纹，模式、游戏策略与 23 参数完整提交可直接走快速准备；文件管理器外部修改仍因指纹失配回退全量规范化。配置变化直接启动唯一合并 worker，成功应用后删除冗余二次准备；快速连续提交产生的旧 pending 只有在当前五文件原始签名与刚完成事务完全一致时才会合并，检测到更新则继续保留，避免对同一 revision 重复执行 native 事务。稳定监听改为 FIFO 阻塞到事件或 30 秒健康超时，音轨事件常见路径合并为 shell 内建解析，logcat 异常使用 `2/4/8/16/30s` 封顶退避。worker/native 只尝试短时 `nice=-10`，不锁频、不固定 CPU、不常驻。最终 APK 为 161,040 bytes，ZIP 为 570,976 bytes；相较 638,651-byte 未优化基线减少 67,675 bytes（约 10.6%）。
+- 性能与体积收尾：配置队列保留五文件原子事务和完整 native 校验；patcher 能力按二进制版本缓存，现代 patcher 成功后不再额外执行第二次完整 ptrace check，单次进程内复用严格 ELF 符号结果。模块自身严格提交会生成带 schema 的配置指纹，模式、游戏策略与 23 参数完整提交可直接走快速准备；文件管理器外部修改仍因指纹失配回退全量规范化。配置变化直接启动唯一合并 worker，成功应用后删除冗余二次准备；快速连续提交产生的旧 pending 只有在当前五文件原始签名与刚完成事务完全一致时才会合并，检测到更新则继续保留，避免对同一 revision 重复执行 native 事务。稳定监听改为 FIFO 阻塞到事件或 30 秒健康超时，音轨事件常见路径合并为 shell 内建解析，logcat 异常使用 `2/4/8/16/30s` 封顶退避。worker/native 只尝试短时 `nice=-10`，不锁频、不固定 CPU、不常驻。阶段性候选 APK 为 161,040 bytes、ZIP 为 570,976 bytes；后续 callback-ready/AudioPolicy 修复改变了正式包内容，最终公开产物以 `v1.5.7-fix` 小节记录的 161,041-byte APK 与 578,677-byte ZIP 为准。
 - 版本统一迭代为 `v1.5.7 / versionCode=1570`。保留 v1.5.6-fix 历史包与用户同目录副本，不覆盖或删除。
 
 ## v1.5.6-fix
