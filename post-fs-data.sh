@@ -9,6 +9,7 @@ cleanup_stale_runtime() {
     "$runtime_dir/a2h_state" \
     "$runtime_dir/a2h_packages.txt" \
     "$runtime_dir/a2h_config.changed" \
+    "$runtime_dir/a2h_config.wake" \
     "$runtime_dir"/a2h_apply.pending.tmp.* \
     "$runtime_dir"/.a2h_state.* \
     "$runtime_dir"/.a2h_packages.* 2>/dev/null || true
@@ -23,6 +24,7 @@ cleanup_stale_runtime() {
 # current boot can enqueue work. Never run this cleanup after boot completes.
 if [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; then
   cleanup_stale_runtime /data/local/tmp
+  rm -rf /data/local/tmp/a2h_hook_runtime 2>/dev/null || true
 fi
 
 MODDIR=${0%/*}

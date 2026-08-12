@@ -1,4 +1,4 @@
-// a2h_patch v1.5.6-fix - universal signature/ELF scan + active audio lifecycle
+// a2h_patch v1.5.7-fix - universal signature/ELF scan + active audio lifecycle
 #define _GNU_SOURCE
 #include <stdint.h>
 #include <stdio.h>
@@ -14,6 +14,7 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <sys/resource.h>
 #include <sys/sysmacros.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
@@ -61,7 +62,7 @@
 #define PTRACE_POKETEXT 4
 #define PTRACE_POKEDATA 5
 #define MAX_SLOTS 10
-#define A2H_VERSION "1.5.6-fix"
+#define A2H_VERSION "1.5.7-fix"
 #define WHITELIST_CAVE_BYTES (MAX_SLOTS * 64 + 16 + MAX_SLOTS * 8 + 32)
 #define WHITELIST_STUB_WORDS 19
 #define WHITELIST_STUB_BYTES (WHITELIST_STUB_WORDS * sizeof(uint32_t))
@@ -2489,6 +2490,63 @@ typedef struct {
     size_t size;
 } elf_a2h_symbol_t;
 
+#define ELF_SYMBOL_CACHE_MAX 12
+#define ELF_SYMBOL_CACHE_NAME_MAX 160
+
+typedef struct {
+    dev_t dev;
+    ino_t ino;
+    uint64_t file_size;
+    size_t expected_size;
+    char name[ELF_SYMBOL_CACHE_NAME_MAX];
+    elf_a2h_symbol_t symbol;
+    int valid;
+} elf_symbol_cache_entry_t;
+
+static elf_symbol_cache_entry_t g_symbol_cache[ELF_SYMBOL_CACHE_MAX];
+static size_t g_symbol_cache_next;
+
+static int elf_symbol_cache_lookup(int fd, uint64_t file_size,
+                                   const char *name, size_t expected_size,
+                                   elf_a2h_symbol_t *out) {
+    struct stat st;
+    if (!name || !out || fstat(fd, &st) != 0) return 0;
+    for (size_t i = 0; i < ELF_SYMBOL_CACHE_MAX; ++i) {
+        const elf_symbol_cache_entry_t *entry = &g_symbol_cache[i];
+        if (entry->valid && entry->dev == st.st_dev && entry->ino == st.st_ino &&
+            entry->file_size == file_size &&
+            entry->expected_size == expected_size &&
+            strcmp(entry->name, name) == 0) {
+            *out = entry->symbol;
+            fprintf(stderr,
+                    "[a2h_patch] ELF symbol cache hit %s vaddr=0x%lx size=%lu\n",
+                    name, (unsigned long)out->vaddr,
+                    (unsigned long)out->size);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void elf_symbol_cache_store(int fd, uint64_t file_size,
+                                   const char *name, size_t expected_size,
+                                   const elf_a2h_symbol_t *symbol) {
+    struct stat st;
+    size_t name_len = name ? strlen(name) : 0;
+    if (!symbol || name_len == 0 || name_len >= ELF_SYMBOL_CACHE_NAME_MAX ||
+        fstat(fd, &st) != 0) return;
+    elf_symbol_cache_entry_t *entry =
+        &g_symbol_cache[g_symbol_cache_next++ % ELF_SYMBOL_CACHE_MAX];
+    memset(entry, 0, sizeof(*entry));
+    entry->dev = st.st_dev;
+    entry->ino = st.st_ino;
+    entry->file_size = file_size;
+    entry->expected_size = expected_size;
+    memcpy(entry->name, name, name_len + 1);
+    entry->symbol = *symbol;
+    entry->valid = 1;
+}
+
 static const char *elf_a2h_state_name(elf_a2h_state_t state) {
     switch (state) {
         case ELF_A2H_STOCK: return "stock";
@@ -2589,8 +2647,13 @@ static int parse_unique_func_symbol(int fd, uint64_t file_size,
                                     size_t expected_size,
                                     elf_a2h_symbol_t *out) {
     Elf64_Ehdr eh;
-    if (!out || !symbol_name || !symbol_name[0] ||
-        !pread_exact(fd, &eh, sizeof(eh), 0) ||
+    if (!out || !symbol_name || !symbol_name[0]) {
+        return ELF_RESOLVE_REJECTED;
+    }
+    if (elf_symbol_cache_lookup(fd, file_size, symbol_name, expected_size, out)) {
+        return ELF_RESOLVE_VERIFIED;
+    }
+    if (!pread_exact(fd, &eh, sizeof(eh), 0) ||
         memcmp(eh.e_ident, ELFMAG, SELFMAG) != 0 ||
         eh.e_ident[EI_CLASS] != ELFCLASS64 ||
         eh.e_ident[EI_DATA] != ELFDATA2LSB ||
@@ -2734,6 +2797,7 @@ static int parse_unique_func_symbol(int fd, uint64_t file_size,
         return ELF_RESOLVE_UNAVAILABLE;
     }
     *out = candidate;
+    elf_symbol_cache_store(fd, file_size, symbol_name, expected_size, out);
     fprintf(stderr,
             "[a2h_patch] ELF symbol %s vaddr=0x%lx size=%lu file_off=0x%lx entries=%d\n",
             symbol_name, (unsigned long)out->vaddr,
@@ -6082,6 +6146,7 @@ int main(int argc,char **argv) {
             printf("       %s --packages FILE\n",argv[0]);
             printf("       %s --game-auto-pause enabled|disabled\n",argv[0]);
             printf("       %s --base 0x...\n",argv[0]);
+            printf("       capabilities: apply-final-verified\n");
             return 0;
         } else if(strcmp(argv[i],"--disable")==0){
             mode=1;
@@ -6108,6 +6173,10 @@ int main(int argc,char **argv) {
         }
         else if(strcmp(argv[i],"--base")==0 && i+1<argc) base_override=(uintptr_t)strtoull(argv[++i],NULL,0);
         else if(argv[i][0] != '-') pid=atoi(argv[i]);
+    }
+    if ((mode == 0 || mode == 1) &&
+        setpriority(PRIO_PROCESS, 0, -10) == 0) {
+        fprintf(stderr, "[a2h_patch] priority=boosted nice=-10\n");
     }
     if(!pkgfile) pkgfile="/data/adb/modules/a2h_hook/config/packages.txt";
     // Identity props are relatively expensive; only print on real apply.

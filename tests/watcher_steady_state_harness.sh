@@ -80,11 +80,19 @@ log() {
   :
 }
 
+wait_for_watch_tick() {
+  watch_elapsed_ticks=1
+}
+
 config_inotify_enabled=0
 config_inotify_pid=
+audio_watcher_pid=$$
+watch_tick_seconds=2
+watch_stable_ticks=3
+watch_health_ticks=15
 
 watcher=$(awk '
-  /^last_pid=\$\(cat / { capture=1 }
+  /^last_pid=$/ { capture=1 }
   capture { print }
   capture && /^done$/ { exit }
 ' "$SERVICE")
@@ -94,8 +102,7 @@ watcher=$(awk '
 }
 
 watcher=$(printf '%s\n' "$watcher" | sed \
-  -e 's/^while true; do$/while [ "$watch_cycle" -lt 40 ]; do/' \
-  -e 's/^  sleep "$watch_tick_seconds"$/  :/')
+  -e 's/^while true; do$/while [ "$watch_cycle" -lt 40 ]; do/')
 eval "$watcher"
 
 native_count=$(cat "$NATIVE_COUNT")

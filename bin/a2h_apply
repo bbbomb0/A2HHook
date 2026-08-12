@@ -18,10 +18,12 @@ CFG_GENERATION="$CFG_DIR/config_generation"
 CFG_BASELINE="$CFG_DIR/.package_baseline"
 CFG_SNAPSHOT="$CFG_DIR/config_snapshot"
 CFG_REVISION="$CFG_DIR/revision"
+CFG_NORMALIZED_FINGERPRINT="$CFG_DIR/.normalized_fingerprint"
 APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
 APPLIED_REVISION="$CFG_DIR/applied_revision"
 APPLIED_GAME_POLICY="$CFG_DIR/applied_game_auto_pause"
 LAST_PID_FILE="$CFG_DIR/last_pid"
+PATCHER_SUPPORT_MARKER="$CFG_DIR/.patcher_packages_support"
 
 TMP_STATE=/data/local/tmp/a2h_state
 TMP_PKGS=/data/local/tmp/a2h_packages.txt
@@ -39,9 +41,14 @@ CURRENT_GAME_AUTO_PAUSE=enabled
 CURRENT_SNAPSHOT=
 CURRENT_REVISION=0
 CURRENT_RAW_SIGNATURE=
+CURRENT_CONFIG_FINGERPRINT=
+CURRENT_TABLE_FINGERPRINT=
+CURRENT_CONFIG_VALUE_SIGNATURE=
 ACTIVE_COUNT=0
 CONFIG_RECOVERED=0
 PATCHER_SUPPORTS_PACKAGES=
+PATCHER_APPLY_FINAL_VERIFIED=
+CONFIG_FINGERPRINT_SCHEMA=1
 
 umask 077
 
@@ -76,6 +83,75 @@ write_value_atomic() {
     return 1
   fi
   commit_tmp "$value_tmp" "$value_dest" "$value_mode"
+}
+
+compute_path_fingerprint() {
+  fingerprint_meta=$(stat -c '%d:%i:%s:%Y:%y:%n' "$@" 2>/dev/null) || return 1
+  CURRENT_CONFIG_FINGERPRINT=$(
+    printf '%s\n' "$fingerprint_meta" | cksum 2>/dev/null | awk '{print $1 ":" $2}'
+  )
+  [ -n "$CURRENT_CONFIG_FINGERPRINT" ]
+}
+
+compute_config_fingerprint() {
+  compute_path_fingerprint "$CFG_STATE" "$CFG_GAME_POLICY" "$CFG_PKGS" \
+    "$CFG_STATES" "$CFG_GENERATION"
+}
+
+compute_table_fingerprint() {
+  compute_path_fingerprint "$CFG_PKGS" "$CFG_STATES" "$CFG_GENERATION" || return 1
+  CURRENT_TABLE_FINGERPRINT=$CURRENT_CONFIG_FINGERPRINT
+  return 0
+}
+
+compute_config_and_table_fingerprints() {
+  fingerprint_meta=$(stat -c '%d:%i:%s:%Y:%y:%n' "$CFG_STATE" "$CFG_GAME_POLICY" \
+    "$CFG_PKGS" "$CFG_STATES" "$CFG_GENERATION" 2>/dev/null) || return 1
+  fingerprint_ifs=$IFS
+  IFS='
+'
+  set -- $fingerprint_meta
+  IFS=$fingerprint_ifs
+  [ "$#" -eq 5 ] || return 1
+  CURRENT_CONFIG_FINGERPRINT=$(
+    printf '%s\n' "$fingerprint_meta" | cksum 2>/dev/null | awk '{print $1 ":" $2}'
+  )
+  fingerprint_table_meta="$3
+$4
+$5"
+  CURRENT_TABLE_FINGERPRINT=$(
+    printf '%s\n' "$fingerprint_table_meta" | cksum 2>/dev/null | awk '{print $1 ":" $2}'
+  )
+  [ -n "$CURRENT_CONFIG_FINGERPRINT" ] && [ -n "$CURRENT_TABLE_FINGERPRINT" ]
+}
+
+compute_config_value_signature() {
+  [ "$#" -eq 5 ] || return 1
+  signature_rows=
+  signature_index=1
+  for signature_path in "$@"; do
+    [ -f "$signature_path" ] || return 1
+    signature_cksum=$(cksum < "$signature_path" 2>/dev/null) || return 1
+    signature_rows="${signature_rows}${signature_index}:${signature_cksum}
+"
+    signature_index=$((signature_index + 1))
+  done
+  CURRENT_CONFIG_VALUE_SIGNATURE=$(
+    printf '%s' "$signature_rows" | cksum 2>/dev/null | awk '{print $1 ":" $2}'
+  )
+  [ -n "$CURRENT_CONFIG_VALUE_SIGNATURE" ]
+}
+
+normalized_fingerprint_matches() {
+  normalized_saved=$(cat "$CFG_NORMALIZED_FINGERPRINT" 2>/dev/null) || return 1
+  compute_config_fingerprint || return 1
+  [ "$normalized_saved" = "$CONFIG_FINGERPRINT_SCHEMA:$CURRENT_CONFIG_FINGERPRINT" ]
+}
+
+record_normalized_fingerprint() {
+  compute_config_fingerprint || return 1
+  write_value_atomic "$CFG_NORMALIZED_FINGERPRINT" \
+    "$CONFIG_FINGERPRINT_SCHEMA:$CURRENT_CONFIG_FINGERPRINT" 0600
 }
 
 write_default_packages() {
@@ -549,8 +625,41 @@ record_revision() {
   return 0
 }
 
+prepare_config_fast_unlocked() {
+  fast_saved=$(cat "$CFG_NORMALIZED_FINGERPRINT" 2>/dev/null) || return 1
+  compute_config_fingerprint || return 1
+  [ "$fast_saved" = "$CONFIG_FINGERPRINT_SCHEMA:$CURRENT_CONFIG_FINGERPRINT" ] || return 1
+  fast_before=$CURRENT_CONFIG_FINGERPRINT
+  fast_expected="$CONFIG_FINGERPRINT_SCHEMA:$fast_before"
+
+  IFS= read -r fast_mode < "$CFG_STATE" || return 1
+  IFS= read -r fast_policy < "$CFG_GAME_POLICY" || return 1
+  case "$fast_mode" in enabled|disabled) ;; *) return 1 ;; esac
+  case "$fast_policy" in enabled|disabled) ;; *) return 1 ;; esac
+  CURRENT_MODE=$fast_mode
+  CURRENT_GAME_AUTO_PAUSE=$fast_policy
+
+  generate_runtime_config || return 1
+  compute_snapshot || return 1
+  compute_raw_config_signature || return 1
+  compute_config_fingerprint || return 1
+  if [ "$CURRENT_CONFIG_FINGERPRINT" != "$fast_before" ] ||
+     [ "$(cat "$CFG_NORMALIZED_FINGERPRINT" 2>/dev/null)" != "$fast_expected" ]; then
+    log "config fast path invalidated during read; falling back to full prepare"
+    return 1
+  fi
+  record_revision || return 1
+  if [ "${A2H_QUIET_PREPARE:-0}" != "1" ]; then
+    log "config fast prepared active=$ACTIVE_COUNT mode=$CURRENT_MODE game_auto_pause=$CURRENT_GAME_AUTO_PAUSE"
+  fi
+  return 0
+}
+
 prepare_config_unlocked() {
   CONFIG_RECOVERED=0
+  if prepare_config_fast_unlocked; then
+    return 0
+  fi
   prepare_pass=1
   while [ "$prepare_pass" -le 4 ]; do
     compute_raw_config_signature || return 1
@@ -570,6 +679,10 @@ prepare_config_unlocked() {
     record_revision || return 1
     compute_raw_config_signature || return 1
     if [ "$CURRENT_RAW_SIGNATURE" = "$prepare_normalized_signature" ]; then
+      if ! record_normalized_fingerprint; then
+        rm -f "$CFG_NORMALIZED_FINGERPRINT" 2>/dev/null
+        log "config normalized fingerprint unavailable; next prepare will use full validation"
+      fi
       return 0
     fi
     log "config changed during prepare pass=$prepare_pass before=$prepare_normalized_signature after=$CURRENT_RAW_SIGNATURE"
@@ -599,6 +712,178 @@ set_game_auto_pause_unlocked() {
   write_value_atomic "$CFG_GAME_POLICY" "$set_policy_value" 0644
 }
 
+commit_config_abort() {
+  [ "${commit_active:-0}" = "1" ] || return 0
+  commit_restore_rc=0
+  commit_restore_one "$CFG_STATE" "$commit_state_old" "$commit_state_had" || commit_restore_rc=1
+  commit_restore_one "$CFG_GAME_POLICY" "$commit_policy_old" "$commit_policy_had" || commit_restore_rc=1
+  commit_restore_one "$CFG_PKGS" "$commit_pkgs_old" "$commit_pkgs_had" || commit_restore_rc=1
+  commit_restore_one "$CFG_STATES" "$commit_states_old" "$commit_states_had" || commit_restore_rc=1
+  commit_restore_one "$CFG_GENERATION" "$commit_generation_old" "$commit_generation_had" || commit_restore_rc=1
+  commit_config_cleanup
+  release_config_lock 2>/dev/null || commit_restore_rc=1
+  commit_active=0
+  return "$commit_restore_rc"
+}
+
+commit_restore_one() {
+  commit_restore_dest=$1
+  commit_restore_old=$2
+  commit_restore_had=$3
+  if [ "$commit_restore_had" = "1" ]; then
+    cp -f "$commit_restore_old" "$commit_restore_dest" 2>/dev/null &&
+      chmod 0644 "$commit_restore_dest" 2>/dev/null
+  else
+    rm -f "$commit_restore_dest" 2>/dev/null
+  fi
+}
+
+commit_config_cleanup() {
+  rm -f "$commit_state_tmp" "$commit_policy_tmp" "$commit_pkgs_tmp" \
+    "$commit_states_tmp" "$commit_generation_tmp" "$commit_state_old" \
+    "$commit_policy_old" "$commit_pkgs_old" "$commit_states_old" \
+    "$commit_generation_old" 2>/dev/null
+}
+
+commit_config_signal() {
+  trap - 0 1 2 15
+  commit_config_abort
+  exit 130
+}
+
+commit_config_and_queue() {
+  [ "$#" -eq 23 ] || return 2
+  commit_mode=$1
+  commit_policy=$2
+  commit_generation=$3
+  shift 3
+  case "$commit_mode" in enabled|disabled) ;; *) return 2 ;; esac
+  case "$commit_policy" in enabled|disabled) ;; *) return 2 ;; esac
+  case "$commit_generation" in ''|*[!0-9]*) return 2 ;; esac
+
+  commit_tag=$$
+  commit_state_tmp="$CFG_DIR/.state.$commit_tag"
+  commit_policy_tmp="$CFG_DIR/.game_auto_pause.$commit_tag"
+  commit_pkgs_tmp="$CFG_DIR/.packages.$commit_tag"
+  commit_states_tmp="$CFG_DIR/.package_states.$commit_tag"
+  commit_generation_tmp="$CFG_DIR/.generation.$commit_tag"
+  commit_state_old="$CFG_DIR/.state.old.$commit_tag"
+  commit_policy_old="$CFG_DIR/.game_auto_pause.old.$commit_tag"
+  commit_pkgs_old="$CFG_DIR/.packages.old.$commit_tag"
+  commit_states_old="$CFG_DIR/.package_states.old.$commit_tag"
+  commit_generation_old="$CFG_DIR/.generation.old.$commit_tag"
+  commit_config_cleanup
+  printf '%s\n' "$commit_mode" > "$commit_state_tmp" || return 74
+  printf '%s\n' "$commit_policy" > "$commit_policy_tmp" || {
+    commit_config_cleanup
+    return 74
+  }
+  : > "$commit_pkgs_tmp" || {
+    commit_config_cleanup
+    return 74
+  }
+  commit_i=0
+  commit_seen='|'
+  while [ "$commit_i" -lt 10 ]; do
+    commit_pkg=$1
+    shift
+    valid_package "$commit_pkg" || {
+      commit_config_cleanup
+      return 2
+    }
+    printf '%s\n' "$commit_pkg" >> "$commit_pkgs_tmp" || {
+      commit_config_cleanup
+      return 74
+    }
+    commit_i=$((commit_i + 1))
+  done
+  : > "$commit_states_tmp" || {
+    commit_config_cleanup
+    return 74
+  }
+  commit_i=0
+  exec 3< "$commit_pkgs_tmp"
+  while [ "$commit_i" -lt 10 ]; do
+    commit_enabled=$1
+    shift
+    case "$commit_enabled" in 0|1) ;; *) exec 3<&-; commit_config_cleanup; return 2 ;; esac
+    IFS= read -r commit_pkg <&3 || commit_pkg=
+    if [ "$commit_enabled" = "1" ]; then
+      [ -n "$commit_pkg" ] || {
+        exec 3<&-
+        commit_config_cleanup
+        return 2
+      }
+      case "$commit_seen" in
+        *"|$commit_pkg|"*) exec 3<&-; commit_config_cleanup; return 2 ;;
+        *) commit_seen="${commit_seen}${commit_pkg}|" ;;
+      esac
+    fi
+    printf '%s\n' "$commit_enabled" >> "$commit_states_tmp" || {
+      exec 3<&-
+      commit_config_cleanup
+      return 74
+    }
+    commit_i=$((commit_i + 1))
+  done
+  exec 3<&-
+  printf '%s\n' "$commit_generation" > "$commit_generation_tmp" || {
+    commit_config_cleanup
+    return 74
+  }
+  chmod 0600 "$commit_state_tmp" "$commit_policy_tmp" "$commit_pkgs_tmp" \
+    "$commit_states_tmp" "$commit_generation_tmp" 2>/dev/null || {
+    commit_config_cleanup
+    return 74
+  }
+  compute_config_value_signature "$commit_state_tmp" "$commit_policy_tmp" \
+    "$commit_pkgs_tmp" "$commit_states_tmp" "$commit_generation_tmp" || {
+    commit_config_cleanup
+    return 74
+  }
+  commit_expected_signature=$CURRENT_CONFIG_VALUE_SIGNATURE
+
+  if ! acquire_config_lock 8; then
+    commit_config_cleanup
+    return 75
+  fi
+  commit_active=1
+  commit_state_had=0
+  commit_policy_had=0
+  commit_pkgs_had=0
+  commit_states_had=0
+  commit_generation_had=0
+  trap 'commit_config_abort' 0
+  trap 'commit_config_signal' 1 2 15
+  if [ -f "$CFG_STATE" ]; then cp -f "$CFG_STATE" "$commit_state_old" 2>/dev/null || return 74; commit_state_had=1; elif [ -e "$CFG_STATE" ]; then return 74; fi
+  if [ -f "$CFG_GAME_POLICY" ]; then cp -f "$CFG_GAME_POLICY" "$commit_policy_old" 2>/dev/null || return 74; commit_policy_had=1; elif [ -e "$CFG_GAME_POLICY" ]; then return 74; fi
+  if [ -f "$CFG_PKGS" ]; then cp -f "$CFG_PKGS" "$commit_pkgs_old" 2>/dev/null || return 74; commit_pkgs_had=1; elif [ -e "$CFG_PKGS" ]; then return 74; fi
+  if [ -f "$CFG_STATES" ]; then cp -f "$CFG_STATES" "$commit_states_old" 2>/dev/null || return 74; commit_states_had=1; elif [ -e "$CFG_STATES" ]; then return 74; fi
+  if [ -f "$CFG_GENERATION" ]; then cp -f "$CFG_GENERATION" "$commit_generation_old" 2>/dev/null || return 74; commit_generation_had=1; elif [ -e "$CFG_GENERATION" ]; then return 74; fi
+  mv -f "$commit_state_tmp" "$CFG_STATE" 2>/dev/null || return 74
+  mv -f "$commit_policy_tmp" "$CFG_GAME_POLICY" 2>/dev/null || return 74
+  mv -f "$commit_pkgs_tmp" "$CFG_PKGS" 2>/dev/null || return 74
+  mv -f "$commit_states_tmp" "$CFG_STATES" 2>/dev/null || return 74
+  mv -f "$commit_generation_tmp" "$CFG_GENERATION" 2>/dev/null || return 74
+  chmod 0644 "$CFG_STATE" "$CFG_GAME_POLICY" "$CFG_PKGS" "$CFG_STATES" \
+    "$CFG_GENERATION" 2>/dev/null || return 74
+  if compute_config_value_signature "$CFG_STATE" "$CFG_GAME_POLICY" "$CFG_PKGS" \
+       "$CFG_STATES" "$CFG_GENERATION" &&
+     [ "$CURRENT_CONFIG_VALUE_SIGNATURE" = "$commit_expected_signature" ] &&
+     record_normalized_fingerprint; then
+    commit_certified=1
+  else
+    commit_certified=0
+    rm -f "$CFG_NORMALIZED_FINGERPRINT" 2>/dev/null
+  fi
+  commit_config_cleanup
+  release_config_lock || return 75
+  commit_active=0
+  trap - 0 1 2 15
+  log "config grouped commit certified=$commit_certified generation=$commit_generation"
+  queue_changed_fast
+}
+
 set_controls() {
   controls_mode=${1:-}
   controls_policy=${2:-}
@@ -617,6 +902,15 @@ set_controls() {
   if ! acquire_config_lock 20; then
     log "set controls FAIL error=lock-timeout"
     return 75
+  fi
+  controls_certified=0
+  controls_table_before=
+  controls_saved_fingerprint=$(cat "$CFG_NORMALIZED_FINGERPRINT" 2>/dev/null)
+  if [ -n "$controls_saved_fingerprint" ] &&
+     compute_config_and_table_fingerprints &&
+     [ "$controls_saved_fingerprint" = "$CONFIG_FINGERPRINT_SCHEMA:$CURRENT_CONFIG_FINGERPRINT" ]; then
+    controls_certified=1
+    controls_table_before=$CURRENT_TABLE_FINGERPRINT
   fi
   controls_mode_existed=0
   controls_policy_existed=0
@@ -644,6 +938,15 @@ set_controls() {
     log "set controls rollback=$controls_rollback rc=$controls_rc"
     [ "$controls_rollback" = "1" ] || controls_rc=1
   fi
+  if [ "$controls_rc" -eq 0 ] && [ "$controls_certified" = "1" ] &&
+     compute_config_and_table_fingerprints &&
+     [ "$CURRENT_TABLE_FINGERPRINT" = "$controls_table_before" ] &&
+     write_value_atomic "$CFG_NORMALIZED_FINGERPRINT" \
+       "$CONFIG_FINGERPRINT_SCHEMA:$CURRENT_CONFIG_FINGERPRINT" 0600; then
+    :
+  else
+    rm -f "$CFG_NORMALIZED_FINGERPRINT" 2>/dev/null
+  fi
   if ! release_config_lock; then
     log "set controls FAIL error=lock-release"
     [ "$controls_rc" -eq 0 ] && controls_rc=1
@@ -656,12 +959,26 @@ toggle_mode() {
     log "toggle mode FAIL error=lock-timeout"
     return 75
   fi
+  toggle_certified=0
+  toggle_table_before=
+  if normalized_fingerprint_matches && compute_table_fingerprint; then
+    toggle_certified=1
+    toggle_table_before=$CURRENT_TABLE_FINGERPRINT
+  fi
   toggle_rc=0
   normalize_mode || toggle_rc=$?
   if [ "$toggle_rc" -eq 0 ]; then
     toggle_next=enabled
     [ "$CURRENT_MODE" = "enabled" ] && toggle_next=disabled
     set_mode_unlocked "$toggle_next" || toggle_rc=$?
+  fi
+  if [ "$toggle_rc" -eq 0 ] && [ "$toggle_certified" = "1" ] &&
+     compute_table_fingerprint &&
+     [ "$CURRENT_TABLE_FINGERPRINT" = "$toggle_table_before" ] &&
+     record_normalized_fingerprint; then
+    :
+  else
+    rm -f "$CFG_NORMALIZED_FINGERPRINT" 2>/dev/null
   fi
   if ! release_config_lock; then
     log "toggle mode FAIL error=lock-release"
@@ -676,12 +993,26 @@ toggle_game_auto_pause() {
     log "toggle game_auto_pause FAIL error=lock-timeout"
     return 75
   fi
+  toggle_policy_certified=0
+  toggle_policy_table_before=
+  if normalized_fingerprint_matches && compute_table_fingerprint; then
+    toggle_policy_certified=1
+    toggle_policy_table_before=$CURRENT_TABLE_FINGERPRINT
+  fi
   toggle_policy_rc=0
   normalize_game_auto_pause || toggle_policy_rc=$?
   if [ "$toggle_policy_rc" -eq 0 ]; then
     toggle_policy_next=enabled
     [ "$CURRENT_GAME_AUTO_PAUSE" = "enabled" ] && toggle_policy_next=disabled
     set_game_auto_pause_unlocked "$toggle_policy_next" || toggle_policy_rc=$?
+  fi
+  if [ "$toggle_policy_rc" -eq 0 ] && [ "$toggle_policy_certified" = "1" ] &&
+     compute_table_fingerprint &&
+     [ "$CURRENT_TABLE_FINGERPRINT" = "$toggle_policy_table_before" ] &&
+     record_normalized_fingerprint; then
+    :
+  else
+    rm -f "$CFG_NORMALIZED_FINGERPRINT" 2>/dev/null
   fi
   if ! release_config_lock; then
     log "toggle game_auto_pause FAIL error=lock-release"
@@ -923,6 +1254,19 @@ prepare_config() {
   return "$prepare_rc"
 }
 
+raw_config_matches() {
+  raw_expected=$1
+  if ! acquire_config_lock 20; then
+    return 2
+  fi
+  raw_match_rc=1
+  if compute_raw_config_signature && [ "$CURRENT_RAW_SIGNATURE" = "$raw_expected" ]; then
+    raw_match_rc=0
+  fi
+  release_config_lock || return 2
+  return "$raw_match_rc"
+}
+
 set_mode() {
   if ! acquire_config_lock 20; then
     log "set mode FAIL error=lock-timeout"
@@ -972,6 +1316,9 @@ release_apply_lock() {
 }
 
 log_slots() {
+  slot_ts=$(ts)
+  exec 5>> "$ACTION_LOG"
+  exec 6>> "$MAIN_LOG"
   exec 3< "$CFG_PKGS"
   exec 4< "$CFG_STATES"
   slot_i=1
@@ -979,11 +1326,14 @@ log_slots() {
     IFS= read -r slot_pkg <&3 || slot_pkg=
     IFS= read -r slot_enabled <&4 || slot_enabled=0
     [ -n "$slot_pkg" ] || slot_pkg='(empty)'
-    log "slot[$slot_i] enabled=$slot_enabled package=$slot_pkg"
+    printf '[%s] slot[%s] enabled=%s package=%s\n' "$slot_ts" "$slot_i" "$slot_enabled" "$slot_pkg" >&5
+    printf '[%s] slot[%s] enabled=%s package=%s\n' "$slot_ts" "$slot_i" "$slot_enabled" "$slot_pkg" >&6
     slot_i=$((slot_i + 1))
   done
   exec 3<&-
   exec 4<&-
+  exec 5>&-
+  exec 6>&-
 }
 
 run_check() {
@@ -1025,20 +1375,57 @@ run_check() {
   fi
 }
 
-patcher_supports_packages() {
-  if [ "$PATCHER_SUPPORTS_PACKAGES" = "yes" ]; then
-    return 0
+probe_patcher_capabilities() {
+  [ -n "$PATCHER_SUPPORTS_PACKAGES" ] &&
+    [ -n "$PATCHER_APPLY_FINAL_VERIFIED" ] && return 0
+
+  patcher_support_stamp=$(stat -c '%s:%Y' "$PATCHER" 2>/dev/null || true)
+  if [ -n "$patcher_support_stamp" ] && [ -f "$PATCHER_SUPPORT_MARKER" ]; then
+    patcher_support_record=$(cat "$PATCHER_SUPPORT_MARKER" 2>/dev/null || true)
+    case "$patcher_support_record" in
+      "$patcher_support_stamp|packages=yes|apply-final=yes")
+        PATCHER_SUPPORTS_PACKAGES=yes
+        PATCHER_APPLY_FINAL_VERIFIED=yes
+        return 0
+        ;;
+      "$patcher_support_stamp|packages=yes|apply-final=no")
+        PATCHER_SUPPORTS_PACKAGES=yes
+        PATCHER_APPLY_FINAL_VERIFIED=no
+        return 0
+        ;;
+      "$patcher_support_stamp|packages=no|apply-final=yes")
+        PATCHER_SUPPORTS_PACKAGES=no
+        PATCHER_APPLY_FINAL_VERIFIED=yes
+        return 0
+        ;;
+      "$patcher_support_stamp|packages=no|apply-final=no")
+        PATCHER_SUPPORTS_PACKAGES=no
+        PATCHER_APPLY_FINAL_VERIFIED=no
+        return 0
+        ;;
+    esac
   fi
-  if [ "$PATCHER_SUPPORTS_PACKAGES" = "no" ]; then
-    return 1
-  fi
-  if "$PATCHER" --help 2>&1 | grep -F -q -- '--packages'; then
-    PATCHER_SUPPORTS_PACKAGES=yes
-    return 0
-  fi
+
+  patcher_help=$("$PATCHER" --help 2>&1 || true)
   PATCHER_SUPPORTS_PACKAGES=no
-  log "patcher lacks --packages; whitelist live check uses legacy shape-only verification"
-  return 1
+  PATCHER_APPLY_FINAL_VERIFIED=no
+  case "$patcher_help" in *'--packages'*) PATCHER_SUPPORTS_PACKAGES=yes ;; esac
+  case "$patcher_help" in *'apply-final-verified'*) PATCHER_APPLY_FINAL_VERIFIED=yes ;; esac
+  [ -n "$patcher_support_stamp" ] &&
+    write_value_atomic "$PATCHER_SUPPORT_MARKER" \
+      "$patcher_support_stamp|packages=$PATCHER_SUPPORTS_PACKAGES|apply-final=$PATCHER_APPLY_FINAL_VERIFIED" \
+      0600 >/dev/null 2>&1 || true
+  return 0
+}
+
+patcher_supports_packages() {
+  probe_patcher_capabilities
+  [ "$PATCHER_SUPPORTS_PACKAGES" = "yes" ]
+}
+
+patcher_apply_final_verified() {
+  probe_patcher_capabilities
+  [ "$PATCHER_APPLY_FINAL_VERIFIED" = "yes" ]
 }
 
 apply_current() {
@@ -1069,7 +1456,10 @@ apply_current() {
     apply_rc=$?
   fi
 
-  if [ "$apply_rc" -eq 0 ]; then
+  if [ "$apply_rc" -eq 0 ] && patcher_apply_final_verified; then
+    check_rc=0
+    log "native final verification accepted reason=$apply_reason pid=$HAL_PID mode=$apply_want"
+  elif [ "$apply_rc" -eq 0 ]; then
     if [ "$apply_want" = "whitelist" ] && patcher_supports_packages; then
       if [ -n "$HAL_BASE" ]; then
         "$PATCHER" --check "$apply_want" "$HAL_PID" --packages "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
@@ -1149,6 +1539,7 @@ apply_stable() {
     fi
     stable_before=$CURRENT_SNAPSHOT
     stable_before_rev=$CURRENT_REVISION
+    stable_before_raw=$CURRENT_RAW_SIGNATURE
     if apply_current "$stable_reason#$stable_try"; then
       stable_patch_rc=0
     else
@@ -1158,12 +1549,18 @@ apply_stable() {
       stable_rc=74
       break
     fi
-    if ! prepare_config; then
-      log "apply FAIL reason=$stable_reason error=config-recheck attempt=$stable_try"
-      stable_rc=2
-      break
+    stable_after=
+    if raw_config_matches "$stable_before_raw"; then
+      stable_after=$stable_before
+    else
+      stable_match_rc=$?
+      if [ "$stable_match_rc" -ne 1 ] || ! prepare_config; then
+        log "apply FAIL reason=$stable_reason error=config-recheck attempt=$stable_try"
+        stable_rc=2
+        break
+      fi
+      stable_after=$CURRENT_SNAPSHOT
     fi
-    stable_after=$CURRENT_SNAPSHOT
     if [ "$stable_patch_rc" -eq 0 ] && [ "$stable_before" = "$stable_after" ]; then
       if refresh_policy_state "$stable_applied_policy"; then
         if record_applied; then
@@ -1197,6 +1594,35 @@ apply_stable() {
 mark_pending() {
   pending_text="$CURRENT_SNAPSHOT $CURRENT_REVISION"
   write_value_atomic "$PENDING_FILE" "$pending_text" 0600
+}
+
+mark_dirty_pending() {
+  write_value_atomic "$PENDING_FILE" "dirty $$" 0600
+}
+
+coalesce_pending_after_success() {
+  [ -f "$PENDING_FILE" ] || return 0
+
+  coalesce_claim="$PENDING_FILE.coalesce.$$"
+  rm -f "$coalesce_claim" 2>/dev/null
+  mv "$PENDING_FILE" "$coalesce_claim" 2>/dev/null || return 0
+  coalesce_marker=$(cat "$coalesce_claim" 2>/dev/null)
+
+  if [ -n "${stable_before_raw:-}" ] && raw_config_matches "$stable_before_raw"; then
+    rm -f "$coalesce_claim" 2>/dev/null
+    log "queue worker coalesced marker=$coalesce_marker revision=$stable_before_rev snapshot=$stable_before"
+    return 0
+  fi
+
+  if mark_dirty_pending; then
+    rm -f "$coalesce_claim" 2>/dev/null
+  elif [ ! -f "$PENDING_FILE" ]; then
+    mv -f "$coalesce_claim" "$PENDING_FILE" 2>/dev/null || true
+  else
+    rm -f "$coalesce_claim" 2>/dev/null
+  fi
+  log "queue worker preserved newer config marker=$coalesce_marker"
+  return 0
 }
 
 claim_worker_lock() {
@@ -1264,6 +1690,8 @@ start_worker() {
 }
 
 worker_main() {
+  command -v renice >/dev/null 2>&1 &&
+    renice -n -10 -p "$$" >/dev/null 2>&1 || true
   worker_bootstrap=${A2H_WORKER_BOOTSTRAP:-}
   worker_start=$(process_starttime "$$") || return 1
   worker_token="$$ $worker_start"
@@ -1309,13 +1737,8 @@ worker_main() {
       return 1
     fi
 
-    if prepare_config; then
-      worker_applied=$(cat "$APPLIED_SNAPSHOT" 2>/dev/null)
-      if [ "$worker_applied" != "$CURRENT_SNAPSHOT" ]; then
-        log "queue worker found newer config applied=${worker_applied:-none} current=$CURRENT_SNAPSHOT"
-        mark_pending || true
-      fi
-    fi
+    coalesce_pending_after_success
+
   done
 }
 
@@ -1337,12 +1760,16 @@ queue_latest() {
   return 0
 }
 
-queue_latest_detached() {
-  if command -v nohup >/dev/null 2>&1; then
-    A2H_REASON=tile nohup sh "$SELF" queue >/dev/null 2>&1 < /dev/null &
-  else
-    A2H_REASON=tile sh "$SELF" queue >/dev/null 2>&1 < /dev/null &
+queue_changed_fast() {
+  if ! mark_dirty_pending; then
+    log "queue fast FAIL error=pending-write"
+    return 2
   fi
+  log "queue fast accepted marker=dirty"
+  if ! start_worker; then
+    log "queue fast deferred error=worker-start pending=preserved"
+  fi
+  printf '%s\n' 'QUEUED_FAST pending=dirty'
   return 0
 }
 
@@ -1443,6 +1870,16 @@ case "$command_name" in
     queue_latest
     exit $?
     ;;
+  queue-controls-fast)
+    set_controls "${2:-}" "${3:-}" || exit $?
+    queue_changed_fast
+    exit $?
+    ;;
+  commit-queue)
+    shift
+    commit_config_and_queue "$@"
+    exit $?
+    ;;
   toggle)
     toggle_mode || exit $?
     queue_latest
@@ -1450,8 +1887,9 @@ case "$command_name" in
     ;;
   toggle-fast)
     toggle_mode || exit $?
-    queue_latest_detached
-    exit $?
+    queue_changed_fast || exit $?
+    printf '%s\n' "$toggle_next"
+    exit 0
     ;;
   toggle-game-auto-pause|toggle_game_auto_pause|game-toggle)
     toggle_game_auto_pause || exit $?
@@ -1460,8 +1898,9 @@ case "$command_name" in
     ;;
   toggle-game-auto-pause-fast|toggle_game_auto_pause_fast|game-toggle-fast)
     toggle_game_auto_pause || exit $?
-    queue_latest_detached
-    exit $?
+    queue_changed_fast || exit $?
+    printf '%s\n' "$toggle_policy_next"
+    exit 0
     ;;
   show|status)
     show_current
@@ -1488,7 +1927,7 @@ case "$command_name" in
     exit $?
     ;;
   *)
-    printf '%s\n' 'usage: a2h_apply [queue [enabled|disabled] [enabled|disabled]|toggle|toggle-fast|toggle-game-auto-pause|toggle-game-auto-pause-fast|apply|enable|disable|show|status|check [global|whitelist]|snapshot|snapshot-state|busy]' >&2
+    printf '%s\n' 'usage: a2h_apply [commit-queue MODE POLICY GENERATION PACKAGE{10} STATE{10}|queue [enabled|disabled] [enabled|disabled]|toggle|toggle-fast|toggle-game-auto-pause|toggle-game-auto-pause-fast|apply|enable|disable|show|status|check [global|whitelist]|snapshot|snapshot-state|busy]' >&2
     exit 2
     ;;
 esac

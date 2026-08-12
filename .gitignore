@@ -5,6 +5,7 @@
 /compatibility_archive/
 /bin/*
 !/bin/a2h_apply
+!/bin/a2h_audio_watch
 /zygisk/
 /companion/build/
 *.o

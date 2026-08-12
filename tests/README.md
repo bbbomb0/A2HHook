@@ -22,8 +22,26 @@ event-driven appname/recompute overlays, and unique semantic layout derivation
 across the four archived HALs. It also executes the production policy-refresh
 transaction and requires first/same-policy applications to skip the silent
 trigger, both policy directions to trigger exactly once, and trigger failure to
-leave applied metadata uncommitted. Companion checks cover both protected
-`TileService` declarations, the independent game-policy toggle, immediate
+leave applied metadata uncommitted. The audio UID watcher harness runs the production
+shell script with synthetic vendor playback events and verifies arbitrary global
+packages, enabled/disabled exact custom slots, invalid and missing UID rejection,
+cached core-system UID rejection, per-package recursion cooldown, compact and
+whitespace-formatted events, long valid
+   package names, actual `su UID -c trigger --lease` arguments, bounded logcat restart backoff,
+   and trigger failure reporting without any hardcoded game package. With `--adb`, the
+   AudioPolicy lease harness additionally covers vendor-event fallback, callback-ready
+   session suppression, `session -> portId` and `portId -> session` field order,
+   `stopOutput()` / `stoptOutput()`, stop records without app names, multiple real ports,
+   stale stop rejection, last-port release, PID/starttime ownership and full runtime cleanup.
+   Cleanup also requires token-first shutdown, a single bounded grace window shared by
+   all lease workers, and escalation only for owners still alive after that window.
+   The native trigger must reach `STARTED`, execute its silent AAudio callback, publish a
+   real allocated session as `ready`, and later reach `STOPPED`; a 70-second bounded
+   fallback is used only when no real AudioPolicy lifecycle is observed. The service wake
+harness executes the production FIFO functions (under root on Android) and verifies
+immediate config wakeup, 30-second-equivalent health timeout bookkeeping, FIFO type
+and cleanup. Companion checks cover both protected
+`TileService` declarations, the positive game-background-haptic toggle, immediate
 visual feedback contract, and clean APK install/uninstall lifecycle. The native
 harness also covers controlled
 `+0x40` layout drift and duplicate-anchor rejection. With `--adb`, it
@@ -56,8 +74,8 @@ does not attach to or modify the phone audio process.
 ## ZIP verification
 
 ```powershell
-python tests/verify_module_zip.py .\a2h_hook_v1.5.6-fix.zip `
-  --expected-version v1.5.6-fix --expected-code 1561
+python tests/verify_module_zip.py .\a2h_hook_v1.5.7-fix.zip `
+  --expected-version v1.5.7-fix --expected-code 1571
 ```
 
 This independently checks the exact member list, duplicates, path portability,
@@ -71,7 +89,7 @@ Preflight only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.6-fix
+  -ExpectedVersion v1.5.7-fix
 ```
 
 Full two-round test after the candidate module is installed and the phone has
@@ -79,7 +97,7 @@ rebooted:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.6-fix -Execute -AllowAudioRestart
+  -ExpectedVersion v1.5.7-fix -Execute -AllowAudioRestart
 ```
 
 The device case waits for the apply queue to become idle, backs up persistent

@@ -26,22 +26,29 @@ FILES = (
     "config/game_auto_pause",
     "bin/a2h_patch",
     "bin/a2h_trigger",
+    "bin/a2h_audio_watch",
     "post-fs-data.sh",
     "wrapper.sh",
     "uninstall.sh",
     "webroot/index.html",
-    "webroot/coolapk.png",
+    "webroot/coolapk.webp",
+    "webroot/donate-wechat-pay.webp",
+    "webroot/donate-wechat.webp",
+    "webroot/donate-alipay.webp",
+    "webroot/payment-wechat-pay.webp",
+    "webroot/payment-wechat-reward.webp",
+    "webroot/payment-alipay.webp",
 )
 
 EXECUTABLE = {
     "customize.sh", "service.sh", "bin/a2h_apply", "bin/a2h_patch",
-    "bin/a2h_trigger", "post-fs-data.sh", "wrapper.sh", "uninstall.sh",
+    "bin/a2h_trigger", "bin/a2h_audio_watch", "post-fs-data.sh", "wrapper.sh", "uninstall.sh",
 }
 
 TEXT = {
     "module.prop", "LICENSE", "customize.sh", "service.sh", "bin/a2h_apply",
     "config/packages.txt", "config/package_states", "config/state",
-    "config/game_auto_pause",
+    "config/game_auto_pause", "bin/a2h_audio_watch",
     "post-fs-data.sh", "wrapper.sh", "uninstall.sh", "webroot/index.html",
 }
 
@@ -140,6 +147,8 @@ def validate(path: Path, expected_version: str | None = None, expected_code: str
                 raise ValueError(f"invalid Unix mode for {name}: system={info.create_system} type={file_type:o} mode={mode:o}")
             if info.date_time != ZIP_TIMESTAMP:
                 raise ValueError(f"non-reproducible ZIP timestamp for {name}: {info.date_time!r}")
+            if info.compress_size > info.file_size:
+                raise ValueError(f"inefficient ZIP compression for {name}")
             data = archive.read(name)
             if name in TEXT:
                 data.decode("utf-8")
@@ -178,6 +187,27 @@ def validate(path: Path, expected_version: str | None = None, expected_code: str
         if archive.read("config/game_auto_pause") != b"enabled\n":
             raise ValueError("default game auto-pause policy is not Xiaomi stock/enabled")
 
+        audio_watcher = archive.read("bin/a2h_audio_watch").decode("utf-8")
+        watcher_markers = (
+            "audio_track_message", "scenario", "/data/system/packages.list",
+            'exec 3< "$CFG_STATES"', 'exec 4< "$CFG_PKGS"',
+            '"$SU_BIN" "$lease_uid" -c "$lease_command"',
+            '"$TRIGGER_RUNTIME --lease $lease_token $lease_session"',
+            'chmod 0711 "$RUNTIME_DIR"', 'chmod 0555 "$trigger_tmp"',
+            '"$trigger_uid" -lt 10000', "mkfifo", "logcat_pid", "watch_restart_delay",
+            "APM_AudioPolicyManager:D", "AudioPolicyManager:D",
+            "*'stopOutput()'*|*'stoptOutput()'*",
+            'policy_port_file="$PORT_DIR/$policy_port"',
+            'lease_worker_start=$(process_starttime "$lease_worker")',
+            'FALLBACK_LEASE_SECONDS:-70',
+        )
+        if not all(marker in audio_watcher for marker in watcher_markers):
+            raise ValueError("audio UID watcher lifecycle contract is incomplete")
+        if any(package in audio_watcher for package in (
+            "com.tencent.tmgp.sgame", "com.tencent.game.rhythmmaster",
+        )):
+            raise ValueError("audio UID watcher hardcodes a game package")
+
         companion = archive.read("companion/a2h_companion.apk")
         signing_ids = apk_signing_ids(companion)
         if 0xF05368C0 not in signing_ids:
@@ -186,7 +216,10 @@ def validate(path: Path, expected_version: str | None = None, expected_code: str
             apk_names = apk.namelist()
             required_apk = {
                 "AndroidManifest.xml", "classes.dex", "resources.arsc",
-                "assets/index.html", "assets/coolapk.png",
+                "assets/index.html", "assets/coolapk.webp",
+                "assets/donate-wechat-pay.webp", "assets/donate-wechat.webp",
+                "assets/donate-alipay.webp", "assets/payment-wechat-pay.webp",
+                "assets/payment-wechat-reward.webp", "assets/payment-alipay.webp",
             }
             if len(apk_names) != len(set(apk_names)) or not required_apk <= set(apk_names):
                 raise ValueError("companion APK members are incomplete or duplicated")
@@ -194,8 +227,14 @@ def validate(path: Path, expected_version: str | None = None, expected_code: str
                 raise ValueError("companion APK CRC verification failed")
             if apk.read("assets/index.html") != archive.read("webroot/index.html"):
                 raise ValueError("companion APK WebUI asset differs from module WebUI")
-            if apk.read("assets/coolapk.png") != archive.read("webroot/coolapk.png"):
+            if apk.read("assets/coolapk.webp") != archive.read("webroot/coolapk.webp"):
                 raise ValueError("companion APK Coolapk asset differs from module WebUI")
+            for asset in (
+                "donate-wechat-pay.webp", "donate-wechat.webp", "donate-alipay.webp",
+                "payment-wechat-pay.webp", "payment-wechat-reward.webp", "payment-alipay.webp",
+            ):
+                if apk.read(f"assets/{asset}") != archive.read(f"webroot/{asset}"):
+                    raise ValueError(f"companion APK {asset} differs from module WebUI")
 
         patcher = archive.read("bin/a2h_patch")
         trigger = archive.read("bin/a2h_trigger")

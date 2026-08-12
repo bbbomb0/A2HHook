@@ -30,11 +30,14 @@ final class RootShell {
         Process process = null;
         try {
             process = new ProcessBuilder("su", "-c", command).start();
+            process.getOutputStream().close();
             final Process current = process;
             final ByteArrayOutputStream stdout = new ByteArrayOutputStream();
             final ByteArrayOutputStream stderr = new ByteArrayOutputStream();
             Thread outThread = new Thread(() -> drain(current.getInputStream(), stdout), "a2h-root-out");
             Thread errThread = new Thread(() -> drain(current.getErrorStream(), stderr), "a2h-root-err");
+            outThread.setDaemon(true);
+            errThread.setDaemon(true);
             outThread.start();
             errThread.start();
             boolean finished = process.waitFor(timeoutMs, TimeUnit.MILLISECONDS);

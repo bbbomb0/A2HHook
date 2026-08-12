@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import struct
 import subprocess
@@ -28,7 +29,7 @@ OFFICIAL = (
     "com.luna.music",
 )
 
-EXPECTED_RELEASE = ("v1.5.6-fix", "1561")
+EXPECTED_RELEASE = ("v1.5.7-fix", "1571")
 
 HAL_CASES = {
     "OS2.0.208.0.VONCNXM": {
@@ -260,6 +261,7 @@ TEXT_RELEASE_FILES = (
     "wrapper.sh",
     "uninstall.sh",
     "bin/a2h_apply",
+    "bin/a2h_audio_watch",
     "config/packages.txt",
     "config/package_states",
     "config/state",
@@ -575,6 +577,19 @@ def locate_posix_shell() -> str | None:
     return None
 
 
+def locate_bash_shell() -> str | None:
+    """Locate a shell that supports the timeout form used by the host FIFO harness."""
+    git_shells = [
+        r"C:\Program Files\Git\bin\bash.exe",
+        r"C:\Program Files\Git\usr\bin\bash.exe",
+    ]
+    candidates = git_shells + [shutil.which("bash")] if os.name == "nt" else [shutil.which("bash")]
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return str(candidate)
+    return None
+
+
 def run_command(command: list[str], cwd: Path, input_bytes: bytes | None = None) -> tuple[int, str]:
     completed = subprocess.run(
         command,
@@ -699,11 +714,153 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     )
 
     webui = (root / "webroot/index.html").read_text(encoding="utf-8")
+    applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
+    companion_styles = (root / "companion/app/src/main/res/values/styles.xml").read_text(encoding="utf-8")
+    companion_manifest = (root / "companion/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
+    companion_activity = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/WebUiActivity.java").read_text(encoding="utf-8")
+    performance_contract = (
+        "apply-final-verified" in patcher
+        and "elf_symbol_cache_lookup" in patcher
+        and "elf_symbol_cache_store" in patcher
+        and "setpriority(PRIO_PROCESS, 0, -10)" in patcher
+        and "patcher_apply_final_verified()" in applier
+        and "native final verification accepted" in applier
+        and "queue_changed_fast()" in applier
+        and "mark_dirty_pending()" in applier
+        and "prepare_config_fast_unlocked()" in applier
+        and "compute_config_and_table_fingerprints()" in applier
+        and "CFG_NORMALIZED_FINGERPRINT" in applier
+        and "config fast prepared" in applier
+        and "queue worker found newer config" not in applier
+        and 'nohup sh "$SELF" queue' not in applier
+    )
+    report.check(
+        performance_contract,
+        "fast apply capability contract",
+        "verified native apply avoids a second ptrace check, controls share one stat snapshot per validation pass, and config changes start one boosted worker",
+        "one of the verified-apply, symbol-cache, priority, or direct-worker safeguards is missing",
+    )
     report.check(
         version in webui,
         "WebUI version metadata",
         f"WebUI contains {version}",
         f"WebUI does not contain {version}",
+    )
+    companion_theme_contract = (
+        "Theme.Material.Light" not in companion_styles
+        and "Theme.DeviceDefault.DayNight" in companion_styles
+        and 'android:configChanges="uiMode"' in companion_manifest
+        and "public void onConfigurationChanged(Configuration configuration)" in companion_activity
+        and "settings.setAlgorithmicDarkeningAllowed(false)" in companion_activity
+        and "window.__A2H_NATIVE_DARK__=" in companion_activity
+        and "window.A2HNativeTheme&&window.A2HNativeTheme(" in companion_activity
+    )
+    report.check(
+        companion_theme_contract,
+        "companion system-theme ownership contract",
+        "DayNight host and live uiMode bridge own companion WebUI system theme",
+        "companion host still locks light mode or does not propagate live uiMode changes",
+    )
+    miuix_webui = (
+        "--primary:#3482ff" in webui
+        and 'class="group"' in webui
+        and 'id="aboutPage"' in webui
+        and 'id="donatePage"' in webui
+        and 'id="qrPage"' in webui
+        and 'id="strongHaptic"' in webui
+        and 'id="donateImage" alt=""' in webui
+        and "history.pushState" in webui
+        and "window.A2HWebUIBack" in webui
+        and "window.addEventListener('popstate'" in webui
+        and "donate-wechat-pay.webp" in webui
+        and "donate-wechat.webp" in webui
+        and "donate-alipay.webp" in webui
+        and "https://qm.qq.com/q/nOF82hSWwU" in webui
+        and "function haptic(" in webui
+        and "navigator.vibrate" in webui
+        and "cmd vibrator_manager synced -f" in webui
+        and "cmd vibrator vibrate -f" in webui
+        and "游戏时启动后台音乐触感" in webui
+        and "data-app-package=\"com.tencent.mobileqq\"" in webui
+        and "data-no-browser-fallback" in webui
+        and "mqqapi://card/show_pslcard?src_type=internal&amp;version=1&amp;uin=778505328" in webui
+        and "navigateRoute('donate')" in webui
+        and "about-row about-author" in webui
+        and "data-theme-mode=\"system\"" in webui
+        and "localStorage.removeItem('a2h_theme')" in webui
+        and "viewport-fit=cover" in webui
+        and "--a2h-safe-top:var(--a2h-native-safe-top,var(--safe-area-inset-top,env(safe-area-inset-top,0px)))" in webui
+        and "--a2h-safe-bottom:var(--a2h-native-safe-bottom,var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px)))" in webui
+        and "style.setProperty('--a2h-native-safe-top'" in webui
+        and "style.setProperty('--a2h-native-safe-bottom'" in webui
+        and "window.A2HSystemInsets=" in webui
+        and "function enableImmersiveLayout(" in webui
+        and "window.ksu.enableEdgeToEdge(true)" in webui
+        and "window.ksu.enableInsets(true)" in webui
+        and "function syncSystemBars(" in webui
+        and "window.ksu.setSystemBarsDark(dark)" in webui
+        and "fullScreen(" not in webui
+        and "align-items:flex-end" in webui
+        and "border-radius:28px 28px 0 0" in webui
+        and "background-clip:padding-box" in webui
+        and "box-shadow:none;isolation:isolate" in webui
+        and "@media(max-height:900px)" in webui
+        and ".slot{height:44px}" in webui
+        and webui.count('class="sheet-handle-area"') == 3
+        and "window.visualViewport" in webui
+        and "--ime-inset" in webui
+        and "function showCommand(" in webui
+        and "function bindSheetDrag(" in webui
+        and "function bindSnackbarSwipe(" in webui
+        and "function isTextEntry(" in webui
+        and "kind==='err'?10000:4000" in webui
+        and "@keyframes sheet-in" in webui
+        and webui.count('class="a2h-logo') == 2
+        and 'class="a2h-logo project-logo"' in webui
+        and '<div class="mark">A2</div>' not in webui
+        and ".project-mark{width:96px;height:84px;color:var(--primary)" in webui
+        and "visibilitychange" in webui
+        and "motion-active" in webui
+        and ".shell').classList.toggle('motion-active'" in webui
+        and "function prioritizeInteraction(" in webui
+        and "!applyBusy&&Date.now()>=motionPausedUntil" in webui
+        and "requestAnimationFrame(()=>setTimeout(run,0))" in webui
+        and "window.A2HNativeTheme=" in webui
+        and "window.__A2H_NATIVE_DARK__" in webui
+        and "const commit=execRoot(command,15000)" in webui
+        and "flushRootHaptic();" in webui
+        and "animation:a2h-core-loop 1.3s ease-in-out infinite" in webui
+        and "a2h-core-intro" not in webui
+        and "a2h-orbit-outer-intro" not in webui
+        and "a2h-wave-left-intro" not in webui
+        and "@keyframes a2h-orbit-outer-loop" in webui
+        and "@keyframes a2h-wave-left-loop" in webui
+        and webui.count('class="logo-wave') == 4
+        and "M9 24l-6 8 6 8" not in webui
+        and "setInterval(" not in webui
+        and webui.count('<svg class="brand-icon') == 2
+        and 'class="brand-icon qq-icon"' in webui
+        and 'class="qq-belly"' not in webui
+        and "qq-mascot" not in webui
+        and "qq-cut" not in webui
+        and "@keyframes qq-wave" not in webui
+        and webui.count('class="support-icon brand-payment"') == 3
+        and 'src="payment-wechat-pay.webp"' in webui
+        and 'src="payment-wechat-reward.webp"' in webui
+        and 'src="payment-alipay.webp"' in webui
+        and 'event.target!==page' in webui
+        and "document.querySelectorAll('.route-page')" in webui
+        and "support-option-summary" not in webui
+        and "微信扫码支付" not in webui
+        and "支付宝扫码赞赏" not in webui
+        and "选择赞赏方式" not in webui
+        and "选择后才会显示对应二维码" not in webui
+    )
+    report.check(
+        miuix_webui,
+        "Miuix WebUI interaction contract",
+        "compact grouped layout, animated sheets, outside-tap back, transparent music-haptic marks, solid QQ and optimized payment icons present",
+        "Miuix layout, support assets or haptic fallback is incomplete",
     )
     request_apply = extract_function(
         webui, "function requestApply(reason,writePackages){", "async function drainApply(){"
@@ -717,12 +874,18 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     state_contract = (
         "APPLY_DELAY" not in webui
         and "applyTimer" not in webui
-        and "setTimeout" not in request_apply
-        and "drainApply();" in request_apply
+        and "prioritizeInteraction(420);" in request_apply
+        and "scheduleApplyDrain();" in request_apply
+        and "interactionBusy=true;" in request_apply
+        and "renderMode();" in request_apply
         and "window[callbackName]=" in raw_bridge
         and "command,'{}',callbackName" in raw_bridge
         and "verifyDeviceConfig(text,data,writePackages);" in apply_loop
         and "loadDeviceConfig({preserveNotice:true})" in apply_loop
+        and "if(!applyPending) interactionBusy=false;" in apply_loop
+        and "const interactionLocked=applyBusy||interactionBusy;" in webui
+        and "input.disabled=!deviceConfigReady||applyBusy||interactionBusy;" in webui
+        and "toggle.disabled=!deviceConfigReady||applyBusy||interactionBusy||!value;" in webui
         and "state!=='enabled'&&state!=='disabled'" in webui
         and "policy!=='enabled'&&policy!=='disabled'" in webui
         and "device-policy-mismatch" in webui
@@ -730,43 +893,42 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     report.check(
         state_contract,
         "WebUI device-state persistence contract",
-        "immediate dispatch, string callback, strict readback, and failure restore present",
-        "mode persistence safeguards are incomplete or page debounce returned",
+        "next-frame dispatch, string callback, strict readback, and failure restore present",
+        "mode persistence safeguards are incomplete or a time-based configuration debounce returned",
     )
-    writer = extract_function(
-        webui, "function buildWritePackagesCmd(snapshot,readable){", "function buildCommand("
+    commit_builder = extract_function(
+        webui, "function buildCommitCommand(state,snapshot,writePackages){", "function buildCommand("
     )
-    packages_commit = writer.find('mv -f "$pkg_tmp" "$cfg/packages.txt"')
-    states_commit = writer.find('mv -f "$state_tmp" "$cfg/package_states"')
-    generation_commit = writer.find('mv -f "$gen_tmp" "$cfg/config_generation"')
-    rollback_contract = (
-        'cfg_backed_up=0' in writer
-        and 'cfg_committed=0' in writer
-        and 'cfg_restore()' in writer
-        and 'cfg_signal_abort()' in writer
-        and 'cfg_backed_up=1' in writer
-        and 'cfg_committed=1' in writer
-        and 'trap - 0 1 2 15; cfg_abort; exit 130' in writer
-        and 'cfg_wait=$((cfg_wait + 1)); [ "$cfg_wait" -le 8 ]' in writer
+    commit_contract = (
+        'a2h_apply commit-queue' in commit_builder
+        and 'data.generation' in commit_builder
+        and 'values.map(shellQuote)' in commit_builder
+        and 'states.map(shellQuote)' in commit_builder
+        and 'queue-controls-fast' in commit_builder
         and 'execRoot(command,15000)' in webui
     )
     report.check(
-        0 <= packages_commit < states_commit < generation_commit,
+        commit_contract,
         "WebUI grouped commit marker order",
-        "packages and states commit before generation",
-        f"commit indexes packages={packages_commit} states={states_commit} generation={generation_commit}",
+        "one validated commit-queue command carries generation, 10 packages and 10 states",
+        "WebUI commit command is incomplete",
     )
     report.check(
-        rollback_contract,
+        "commit_config_and_queue()" in applier and
+        "commit_config_abort()" in applier and
+        "commit_restore_one()" in applier and
+        "commit_config_signal()" in applier and
+        "commit_config_cleanup()" in applier and
+        "queue-controls-fast)" in applier,
         "WebUI grouped commit rollback contract",
-        "old files are restored on failure/signal and lock waiting is bounded below the bridge timeout",
-        "backup, rollback, signal exit, bounded wait, or timeout headroom is incomplete",
+        "native applier owns atomic five-file rollback and direct fast worker queue",
+        "unified commit/rollback entry or fast queue path is incomplete",
     )
 
     service = (root / "service.sh").read_text(encoding="utf-8")
     watcher = extract_function(
         service,
-        'last_pid=$(cat "$LAST_PID_FILE" 2>/dev/null)\nlast_raw_signature=$(raw_config_signature)',
+        "config_inotify_pid=\nconfig_inotify_enabled=0\naudio_watcher_pid=\n",
         "done\n",
     )
     watcher_contract = (
@@ -785,8 +947,8 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and "sleep 25" not in watcher
         and "Never let the slower health path" in watcher
         and 'current_pid=$(find_hal_pid)' in watcher
-        and 'current_revision=$(cat "$CFG_REVISION"' in watcher
-        and 'applied_revision=$(cat "$APPLIED_REVISION"' in watcher
+        and 'read -r current_revision < "$CFG_REVISION"' in watcher
+        and 'read -r applied_revision < "$APPLIED_REVISION"' in watcher
         and 'if [ "$current_pid" != "$last_pid" ]; then' in watcher
         and '[ "$current_snapshot" != "$applied_snapshot" ] ||' in watcher
         and '[ "$current_revision" != "$applied_revision" ]' in watcher
@@ -819,7 +981,7 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     report.check(
         watcher_contract,
         "non-intrusive watcher health contract",
-        "2-second debounce and 30-second PID/config probes never launch a native inspection",
+        "FIFO-blocked idle, 2-second debounce, and 30-second PID/config probes never launch a native inspection",
         "watcher debounce/probes are incomplete or a periodic native inspection returned",
     )
 
@@ -863,13 +1025,19 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "periodic metadata probes can still refresh existing log mtimes",
     )
     report.check(
-        "queue_latest_detached()" in applier
-        and 'A2H_REASON=tile nohup sh "$SELF" queue' in applier
+        "queue_changed_fast()" in applier
+        and "mark_dirty_pending()" in applier
+        and "coalesce_pending_after_success()" in applier
+        and 'mv "$PENDING_FILE" "$coalesce_claim"' in applier
+        and 'raw_config_matches "$stable_before_raw"' in applier
+        and "queue worker coalesced" in applier
+        and "queue worker preserved newer config" in applier
+        and 'renice -n -10 -p "$$"' in applier
         and "toggle-fast)" in applier
         and "toggle-game-auto-pause-fast|" in applier,
-        "quick settings detached queue contract",
-        "both tiles commit under the config lock and detach the unchanged apply queue",
-        "tile commands still wait for native worker startup or bypass the production queue",
+        "quick settings direct worker queue contract",
+        "both tiles commit under the config lock, start one worker, and coalesce only signature-proven stale requests",
+        "tile commands bypass the production worker or stale-request coalescing can lose newer configuration",
     )
 
     postfs = (root / "post-fs-data.sh").read_text(encoding="utf-8")
@@ -883,12 +1051,75 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and "a2h_config.lock" in postfs
         and "a2h_packages.txt" in postfs
         and "a2h_state" in postfs
+        and "a2h_config.wake" in postfs
+        and "rm -rf /data/local/tmp/a2h_hook_runtime" in postfs
     )
     report.check(
         postfs_contract,
         "previous-boot runtime cleanup contract",
         "post-fs-data gates module-only pending/lock/temp cleanup before boot completion",
         "early-boot guard or one of the module runtime artifacts is missing",
+    )
+
+    audio_watcher = (root / "bin/a2h_audio_watch").read_text(encoding="utf-8")
+    trigger_source = (root / "src/trigger.c").read_text(encoding="utf-8")
+    service = (root / "service.sh").read_text(encoding="utf-8")
+    uninstall = (root / "uninstall.sh").read_text(encoding="utf-8")
+    audio_watcher_contract = (
+        "vendor.xiaomi.hardware.mediaeventgatherservice-service" in audio_watcher
+        and 'event_name" = "audio_track_message"' in audio_watcher
+        and 'event_scenario" = "playback"' in audio_watcher
+        and "/data/system/packages.list" in audio_watcher
+        and 'exec 3< "$CFG_STATES"' in audio_watcher
+        and 'exec 4< "$CFG_PKGS"' in audio_watcher
+        and '"$SU_BIN" "$lease_uid" -c "$lease_command"' in audio_watcher
+        and '"$TRIGGER_RUNTIME --lease $lease_token $lease_session"' in audio_watcher
+        and "AAudioStream_waitForStateChange" in trigger_source
+        and "AAudioStreamBuilder_setDataCallback" in trigger_source
+        and "wait_for_first_callback(stream, &trigger_state)" in trigger_source
+        and "write_session_file(session_file, stream, 1)" in trigger_source
+        and "AAudioStream_requestStop(stream)" in trigger_source
+        and "FALLBACK_LEASE_MS = 70000" in trigger_source
+        and 'cooldown_accept "$trigger_package"' in audio_watcher
+        and "read -r cooldown_now cooldown_unused < /proc/uptime" in audio_watcher
+        and 'printf \'%s\\n\' "$cooldown_now" > "$cooldown_file"' in audio_watcher
+        and 'chmod 0711 "$RUNTIME_DIR"' in audio_watcher
+        and 'chmod 0555 "$trigger_tmp"' in audio_watcher
+        and 'CORE_UID_DIR="$RUNTIME_DIR/core_uid"' in audio_watcher
+        and '[ ! -f "$CORE_UID_DIR/$trigger_package" ] || return 0' in audio_watcher
+        and ': > "$CORE_UID_DIR/$trigger_package"' in audio_watcher
+        and "mkfifo" in audio_watcher
+        and "logcat_pid" in audio_watcher
+        and "watch_restart_delay=2" in audio_watcher
+        and 'watch_restart_delay" -le 30' in audio_watcher
+        and 'command -v "$LOGCAT_BIN"' in audio_watcher
+        and '"${#package_value}" -lt 256' in audio_watcher
+        and '"$trigger_uid" -lt 10000' in audio_watcher
+        and "APM_AudioPolicyManager:D" in audio_watcher
+        and "AudioPolicyManager:D" in audio_watcher
+        and "*'stopOutput()'*|*'stoptOutput()'*" in audio_watcher
+        and 'policy_port_file="$PORT_DIR/$policy_port"' in audio_watcher
+        and 'trigger_session_matches "$policy_package" "$policy_session"' in audio_watcher
+        and 'lease_worker_start=$(process_starttime "$lease_worker")' in audio_watcher
+        and "dumpsys" not in audio_watcher
+        and "ptrace" not in audio_watcher.lower()
+        and "com.tencent.tmgp.sgame" not in audio_watcher
+        and "com.tencent.game.rhythmmaster" not in audio_watcher
+        and 'AUDIO_WATCHER="$MODDIR/bin/a2h_audio_watch"' in service
+        and "start_audio_watcher || true" in service
+        and "stop_audio_watcher" in service
+        and 'if [ "$health_due" = "1" ]; then' in service
+        and 'CONFIG_WAKE_FIFO=/data/local/tmp/a2h_config.wake' in service
+        and "prepare_config_wake_fifo()" in service
+        and "wait_for_watch_tick()" in service
+        and 'read -r -t "$((watch_tick_seconds * watch_health_ticks))"' in service
+        and "/data/local/tmp/a2h_hook_runtime" in uninstall
+    )
+    report.check(
+        audio_watcher_contract,
+        "arbitrary audio UID watcher contract",
+        "vendor playback and AudioPolicy ports use exact global/slot policy, real UID/session, callback-ready lease and PID/starttime cleanup",
+        "audio watcher metadata, UID, lifecycle, or no-hardcoded-package contract is incomplete",
     )
 
     packager = (root / "package_module.py").read_text(encoding="utf-8")
@@ -899,10 +1130,19 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     report.check(
         "ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)" in packager
         and "ZipInfo(filename=relative, date_time=ZIP_TIMESTAMP)" in packager
+        and "select_compression(data)" in packager
+        and "info.compress_size > info.file_size" in packager
         and "ZipInfo.from_file" not in packager,
         "reproducible release timestamp contract",
-        "all ZIP members use a fixed DOS timestamp instead of source mtimes",
-        "release ZIP still inherits source mtimes or lacks a fixed timestamp",
+        "all ZIP members use a fixed DOS timestamp and skip size-increasing compression",
+        "release ZIP still inherits source mtimes or lacks adaptive compression",
+    )
+    text_manifest_area = extract_function(packager, "TEXT_FILES = {", "ZIP_TIMESTAMP")
+    report.check(
+        not any(suffix in text_manifest_area for suffix in (".apk", ".png", ".webp", ".so")),
+        "release text/binary classification",
+        "only textual members receive BOM and line-ending validation",
+        "binary assets are still classified as text and can fail packaging on arbitrary bytes",
     )
 
     build_script = (root / "build.sh").read_text(encoding="utf-8")
@@ -934,7 +1174,10 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "installer does not preserve game policy or companion install command drifted",
     )
 
-    scripts = ["customize.sh", "service.sh", "post-fs-data.sh", "wrapper.sh", "bin/a2h_apply"]
+    scripts = [
+        "customize.sh", "service.sh", "post-fs-data.sh", "wrapper.sh",
+        "uninstall.sh", "bin/a2h_apply", "bin/a2h_audio_watch",
+    ]
     if use_adb:
         adb = shutil.which("adb")
         if not adb:
@@ -994,9 +1237,11 @@ def check_companion(root: Path, report: Report) -> None:
         application is not None
         and application.get(android + "allowBackup") == "false"
         and application.get(android + "usesCleartextTraffic") == "false"
+        and permissions == {"android.permission.VIBRATE"}
         and "android.permission.INTERNET" not in permissions
         and activity is not None
         and activity.get(android + "name") == ".WebUiActivity"
+        and activity.get(android + "enableOnBackInvokedCallback") == "true"
         and activity.get(android + "exported") == "true"
         and "android.service.quicksettings.action.QS_TILE_PREFERENCES" in activity_actions
         and service_names == {".A2HTileService", ".A2HGameTileService"}
@@ -1016,18 +1261,19 @@ def check_companion(root: Path, report: Report) -> None:
 
     build_script = (root / "companion/build.ps1").read_text(encoding="utf-8")
     report.check(
-        "$VersionName = '1.5.6-fix'" in build_script
-        and "$VersionCode = '1561'" in build_script
+        "$VersionName = '1.5.7-fix'" in build_script
+        and "$VersionCode = '1571'" in build_script
         and "--min-sdk-version', '29'" in build_script
         and "--target-sdk-version', '35'" in build_script
         and "signing.properties" in build_script,
         "companion build metadata",
-        "version 1.5.6-fix/1561, API 29-35, external stable signing config",
+        "version 1.5.7-fix/1571, API 29-35, external stable signing config",
         "companion build version/API/signing metadata mismatch",
     )
 
     web_activity = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/WebUiActivity.java").read_text(encoding="utf-8")
     bridge = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/A2HBridge.java").read_text(encoding="utf-8")
+    root_shell = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/RootShell.java").read_text(encoding="utf-8")
     tile = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/A2HTileService.java").read_text(encoding="utf-8")
     tile_base = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/A2HToggleTileService.java").read_text(encoding="utf-8")
     game_tile = (root / "companion/app/src/main/java/io/github/bbbomb0/a2hhook/A2HGameTileService.java").read_text(encoding="utf-8")
@@ -1036,33 +1282,71 @@ def check_companion(root: Path, report: Report) -> None:
         and "settings.setAllowFileAccess(false)" in web_activity
         and "settings.setAllowContentAccess(false)" in web_activity
         and "WebView.setWebContentsDebuggingEnabled(false)" in web_activity
+        and "webView.pauseTimers()" in web_activity
+        and "webView.resumeTimers()" in web_activity
+        and "webView.stopLoading()" in web_activity
+        and "((ViewGroup) webView.getParent()).removeView(webView)" in web_activity
         and '"https".equals(uri.getScheme())' in web_activity
-        and '"/coolapk.png".equals(path)' in web_activity
+        and '"/coolapk.webp".equals(path)' in web_activity
+        and '"/donate-wechat-pay.webp".equals(path)' in web_activity
+        and '"/donate-wechat.webp".equals(path)' in web_activity
+        and '"/donate-alipay.webp".equals(path)' in web_activity
+        and '"/payment-wechat-pay.webp".equals(path)' in web_activity
+        and '"/payment-wechat-reward.webp".equals(path)' in web_activity
+        and '"/payment-alipay.webp".equals(path)' in web_activity
         and '"/".equals(uri.getPath())' in web_activity
         and "return null;" in web_activity
-        and "Color.TRANSPARENT" not in web_activity
+        and "Color.TRANSPARENT" in web_activity
         and "setOnApplyWindowInsetsListener" in web_activity
-        and "WindowInsets.Type.statusBars()" in web_activity
+        and "setDecorFitsSystemWindows(false)" in web_activity
+        and "SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN" in web_activity
+        and "SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION" in web_activity
+        and "setStatusBarContrastEnforced(false)" in web_activity
+        and "setNavigationBarContrastEnforced(false)" in web_activity
+        and "WindowInsets.Type.systemBars()" in web_activity
         and "WindowInsets.Type.displayCutout()" in web_activity
         and "getInsetsIgnoringVisibility" in web_activity
-        and "status_bar_height" in web_activity
-        and "webParams.topMargin" in web_activity
+        and "getDisplayMetrics().density" in web_activity
+        and "Math.round(physicalPixels / density)" in web_activity
+        and "window.A2HSystemInsets" in web_activity
+        and "webParams.topMargin" not in web_activity
         and "FrameLayout" in web_activity
         and "requestApplyInsets()" in web_activity
         and "addJavascriptInterface" in web_activity
-        and "__a2h_exec_[0-9]+_[0-9]+" in bridge
+        and "public void onBackPressed()" in web_activity
+        and "OnBackInvokedCallback" in web_activity
+        and "registerOnBackInvokedCallback" in web_activity
+        and "unregisterOnBackInvokedCallback" in web_activity
+        and "dispatchBackToWebUi" in web_activity
+        and "finishAfterTransition()" in web_activity
+        and "window.A2HWebUIBack" in web_activity
+        and "evaluateJavascript" in web_activity
+        and "CALLBACK_NAME.matcher(callbackName).matches()" in bridge
+        and "HAPTIC_KIND" in bridge
+        and "public void setSystemBarsDark(boolean dark)" in bridge
+        and "miui.util.HapticFeedbackUtil" in bridge
+        and "performHapticFeedback" in bridge
+        and "VibrationEffect.createPredefined" in bridge
+        and "process.getOutputStream().close()" in root_shell
+        and root_shell.count("setDaemon(true)") == 2
         and "a2h_apply toggle" in tile
         and "A2H 全局音乐触感" in tile
         and "ic_a2h_tile_off" in tile
         and "onStartListening" in tile_base
         and "toggle-game-auto-pause" in game_tile
-        and "游戏时暂停音乐触感" in game_tile
+        and "游戏时启动后台音乐触感" in game_tile
+        and 'return "disabled".equals(state);' in game_tile
+        and 'return drawableId("ic_a2h_tile_game_off");' in game_tile
+        and 'return drawableId("ic_a2h_tile_game_on");' in game_tile
+        and "isActiveState(state)" in tile_base
         and "setIcon(Icon.createWithResource" in tile_base
+        and 'RootShell.run("sh " + toggleCommand(), 10000)' in tile_base
+        and "STATE_MARKER" not in tile_base
     )
     report.check(
         java_security,
         "companion local-root bridge boundary",
-        "fixed local assets, blocked network/file/content access, strict callback and two fast-feedback tile bridges",
+        "fixed local assets, blocked network/file/content access, strict callback, bounded HyperOS haptics and two fast-feedback tile bridges",
         "companion WebView or tile bridge security contract is incomplete",
     )
 
@@ -1113,7 +1397,7 @@ def check_companion(root: Path, report: Report) -> None:
         and any(pause_slash in path for path in game_icon_paths["on"])
         and not any(pause_slash in path for path in game_icon_paths["off"]),
         "game tile reference icon geometry",
-        "simple dual-grip controller, disjoint note/buttons/haptics and enabled-state pause slash",
+        "simple dual-grip controller, disjoint note/buttons/haptics, stock-policy slash and background-haptic no-slash state",
         f"on={game_icon_paths['on']!r} off={game_icon_paths['off']!r}",
     )
     report.check(
@@ -1128,7 +1412,7 @@ def check_companion(root: Path, report: Report) -> None:
     uninstall_script = (root / "uninstall.sh").read_text(encoding="utf-8")
     installer_script = (root / "customize.sh").read_text(encoding="utf-8")
     lifecycle_ok = (
-        "COMPANION_VERSION_CODE=1561" in service_script
+        "COMPANION_VERSION_CODE=1571" in service_script
         and "ensure_companion_installed()" in service_script
         and "ensure_companion_installed &" in service_script
         and 'pm install --user 0 "$COMPANION_APK"' in service_script
@@ -1161,14 +1445,24 @@ def check_companion(root: Path, report: Report) -> None:
             names = apk.namelist()
             required = {
                 "AndroidManifest.xml", "classes.dex", "resources.arsc",
-                "assets/index.html", "assets/coolapk.png",
+                "assets/index.html", "assets/coolapk.webp",
+                "assets/donate-wechat-pay.webp", "assets/donate-wechat.webp",
+                "assets/donate-alipay.webp", "assets/payment-wechat-pay.webp",
+                "assets/payment-wechat-reward.webp", "assets/payment-alipay.webp",
             }
             apk_ok = (
                 len(names) == len(set(names))
                 and required <= set(names)
                 and apk.testzip() is None
                 and apk.read("assets/index.html") == (root / "webroot/index.html").read_bytes()
-                and apk.read("assets/coolapk.png") == (root / "webroot/coolapk.png").read_bytes()
+                and apk.read("assets/coolapk.webp") == (root / "webroot/coolapk.webp").read_bytes()
+                and all(
+                    apk.read(f"assets/{asset}") == (root / f"webroot/{asset}").read_bytes()
+                    for asset in (
+                        "donate-wechat-pay.webp", "donate-wechat.webp", "donate-alipay.webp",
+                        "payment-wechat-pay.webp", "payment-wechat-reward.webp", "payment-alipay.webp",
+                    )
+                )
                 and 0xF05368C0 in ids
             )
     except (OSError, ValueError, zipfile.BadZipFile, struct.error) as exc:
@@ -1200,8 +1494,8 @@ def check_lock_protocol(root: Path, report: Report, use_adb: bool) -> None:
         "dual-factor lock ownership contract is incomplete",
     )
     report.check(
-        "cfg_proc_start()" in webui and 'cfg_token="$$ $cfg_start"' in webui and
-        '[ "$cfg_owner" = "$cfg_token" ]' in webui,
+        "commit-queue" in webui and "commit_config_and_queue()" in applier and
+        'commit_config_abort()' in applier and 'commit_restore_one()' in applier,
         "WebUI config lock ownership contract",
         "embedded writer uses the same pid+starttime owner token",
         "WebUI config writer does not match the native lock protocol",
@@ -1427,6 +1721,7 @@ base=__CONTROL_TEST_BASE__/a2h_controls_$$
 CFG_DIR="$base/config"
 CFG_STATE="$CFG_DIR/state"
 CFG_GAME_POLICY="$CFG_DIR/game_auto_pause"
+CFG_NORMALIZED_FINGERPRINT="$CFG_DIR/.normalized_fingerprint"
 lock_calls=0
 fail_policy_commit=0
 
@@ -1434,6 +1729,9 @@ fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
 log() { :; }
 acquire_config_lock() { lock_calls=$((lock_calls + 1)); return 0; }
 release_config_lock() { return 0; }
+normalized_fingerprint_matches() { return 1; }
+compute_table_fingerprint() { return 1; }
+record_normalized_fingerprint() { return 0; }
 commit_tmp() {
   src=$1
   dest=$2
@@ -1521,6 +1819,7 @@ TRIGGER_FAIL="$base/trigger.fail"
 CURRENT_MODE=disabled
 CURRENT_GAME_AUTO_PAUSE=enabled
 CURRENT_SNAPSHOT=snapshot-1
+CURRENT_RAW_SIGNATURE=raw-1
 CURRENT_REVISION=1
 ACTIVE_COUNT=6
 A2H_APPLY_ATTEMPTS=2
@@ -1532,6 +1831,7 @@ log() { printf '%s\n' "$*" >> "$ACTION_LOG"; }
 acquire_apply_lock() { return 0; }
 release_apply_lock() { release_calls=$((release_calls + 1)); return 0; }
 prepare_config() { return 0; }
+raw_config_matches() { return 0; }
 apply_current() { apply_calls=$((apply_calls + 1)); return 0; }
 sleep() { :; }
 cleanup() { rm -rf "$base"; }
@@ -1797,8 +2097,10 @@ PATCHER_CALL_LOG="$base/patcher.calls"
 MAIN_LOG="$base/main.log"
 TEST_LOG="$base/test.log"
 TMP_PKGS="$base/packages.txt"
-APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
+APPLIED_GAME_POLICY="$CFG_DIR/applied_game_auto_pause"
 APPLIED_REVISION="$CFG_DIR/applied_revision"
+APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
+CURRENT_RAW_SIGNATURE=raw-1
 CURRENT_MODE=enabled
 CURRENT_GAME_AUTO_PAUSE=enabled
 CURRENT_REVISION=17
@@ -1816,9 +2118,11 @@ log() { printf '%s\n' "$*" >> "$TEST_LOG"; }
 log_slots() { :; }
 resolve_hal() { HAL_PID=4242; HAL_BASE=; return 0; }
 patcher_supports_packages() { return 0; }
+patcher_apply_final_verified() { return 1; }
 acquire_apply_lock() { return 0; }
 release_apply_lock() { release_calls=$((release_calls + 1)); return 0; }
 prepare_config() { prepare_calls=$((prepare_calls + 1)); return 0; }
+raw_config_matches() { return 0; }
 mv() {
   if [ "$#" = 3 ] && [ "$1" = -f ] && [ "$3" = "$LAST_PID_FILE" ]; then
     last_pid_failure_calls=$((last_pid_failure_calls + 1))
@@ -1954,10 +2258,15 @@ def check_postfs_runtime_cleanup(root: Path, report: Report, use_adb: bool) -> N
         "cleanup_stale_runtime /data/local/tmp",
         'cleanup_stale_runtime "$runtime_test_dir"',
     )
+    postfs = postfs.replace(
+        "rm -rf /data/local/tmp/a2h_hook_runtime",
+        'rm -rf "$audio_runtime_test_dir"',
+    )
     harness = r'''
 set -eu
 base=__POSTFS_TEST_BASE__/a2h_postfs_cleanup_$$
 runtime_test_dir="$base/runtime"
+audio_runtime_test_dir="$base/audio-runtime"
 BOOT_STATE=0
 
 fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
@@ -1973,11 +2282,13 @@ cleanup() { rm -rf "$base"; }
 trap cleanup 0 1 2 15
 
 seed_runtime() {
-  rm -rf "$runtime_test_dir"
+  rm -rf "$runtime_test_dir" "$audio_runtime_test_dir"
   mkdir -p \
     "$runtime_test_dir/a2h_apply.lock" \
     "$runtime_test_dir/a2h_apply.worker" \
     "$runtime_test_dir/a2h_config.lock"
+  mkdir -p "$audio_runtime_test_dir/cooldown"
+  printf 'trigger\n' > "$audio_runtime_test_dir/a2h_trigger"
   printf 'pending\n' > "$runtime_test_dir/a2h_apply.pending"
   printf 'pending-tmp\n' > "$runtime_test_dir/a2h_apply.pending.tmp.123"
   printf 'state\n' > "$runtime_test_dir/a2h_state"
@@ -1985,6 +2296,7 @@ seed_runtime() {
   printf 'packages\n' > "$runtime_test_dir/a2h_packages.txt"
   printf 'packages-tmp\n' > "$runtime_test_dir/.a2h_packages.123"
   printf 'event\n' > "$runtime_test_dir/a2h_config.changed"
+  printf 'wake\n' > "$runtime_test_dir/a2h_config.wake"
   printf 'owner\n' > "$runtime_test_dir/a2h_apply.worker/pid"
   printf 'keep\n' > "$runtime_test_dir/unrelated.keep"
 }
@@ -1994,13 +2306,17 @@ seed_runtime
 [ -f "$runtime_test_dir/unrelated.keep" ] || fail early-unrelated-removed
 [ "$(find "$runtime_test_dir" -mindepth 1 ! -name unrelated.keep | wc -l | tr -d ' ')" = 0 ] ||
   fail early-target-remains
+[ ! -e "$audio_runtime_test_dir" ] || fail early-audio-runtime-remains
 
 seed_runtime
 before=$(find "$runtime_test_dir" -mindepth 1 -print | sort | cksum)
+before_audio=$(find "$audio_runtime_test_dir" -mindepth 1 -print | sort | cksum)
 BOOT_STATE=1
 ''' + postfs + r'''
 after=$(find "$runtime_test_dir" -mindepth 1 -print | sort | cksum)
+after_audio=$(find "$audio_runtime_test_dir" -mindepth 1 -print | sort | cksum)
 [ "$after" = "$before" ] || fail completed-boot-mutated-runtime
+[ "$after_audio" = "$before_audio" ] || fail completed-boot-mutated-audio-runtime
 printf 'PASS post-fs-data runtime cleanup regression\n'
 '''
 
@@ -2029,6 +2345,335 @@ printf 'PASS post-fs-data runtime cleanup regression\n'
     )
 
 
+def check_config_wake_fifo(root: Path, report: Report, use_adb: bool) -> None:
+    service = (root / "service.sh").read_text(encoding="utf-8")
+    wake_functions = extract_function(
+        service, "prepare_config_wake_fifo() {", "\nstart_audio_watcher() {",
+    )
+    if not wake_functions:
+        report.add("FAIL", "config wake FIFO regression", "production wake functions not found")
+        return
+
+    harness = r'''
+set -eu
+base=__WAKE_TEST_BASE__/a2h_config_wake_$$
+CONFIG_WAKE_FIFO="$base/config.wake"
+config_inotify_enabled=1
+config_wake_ready=0
+pending_raw_signature=
+config_poll_grace_ticks=0
+watch_tick_seconds=1
+watch_health_ticks=2
+
+fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
+mkdir -p "$base"
+''' + wake_functions + r'''
+cleanup() {
+  stop_config_wake_fifo || true
+  rm -rf "$base"
+}
+trap cleanup 0 1 2 15
+
+prepare_config_wake_fifo || fail prepare
+[ -p "$CONFIG_WAKE_FIFO" ] || fail not-fifo
+[ "$config_wake_ready" = 1 ] || fail not-ready
+
+( sleep 1; printf 'config\n' > "$CONFIG_WAKE_FIFO" ) &
+writer=$!
+wait_for_watch_tick
+wait "$writer"
+[ "$watch_elapsed_ticks" = 1 ] || fail event-elapsed
+[ "$watch_wake_event" = config ] || fail event-payload
+
+wait_for_watch_tick
+[ "$watch_elapsed_ticks" = 2 ] || fail timeout-elapsed
+stop_config_wake_fifo
+[ ! -e "$CONFIG_WAKE_FIFO" ] || fail cleanup
+printf 'PASS config wake FIFO regression\n'
+'''
+
+    if use_adb:
+        adb = shutil.which("adb")
+        if not adb:
+            report.add("FAIL", "config wake FIFO regression", "adb requested but not found")
+            return
+        command = [adb, "shell", "su", "-c", "sh -s"]
+        test_base = "/data/local/tmp"
+    else:
+        # The production helper uses `read -t`; dash accepts `read` but not this
+        # timeout option, so the host harness must run under bash explicitly.
+        shell = locate_bash_shell()
+        if not shell:
+            report.gap("config wake FIFO regression", "Bash with read -t is required")
+            return
+        command = [shell, "-s"]
+        test_base = "${TMPDIR:-/tmp}"
+
+    payload = harness.replace("__WAKE_TEST_BASE__", test_base).encode("utf-8")
+    rc, output = run_command(command, root, payload)
+    report.check(
+        rc == 0 and "PASS config wake FIFO regression" in output,
+        "config wake FIFO regression",
+        "event wake, health timeout, FIFO type and cleanup passed",
+        output.strip() or f"harness exited {rc}",
+    )
+
+
+def check_audio_uid_watcher(root: Path, report: Report) -> None:
+    shell = locate_posix_shell()
+    if not shell:
+        report.gap("audio UID watcher semantics", "POSIX sh is required")
+        return
+
+    watcher = (root / "bin/a2h_audio_watch").resolve()
+
+    def shell_path(path: Path) -> str:
+        return path.resolve().as_posix()
+
+    def event(package: str, name: str = "audio_track_message",
+              scenario: str = "playback") -> str:
+        return (
+            'TransferEvent event = {"name":"' + name
+            + '","audio_event":{"app_name":"' + package
+            + '", "scenario":"' + scenario + '"}}\n'
+        )
+
+    def spaced_event(package: str) -> str:
+        return (
+            'TransferEvent event = {"name" : "audio_track_message",'
+            '"audio_event" : {"app_name" : "' + package
+            + '", "scenario" : "playback"}}\n'
+        )
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="a2h-audio-watch-") as temporary:
+            base = Path(temporary)
+            module = base / "module"
+            config = module / "config"
+            bin_dir = module / "bin"
+            config.mkdir(parents=True)
+            bin_dir.mkdir(parents=True)
+            trigger = bin_dir / "a2h_trigger"
+            trigger.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8", newline="\n")
+            trigger.chmod(0o755)
+            packages_list = base / "packages.list"
+            long_package = "com.example." + "x" * 70
+            packages_list.write_text(
+                "com.example.globalgame 10420 0 /data/user/0/com.example.globalgame\n"
+                "org.sample.rhythm 10421 0 /data/user/0/org.sample.rhythm\n"
+                "com.android.systemui 1000 0 /data/user/0/com.android.systemui\n"
+                + f"{long_package} 10422 0 /data/user/0/{long_package}\n",
+                encoding="utf-8", newline="\n",
+            )
+            su_log = base / "su.calls"
+            watcher_log = base / "watch.log"
+            fake_su = base / "fake-su"
+            fake_su.write_text(
+                "#!/bin/sh\n"
+                "printf '%s\\n' \"$*\" >> \"$A2H_TEST_SU_LOG\"\n"
+                "set -- $3\n"
+                "if [ \"${A2H_TEST_SU_RC:-0}\" -eq 0 ]; then\n"
+                "  printf '4242 ready\\n' > \"$4\"\n"
+                "  sleep 0.1\n"
+                "  exit 0\n"
+                "fi\n"
+                "sleep 0.1\n"
+                "exit \"$A2H_TEST_SU_RC\"\n",
+                encoding="utf-8", newline="\n",
+            )
+            fake_su.chmod(0o755)
+
+            def run_case(name: str, mode: str, lines: str,
+                         enabled_custom: bool = False,
+                         su_rc: int = 0,
+                         cooldown_seconds: int = 30) -> tuple[int, str, str]:
+                packages = [""] * 10
+                states = ["0"] * 10
+                packages[6] = "org.sample.rhythm"
+                if enabled_custom:
+                    states[6] = "1"
+                (config / "state").write_text(mode + "\n", encoding="utf-8", newline="\n")
+                (config / "packages.txt").write_text(
+                    "\n".join(packages) + "\n", encoding="utf-8", newline="\n",
+                )
+                (config / "package_states").write_text(
+                    "\n".join(states) + "\n", encoding="utf-8", newline="\n",
+                )
+                event_file = base / f"{name}.events"
+                event_file.write_text(lines, encoding="utf-8", newline="\n")
+                su_log.write_text("", encoding="utf-8", newline="\n")
+                watcher_log.write_text("", encoding="utf-8", newline="\n")
+                runtime = base / f"runtime-{name}"
+                environment = os.environ.copy()
+                environment.update({
+                    "A2H_MODDIR": shell_path(module),
+                    "A2H_CONFIG_DIR": shell_path(config),
+                    "A2H_PACKAGES_LIST": shell_path(packages_list),
+                    "A2H_TRIGGER_SOURCE": shell_path(trigger),
+                    "A2H_RUNTIME_DIR": shell_path(runtime),
+                    "A2H_LOG_FILE": shell_path(watcher_log),
+                    "A2H_SU_BIN": shell_path(fake_su),
+                    "A2H_SKIP_CHOWN": "1",
+                    "A2H_COOLDOWN_SECONDS": str(cooldown_seconds),
+                    "A2H_TEST_SU_LOG": shell_path(su_log),
+                    "A2H_TEST_SU_RC": str(su_rc),
+                })
+                completed = subprocess.run(
+                    [shell, shell_path(watcher), "--file", shell_path(event_file)],
+                    cwd=root,
+                    env=environment,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    check=False,
+                )
+                return (
+                    completed.returncode,
+                    su_log.read_text(encoding="utf-8"),
+                    watcher_log.read_text(encoding="utf-8"),
+                )
+
+            global_rc, global_calls, _ = run_case(
+                "global", "enabled", event("com.example.globalgame") * 2,
+            )
+            custom_rc, custom_calls, _ = run_case(
+                "custom-enabled", "disabled", event("org.sample.rhythm"), True,
+            )
+            disabled_rc, disabled_calls, _ = run_case(
+                "custom-disabled", "disabled", event("org.sample.rhythm"), False,
+            )
+            rejected_rc, rejected_calls, rejected_log = run_case(
+                "rejected", "enabled",
+                event("bad/package")
+                + event("")
+                + event("com.example.globalgame", scenario="capture")
+                + event("com.example.globalgame", name="music_playback")
+                + event("com.android.systemui")
+                + event("com.android.systemui")
+                + event("net.missing.game"),
+                cooldown_seconds=0,
+            )
+            failed_rc, failed_calls, failed_log = run_case(
+                "trigger-failure", "enabled", event("com.example.globalgame"),
+                su_rc=17,
+            )
+            spaced_rc, spaced_calls, _ = run_case(
+                "spaced-json", "enabled", spaced_event("com.example.globalgame"),
+            )
+            long_rc, long_calls, _ = run_case(
+                "long-package", "enabled", event(long_package),
+            )
+
+            global_lines = global_calls.splitlines()
+            custom_lines = custom_calls.splitlines()
+            failed_lines = failed_calls.splitlines()
+            spaced_lines = spaced_calls.splitlines()
+            long_lines = long_calls.splitlines()
+            ok = (
+                global_rc == custom_rc == disabled_rc == rejected_rc == failed_rc
+                == spaced_rc == long_rc == 0
+                and len(global_lines) == 1
+                and global_lines[0].startswith("10420 -c ")
+                and " --lease " in global_lines[0]
+                and "/a2h_trigger --lease " in global_lines[0]
+                and len(custom_lines) == 1
+                and custom_lines[0].startswith("10421 -c ")
+                and not disabled_calls
+                and not rejected_calls
+                and rejected_log.count("reason=core-system-uid") == 1
+                and len(failed_lines) == 1
+                and "rc=17" in failed_log
+                and len(spaced_lines) == 1
+                and spaced_lines[0].startswith("10420 -c ")
+                and len(long_lines) == 1
+                and long_lines[0].startswith("10422 -c ")
+            )
+            detail = (
+                f"rcs={global_rc}/{custom_rc}/{disabled_rc}/{rejected_rc}/{failed_rc}/"
+                f"{spaced_rc}/{long_rc} "
+                f"global={global_lines!r} custom={custom_lines!r} "
+                f"disabled={disabled_calls!r} rejected={rejected_calls!r} "
+                f"rejected_log={rejected_log.strip()!r} "
+                f"failed={failed_lines!r} spaced={spaced_lines!r} long={long_lines!r} "
+                f"log={failed_log.strip()!r}"
+            )
+            report.check(
+                ok,
+                "audio UID watcher semantics",
+                "global arbitrary/long app package, cached core-system UID rejection, spaced JSON fallback, enabled exact slot, UID mapping, cooldown and failure rc all verified",
+                detail,
+            )
+    except (OSError, UnicodeError) as exc:
+        report.add("FAIL", "audio UID watcher semantics", str(exc))
+
+
+def check_audio_policy_lease(root: Path, report: Report, use_adb: bool) -> None:
+    watcher_source = (root / "bin/a2h_audio_watch").read_text(encoding="utf-8")
+    cleanup_block = extract_function(watcher_source, "cleanup() {", "watch_events() {")
+    cleanup_contract = (
+        bool(cleanup_block)
+        and "while [ \"$cleanup_grace\" -lt 25 ]" in cleanup_block
+        and "sleep 0.02" in cleanup_block
+        and cleanup_block.index('rm -f "$lease_token"')
+        < cleanup_block.index('while [ "$cleanup_grace" -lt 25 ]')
+        < cleanup_block.index('kill "$lease_read_pid"')
+    )
+    report.check(
+        cleanup_contract,
+        "audio lease graceful shutdown contract",
+        "token-first shared grace window precedes PID/starttime escalation",
+        "watcher cleanup can still terminate a lease before its normal stream close",
+    )
+    if not use_adb:
+        report.gap("audio policy lease lifecycle", "Android /proc and FIFO semantics require --adb")
+        return
+    adb = shutil.which("adb")
+    if not adb:
+        report.add("FAIL", "audio policy lease lifecycle", "adb requested but not found")
+        return
+    harness = (root / "tests/audio_policy_lease_harness.sh").resolve()
+    watcher = (root / "bin/a2h_audio_watch").resolve()
+    remote_harness = "/data/local/tmp/a2h_stage24_test_harness.sh"
+    remote_watcher = "/data/local/tmp/a2h_stage24_test_watcher.sh"
+    remote_base = "/data/local/tmp"
+    outputs: list[str] = []
+    rc = 1
+    try:
+        for local, remote in ((harness, remote_harness), (watcher, remote_watcher)):
+            pushed = subprocess.run(
+                [adb, "push", str(local), remote], cwd=root,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+            )
+            outputs.append(pushed.stdout.decode("utf-8", errors="replace"))
+            if pushed.returncode != 0:
+                raise OSError(f"adb push failed for {local.name}")
+        command = (
+            f"A2H_TEST_BASE={remote_base} A2H_TEST_SHELL=/system/bin/sh "
+            f"sh {remote_harness} {remote_watcher}"
+        )
+        completed = subprocess.run(
+            [adb, "shell", "su", "-c", command], cwd=root,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+        )
+        rc = completed.returncode
+        outputs.append(completed.stdout.decode("utf-8", errors="replace"))
+    except OSError as exc:
+        outputs.append(str(exc))
+    finally:
+        subprocess.run(
+            [adb, "shell", "su", "-c",
+             f"rm -f {remote_harness} {remote_watcher}"],
+            cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    output = "".join(outputs)
+    report.check(
+        rc == 0 and "PASS audio policy lease lifecycle" in output,
+        "audio policy lease lifecycle",
+        "fallback promotion, self-session suppression, order-independent start/stop parsing, multi-port release and cleanup passed",
+        output.strip() or f"harness exited {rc}",
+    )
+
+
 def check_webui_writer_transaction(root: Path, report: Report, use_adb: bool) -> None:
     node = shutil.which("node")
     if not node:
@@ -2039,7 +2684,7 @@ def check_webui_writer_transaction(root: Path, report: Report, use_adb: bool) ->
     normalizer = extract_function(webui, "function normalizeSlot", "function cloneSlots")
     quoter = extract_function(webui, "function shellQuote", "function snapshotConfig")
     writer = extract_function(
-        webui, "function buildWritePackagesCmd(snapshot,readable){", "function buildCommand("
+        webui, "function buildCommitCommand(state,snapshot,writePackages){", "function buildCommand("
     )
     builder = extract_function(webui, "function buildCommand(", "function findExecBridge")
     if not normalizer or not quoter or not writer or not builder:
@@ -2057,9 +2702,9 @@ def check_webui_writer_transaction(root: Path, report: Report, use_adb: bool) ->
             "'use strict';",
             normalizer,
             quoter,
-            writer,
+             writer,
             f"const snapshot={json.dumps(snapshot, separators=(',', ':'))};",
-            "process.stdout.write(buildWritePackagesCmd(snapshot,true));",
+             "process.stdout.write(buildCommitCommand('disabled',snapshot,true));",
         )
     )
     node_rc, writer_command = run_command([node, "-e", javascript], root)
@@ -2072,7 +2717,7 @@ def check_webui_writer_transaction(root: Path, report: Report, use_adb: bool) ->
             "'use strict';",
             normalizer,
             quoter,
-            writer,
+             writer,
             builder,
             f"const snapshot={json.dumps(snapshot, separators=(',', ':'))};",
             "process.stdout.write(buildCommand('disabled',snapshot,true));",
@@ -2083,74 +2728,152 @@ def check_webui_writer_transaction(root: Path, report: Report, use_adb: bool) ->
         report.add("FAIL", "WebUI writer/apply transaction regression", combined_command.strip() or f"node rc={node_rc}")
         return
 
-    writer_command = writer_command.replace(
-        "cfg=/data/adb/modules/a2h_hook/config", 'cfg="$base/config"'
-    ).replace(
-        "cfg_lock=/data/local/tmp/a2h_config.lock", 'cfg_lock="$base/lock"'
-    ).replace(
-        'mkdir -p "$cfg" /data/local/tmp', 'mkdir -p "$cfg" "$base/runtime"'
+    expected_args = [
+        "disabled",
+        "enabled",
+        "4242",
+        *snapshot["packages"],
+        *("1" if enabled else "0" for enabled in snapshot["enabled"]),
+    ]
+    try:
+        writer_tokens = shlex.split(writer_command, posix=True)
+        combined_lines = [line for line in combined_command.splitlines() if not line.startswith("#")]
+        combined_tokens = shlex.split("\n".join(combined_lines), posix=True)
+    except ValueError as exc:
+        report.add("FAIL", "WebUI writer/apply transaction regression", f"invalid shell quoting: {exc}")
+        return
+    expected_prefix = ["sh", "/data/adb/modules/a2h_hook/bin/a2h_apply", "commit-queue"]
+    if (
+        len(expected_args) != 23
+        or writer_tokens[:3] != expected_prefix
+        or combined_tokens[:3] != expected_prefix
+        or writer_tokens[3:] != expected_args
+        or combined_tokens[3:] != expected_args
+    ):
+        report.add(
+            "FAIL",
+            "WebUI writer/apply transaction regression",
+            f"writer={writer_tokens!r} combined={combined_tokens!r} expected_args={expected_args!r}",
+        )
+        return
+
+    applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
+    validator = extract_function(applier, "valid_package() {", "restore_default_config_unlocked() {")
+    transaction = extract_function(applier, "commit_config_abort() {", "set_controls() {")
+    if not validator or not transaction:
+        report.add("FAIL", "WebUI writer/apply transaction regression", "production transaction functions not found")
+        return
+
+    production_call = writer_command.replace(
+        "sh /data/adb/modules/a2h_hook/bin/a2h_apply commit-queue", "commit_config_and_queue", 1
     )
-    combined_command = combined_command.replace(
-        "cfg=/data/adb/modules/a2h_hook/config", 'cfg="$base/config"'
-    ).replace(
-        "cfg_lock=/data/local/tmp/a2h_config.lock", 'cfg_lock="$base/lock"'
-    ).replace(
-        'mkdir -p "$cfg" /data/local/tmp', 'mkdir -p "$cfg" "$base/runtime"'
-    ).replace(
-        "sh /data/adb/modules/a2h_hook/bin/a2h_apply queue", 'sh "$base/a2h_apply" queue'
+    combined_call = combined_command.replace(
+        "sh /data/adb/modules/a2h_hook/bin/a2h_apply commit-queue", "commit_config_and_queue", 1
     )
-    harness = r'''
+    harness = validator + transaction + r'''
 set -u
 base=__WRITER_TEST_BASE__/a2h_webui_writer_$$
+CFG_DIR="$base/config"
+CFG_STATE="$CFG_DIR/state"
+CFG_GAME_POLICY="$CFG_DIR/game_auto_pause"
+CFG_PKGS="$CFG_DIR/packages.txt"
+CFG_STATES="$CFG_DIR/package_states"
+CFG_GENERATION="$CFG_DIR/config_generation"
+CFG_NORMALIZED_FINGERPRINT="$CFG_DIR/.normalized_fingerprint"
+CONFIG_LOCK="$base/config.lock"
+QUEUE_CALLED="$base/queue_called"
+LOCK_ATTEMPTS="$base/lock_attempts"
+fail_mv=0
+mv_count=0
+
+fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
 cleanup() { rm -rf "$base"; }
 trap cleanup 0 1 2 15
-mkdir -p "$base/config"
-printf 'old packages\n' > "$base/config/packages.txt"
-printf 'old states\n' > "$base/config/package_states"
-printf '41\n' > "$base/config/config_generation"
-old_packages=$(cksum < "$base/config/packages.txt")
-old_states=$(cksum < "$base/config/package_states")
-old_generation=$(cksum < "$base/config/config_generation")
 
-writer_mv_count=0
-A2H_FAIL_MV=2
+acquire_config_lock() {
+  printf '1\n' >> "$LOCK_ATTEMPTS"
+  mkdir "$CONFIG_LOCK" 2>/dev/null
+}
+release_config_lock() { rmdir "$CONFIG_LOCK" 2>/dev/null; }
+queue_changed_fast() { printf 'queued\n' >> "$QUEUE_CALLED"; }
+compute_config_value_signature() {
+  CURRENT_CONFIG_VALUE_SIGNATURE=fixture-signature
+}
+record_normalized_fingerprint() {
+  printf 'fixture\n' > "$CFG_NORMALIZED_FINGERPRINT"
+}
 mv() {
-  writer_mv_count=$((writer_mv_count + 1))
-  [ "$writer_mv_count" != "$A2H_FAIL_MV" ] || return 70
+  mv_count=$((mv_count + 1))
+  [ "$fail_mv" -eq 0 ] || [ "$mv_count" -ne "$fail_mv" ] || return 70
   command mv "$@"
 }
-__WRITER_COMMAND__
-writer_rc=$?
-[ "$writer_rc" -ne 0 ] || { printf 'FAIL: injected writer failure returned success\n'; exit 1; }
-[ "$(cksum < "$base/config/packages.txt")" = "$old_packages" ] || { printf 'FAIL: packages rollback\n'; exit 1; }
-[ "$(cksum < "$base/config/package_states")" = "$old_states" ] || { printf 'FAIL: states rollback\n'; exit 1; }
-[ "$(cksum < "$base/config/config_generation")" = "$old_generation" ] || { printf 'FAIL: generation rollback\n'; exit 1; }
-[ ! -e "$base/lock" ] || { printf 'FAIL: writer lock leaked after rollback\n'; exit 1; }
 
-printf '%s\n' '#!/system/bin/sh' 'printf "%s\n" "$*" > "$A2H_TEST_BASE/queue_called"' > "$base/a2h_apply"
-export A2H_TEST_BASE="$base"
-rm -f "$base/queue_called"
-writer_mv_count=0
-A2H_FAIL_MV=2
-__COMBINED_COMMAND__
-combined_rc=$?
-[ "$combined_rc" -ne 0 ] || { printf 'FAIL: combined writer failure returned success\n'; exit 1; }
-[ ! -e "$base/queue_called" ] || { printf 'FAIL: queue ran after writer rollback\n'; exit 1; }
-[ "$(cksum < "$base/config/packages.txt")" = "$old_packages" ] || { printf 'FAIL: combined packages rollback\n'; exit 1; }
-[ "$(cksum < "$base/config/package_states")" = "$old_states" ] || { printf 'FAIL: combined states rollback\n'; exit 1; }
-[ "$(cksum < "$base/config/config_generation")" = "$old_generation" ] || { printf 'FAIL: combined generation rollback\n'; exit 1; }
-[ ! -e "$base/lock" ] || { printf 'FAIL: combined writer lock leaked after rollback\n'; exit 1; }
+seed_old() {
+  rm -rf "$CFG_DIR" "$CONFIG_LOCK"
+  rm -f "$QUEUE_CALLED" "$LOCK_ATTEMPTS"
+  mkdir -p "$CFG_DIR"
+  printf 'old-mode\n' > "$CFG_STATE"
+  printf 'old-policy\n' > "$CFG_GAME_POLICY"
+  printf 'old packages\n' > "$CFG_PKGS"
+  printf 'old states\n' > "$CFG_STATES"
+  printf '41\n' > "$CFG_GENERATION"
+}
 
-writer_mv_count=0
-A2H_FAIL_MV=0
-__COMBINED_COMMAND__
-[ "$?" -eq 0 ] || { printf 'FAIL: combined writer success path\n'; exit 1; }
-[ "$(cat "$base/queue_called")" = "queue disabled enabled" ] || { printf 'FAIL: queue controls missing after writer commit\n'; exit 1; }
-[ "$(wc -l < "$base/config/packages.txt" | tr -d ' ')" = 10 ] || { printf 'FAIL: package line count\n'; exit 1; }
-[ "$(sed -n '8p' "$base/config/packages.txt")" = com.example.slot8 ] || { printf 'FAIL: slot 8 package\n'; exit 1; }
-[ "$(sed -n '8p' "$base/config/package_states")" = 1 ] || { printf 'FAIL: slot 8 state\n'; exit 1; }
-[ "$(cat "$base/config/config_generation")" = 4242 ] || { printf 'FAIL: generation commit\n'; exit 1; }
-[ ! -e "$base/lock" ] || { printf 'FAIL: writer lock leaked after commit\n'; exit 1; }
+assert_old() {
+  label=$1
+  [ "$(cat "$CFG_STATE")" = old-mode ] || fail "$label-mode-rollback"
+  [ "$(cat "$CFG_GAME_POLICY")" = old-policy ] || fail "$label-policy-rollback"
+  [ "$(cat "$CFG_PKGS")" = 'old packages' ] || fail "$label-packages-rollback"
+  [ "$(cat "$CFG_STATES")" = 'old states' ] || fail "$label-states-rollback"
+  [ "$(cat "$CFG_GENERATION")" = 41 ] || fail "$label-generation-rollback"
+  [ ! -e "$CONFIG_LOCK" ] || fail "$label-lock-leaked"
+  [ -z "$(find "$CFG_DIR" -type f -name '.*.[0-9]*' -print -quit 2>/dev/null)" ] || fail "$label-temp-leaked"
+  [ ! -e "$QUEUE_CALLED" ] || fail "$label-queue-ran"
+}
+
+seed_old
+if commit_config_and_queue invalid disabled 4242 a b c d e f g h i j 1 1 1 1 1 1 1 1 1 1; then
+  fail invalid-mode-accepted
+fi
+[ ! -e "$LOCK_ATTEMPTS" ] || fail invalid-mode-acquired-lock
+assert_old invalid-mode
+
+seed_old
+if commit_config_and_queue disabled enabled 4242 a b c d e f g h i j 1 1 1 1 1 1 1 1 1; then
+  fail invalid-count-accepted
+fi
+[ ! -e "$LOCK_ATTEMPTS" ] || fail invalid-count-acquired-lock
+assert_old invalid-count
+
+seed_old
+if commit_config_and_queue disabled enabled 4242 a b c d e f g h i j 1 1 1 1 1 broken 1 1 1 1; then
+  fail invalid-state-accepted
+fi
+[ ! -e "$LOCK_ATTEMPTS" ] || fail invalid-state-acquired-lock
+assert_old invalid-state
+
+fault=1
+while [ "$fault" -le 5 ]; do
+  seed_old
+  if ( fail_mv=$fault; mv_count=0; __PRODUCTION_CALL__ ); then
+    fail "commit-$fault-failure-returned-success"
+  fi
+  assert_old "commit-$fault"
+  fault=$((fault + 1))
+done
+
+seed_old
+( fail_mv=0; mv_count=0; __COMBINED_CALL__ ) || fail success-command
+[ "$(cat "$CFG_STATE")" = disabled ] || fail success-mode
+[ "$(cat "$CFG_GAME_POLICY")" = enabled ] || fail success-policy
+[ "$(wc -l < "$CFG_PKGS" | tr -d ' ')" = 10 ] || fail success-package-count
+[ "$(sed -n '8p' "$CFG_PKGS")" = com.example.slot8 ] || fail success-slot8-package
+[ "$(wc -l < "$CFG_STATES" | tr -d ' ')" = 10 ] || fail success-state-count
+[ "$(sed -n '8p' "$CFG_STATES")" = 1 ] || fail success-slot8-state
+[ "$(cat "$CFG_GENERATION")" = 4242 ] || fail success-generation
+[ ! -e "$CONFIG_LOCK" ] || fail success-lock-leaked
+[ -z "$(find "$CFG_DIR" -type f -name '.*.[0-9]*' -print -quit 2>/dev/null)" ] || fail success-temp-leaked
+[ "$(wc -l < "$QUEUE_CALLED" | tr -d ' ')" = 1 ] || fail success-queue-count
 printf 'PASS WebUI writer/apply transaction regression\n'
 '''
 
@@ -2162,22 +2885,144 @@ printf 'PASS WebUI writer/apply transaction regression\n'
         command = [adb, "shell", "sh", "-s"]
         test_base = "/data/local/tmp"
     else:
-        shell = shutil.which("sh")
+        shell = locate_posix_shell()
         if not shell:
             report.gap("WebUI writer transaction regression", "rerun with --adb or on a POSIX host")
             return
         command = [shell, "-s"]
         test_base = "${TMPDIR:-/tmp}"
 
-    payload = harness.replace("__WRITER_TEST_BASE__", test_base).replace(
-        "__WRITER_COMMAND__", writer_command
-    ).replace("__COMBINED_COMMAND__", combined_command).encode("utf-8")
+    payload = (
+        harness.replace("__WRITER_TEST_BASE__", test_base)
+        .replace("__PRODUCTION_CALL__", production_call)
+        .replace("__COMBINED_CALL__", combined_call)
+        .encode("utf-8")
+    )
     rc, output = run_command(command, root, payload)
     report.check(
         rc == 0 and "PASS WebUI writer/apply transaction regression" in output,
         "WebUI writer/apply transaction regression",
-        "production writer rolls back partial commits, gates queue on success, and commits all three files",
+        "23 ordered arguments, validation-before-lock, five-file rollback/cleanup, and success-only queue passed",
         output.strip(),
+    )
+
+
+def check_apply_capability_runtime(root: Path, report: Report, use_adb: bool) -> None:
+    applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
+    capability_functions = extract_function(
+        applier, "probe_patcher_capabilities() {", "apply_current() {"
+    )
+    apply_current = extract_function(
+        applier, "apply_current() {", "refresh_policy_state() {"
+    )
+    if not capability_functions or not apply_current:
+        report.add(
+            "FAIL",
+            "native apply capability runtime regression",
+            "production capability or apply function could not be extracted",
+        )
+        return
+
+    harness = capability_functions + apply_current + r'''
+set -eu
+base=__CAPABILITY_TEST_BASE__/a2h_capability_$$
+CFG_DIR="$base/config"
+PATCHER_SUPPORT_MARKER="$CFG_DIR/.patcher_packages_support"
+CALLS="$base/calls"
+MODE_FILE="$base/mode"
+TMP_PKGS="$base/packages"
+LAST_PID_FILE="$base/last_pid"
+MAIN_LOG="$base/main.log"
+HAL_PID=123
+HAL_BASE=
+CURRENT_GAME_AUTO_PAUSE=enabled
+CURRENT_REVISION=7
+CURRENT_SNAPSHOT=fixture
+ACTIVE_COUNT=6
+PATCHER=patcher_stub
+
+fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
+cleanup() { rm -rf "$base"; }
+trap cleanup 0 1 2 15
+mkdir -p "$CFG_DIR"
+printf 'com.kugou.android\n' > "$TMP_PKGS"
+: > "$MAIN_LOG"
+
+log() { :; }
+log_slots() { :; }
+resolve_hal() { HAL_PID=123; HAL_BASE=; return 0; }
+write_value_atomic() {
+  atomic_path=$1
+  atomic_value=$2
+  printf '%s\n' "$atomic_value" > "$atomic_path"
+}
+patcher_stub() {
+  if [ "${1:-}" = --help ]; then
+    if [ "$(cat "$MODE_FILE")" = modern ]; then
+      printf '%s\n' 'Usage: a2h_patch --packages FILE capabilities: apply-final-verified'
+    else
+      printf '%s\n' 'Usage: a2h_patch legacy'
+    fi
+    return 0
+  fi
+  printf '%s\n' "$*" >> "$CALLS"
+  return 0
+}
+reset_case() {
+  printf '%s\n' "$1" > "$MODE_FILE"
+  : > "$CALLS"
+  rm -f "$PATCHER_SUPPORT_MARKER" "$LAST_PID_FILE"
+  PATCHER_SUPPORTS_PACKAGES=
+  PATCHER_APPLY_FINAL_VERIFIED=
+}
+
+reset_case modern
+CURRENT_MODE=enabled
+apply_current modern-global >/dev/null || fail modern-global-apply
+[ "$(wc -l < "$CALLS" | tr -d ' ')" = 1 ] || fail modern-global-call-count
+grep -q '^123 --game-auto-pause enabled$' "$CALLS" || fail modern-global-command
+grep -q -- '--check' "$CALLS" && fail modern-global-extra-check
+
+reset_case modern
+CURRENT_MODE=disabled
+apply_current modern-whitelist >/dev/null || fail modern-whitelist-apply
+[ "$(wc -l < "$CALLS" | tr -d ' ')" = 1 ] || fail modern-whitelist-call-count
+grep -q '^--disable 123 ' "$CALLS" || fail modern-whitelist-command
+grep -q -- '--check' "$CALLS" && fail modern-whitelist-extra-check
+
+reset_case legacy
+CURRENT_MODE=enabled
+apply_current legacy-global >/dev/null || fail legacy-global-apply
+[ "$(wc -l < "$CALLS" | tr -d ' ')" = 2 ] || fail legacy-global-call-count
+sed -n '2p' "$CALLS" | grep -q '^--check global 123 ' || fail legacy-global-check
+printf 'PASS native apply capability runtime regression\n'
+'''
+
+    if use_adb:
+        adb = shutil.which("adb")
+        if not adb:
+            report.add("FAIL", "native apply capability runtime regression", "adb requested but not found")
+            return
+        command = [adb, "shell", "sh", "-s"]
+        test_base = "/data/local/tmp"
+    else:
+        shell = locate_posix_shell()
+        if not shell:
+            report.gap(
+                "native apply capability runtime regression",
+                "rerun with --adb or on a POSIX host",
+            )
+            return
+        command = [shell, "-s"]
+        test_base = "${TMPDIR:-/tmp}"
+
+    payload = harness.replace("__CAPABILITY_TEST_BASE__", test_base).encode("utf-8")
+    rc, output = run_command(command, root, payload)
+    report.check(
+        rc == 0 and "PASS native apply capability runtime regression" in output,
+        "native apply capability runtime regression",
+        "modern patchers apply once; legacy patchers retain apply plus external check",
+        output.strip() or f"harness exited {rc}",
     )
 
 
@@ -2940,8 +3785,12 @@ def main() -> int:
     check_revision_metadata_repair(root, report, args.adb)
     check_last_pid_write_failure(root, report, args.adb)
     check_boot_last_pid_failure(root, report, args.adb)
+    check_config_wake_fifo(root, report, args.adb)
     check_postfs_runtime_cleanup(root, report, args.adb)
+    check_audio_uid_watcher(root, report)
+    check_audio_policy_lease(root, report, args.adb)
     check_webui_writer_transaction(root, report, args.adb)
+    check_apply_capability_runtime(root, report, args.adb)
     check_source_contracts(root, report)
     check_ndk(root, report, args.ndk)
     check_hal_fixtures(root, report, archive)

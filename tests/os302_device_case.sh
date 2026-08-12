@@ -2,7 +2,7 @@
 set -eu
 
 MODDIR=${A2H_MODULE_DIR:-/data/adb/modules/a2h_hook}
-EXPECTED_VERSION=${A2H_EXPECTED_VERSION:-v1.5.6-fix}
+EXPECTED_VERSION=${A2H_EXPECTED_VERSION:-v1.5.7-fix}
 CUSTOM_PACKAGE=${A2H_TEST_PACKAGE:-com.kugou.android.lite}
 HOTUPDATE_PACKAGE=${A2H_HOTUPDATE_PACKAGE:-com.ss.android.ugc.aweme.lite}
 HOTUPDATE_PACKAGE_2=${A2H_HOTUPDATE_PACKAGE_2:-com.example.a2h.hotupdate}

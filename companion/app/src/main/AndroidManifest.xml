@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.bbbomb0.a2hhook">
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <application
         android:allowBackup="false"
         android:label="A2HHook 音乐触感"
@@ -8,6 +10,8 @@
         android:theme="@style/Theme.A2HHook">
         <activity
             android:name=".WebUiActivity"
+            android:configChanges="uiMode"
+            android:enableOnBackInvokedCallback="true"
             android:excludeFromRecents="true"
             android:exported="true">
             <intent-filter>
@@ -34,7 +38,7 @@
             android:name=".A2HGameTileService"
             android:exported="true"
             android:icon="@drawable/ic_a2h_tile_game_on"
-            android:label="游戏时暂停音乐触感"
+            android:label="游戏时启动后台音乐触感"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <meta-data
                 android:name="android.service.quicksettings.TOGGLEABLE_TILE"

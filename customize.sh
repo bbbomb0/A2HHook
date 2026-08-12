@@ -55,6 +55,7 @@ done
 repair_backslash_entry "$MODDIR/webroot\\index.html"
 repair_backslash_entry "$MODDIR/bin\\a2h_patch"
 repair_backslash_entry "$MODDIR/bin\\a2h_trigger"
+repair_backslash_entry "$MODDIR/bin\\a2h_audio_watch"
 repair_backslash_entry "$MODDIR/bin\\a2h_inject"
 repair_backslash_entry "$MODDIR/config\\packages.txt"
 repair_backslash_entry "$MODDIR/config\\state"
@@ -253,6 +254,7 @@ rm -f "$baseline_tmp" 2>/dev/null
 chmod 755 \
   "$MODDIR/bin/a2h_patch" \
   "$MODDIR/bin/a2h_trigger" \
+  "$MODDIR/bin/a2h_audio_watch" \
   "$MODDIR/bin/a2h_apply" \
   "$MODDIR/service.sh" \
   "$MODDIR/post-fs-data.sh" \
@@ -271,7 +273,7 @@ chmod 644 \
   "$MODDIR/config/state" \
   "$MODDIR/config/game_auto_pause" \
   "$MODDIR/webroot/index.html" \
-  "$MODDIR/webroot/coolapk.png" 2>/dev/null
+  "$MODDIR/webroot/coolapk.webp" 2>/dev/null
 
 chmod 600 "$MODDIR/config/.package_baseline" 2>/dev/null
 
