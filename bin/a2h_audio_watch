@@ -1,0 +1,652 @@
+#!/system/bin/sh
+
+# Bridge vendor audio-track metadata into the HAL app-name lifecycle for
+# applications whose real low-latency stream is not registered by the system.
+
+MODDIR=${A2H_MODDIR:-${0%/*}/..}
+CFG_DIR=${A2H_CONFIG_DIR:-$MODDIR/config}
+CFG_STATE="$CFG_DIR/state"
+CFG_PKGS="$CFG_DIR/packages.txt"
+CFG_STATES="$CFG_DIR/package_states"
+PACKAGES_LIST=${A2H_PACKAGES_LIST:-/data/system/packages.list}
+TRIGGER_SOURCE=${A2H_TRIGGER_SOURCE:-$MODDIR/bin/a2h_trigger}
+RUNTIME_DIR=${A2H_RUNTIME_DIR:-/data/local/tmp/a2h_hook_runtime}
+TRIGGER_RUNTIME="$RUNTIME_DIR/a2h_trigger"
+COOLDOWN_DIR="$RUNTIME_DIR/cooldown"
+CORE_UID_DIR="$RUNTIME_DIR/core_uid"
+PORT_DIR="$RUNTIME_DIR/ports"
+LEASE_DIR="$RUNTIME_DIR/leases"
+LEASE_PID_DIR="$RUNTIME_DIR/lease_pids"
+SESSION_DIR="$RUNTIME_DIR/sessions"
+LOG=${A2H_LOG_FILE:-$MODDIR/a2h_patch.log}
+LOGCAT_BIN=${A2H_LOGCAT_BIN:-logcat}
+SU_BIN=${A2H_SU_BIN:-su}
+MEDIAEVENT_TAG=${A2H_MEDIAEVENT_TAG:-vendor.xiaomi.hardware.mediaeventgatherservice-service}
+COOLDOWN_SECONDS=${A2H_COOLDOWN_SECONDS:-8}
+FALLBACK_LEASE_SECONDS=${A2H_FALLBACK_LEASE_SECONDS:-70}
+
+logcat_pid=
+event_fifo=
+lease_sequence=0
+
+ts() { date '+%F %T'; }
+log() { printf '[%s] audio-watch %s\n' "$(ts)" "$*" >> "$LOG" 2>/dev/null; }
+
+valid_package() {
+  package_value=$1
+  [ -n "$package_value" ] || return 1
+  [ "${#package_value}" -lt 256 ] || return 1
+  case "$package_value" in
+    [A-Za-z]*.*?) ;;
+    *) return 1 ;;
+  esac
+  case "$package_value" in
+    *[!A-Za-z0-9_.]*) return 1 ;;
+  esac
+  return 0
+}
+
+prepare_runtime() {
+  umask 077
+  if [ -L "$RUNTIME_DIR" ]; then
+    log "runtime rejected reason=symlink path=$RUNTIME_DIR"
+    return 1
+  fi
+  mkdir -p "$RUNTIME_DIR" 2>/dev/null || {
+    log "runtime prepare FAIL reason=mkdir path=$RUNTIME_DIR"
+    return 1
+  }
+  if [ "${A2H_SKIP_CHOWN:-0}" != "1" ]; then
+    chown 0:0 "$RUNTIME_DIR" 2>/dev/null || {
+      log "runtime prepare FAIL reason=directory-owner path=$RUNTIME_DIR"
+      return 1
+    }
+  fi
+  chmod 0711 "$RUNTIME_DIR" 2>/dev/null || {
+    log "runtime prepare FAIL reason=directory-mode path=$RUNTIME_DIR"
+    return 1
+  }
+  [ -f "$TRIGGER_SOURCE" ] || {
+    log "runtime prepare FAIL reason=trigger-missing path=$TRIGGER_SOURCE"
+    return 1
+  }
+
+  trigger_tmp="$RUNTIME_DIR/.a2h_trigger.$$"
+  rm -f "$trigger_tmp" 2>/dev/null
+  cp "$TRIGGER_SOURCE" "$trigger_tmp" 2>/dev/null || {
+    log "runtime prepare FAIL reason=trigger-copy"
+    rm -f "$trigger_tmp" 2>/dev/null
+    return 1
+  }
+  if [ "${A2H_SKIP_CHOWN:-0}" != "1" ]; then
+    chown 0:0 "$trigger_tmp" 2>/dev/null || {
+      log "runtime prepare FAIL reason=trigger-owner"
+      rm -f "$trigger_tmp" 2>/dev/null
+      return 1
+    }
+  fi
+  chmod 0555 "$trigger_tmp" 2>/dev/null || {
+    log "runtime prepare FAIL reason=trigger-mode"
+    rm -f "$trigger_tmp" 2>/dev/null
+    return 1
+  }
+  mv -f "$trigger_tmp" "$TRIGGER_RUNTIME" 2>/dev/null || {
+    log "runtime prepare FAIL reason=trigger-commit"
+    rm -f "$trigger_tmp" 2>/dev/null
+    return 1
+  }
+
+  mkdir -p "$COOLDOWN_DIR" "$CORE_UID_DIR" "$PORT_DIR" "$LEASE_DIR" \
+    "$LEASE_PID_DIR" "$SESSION_DIR" 2>/dev/null || return 1
+  if [ "${A2H_SKIP_CHOWN:-0}" != "1" ]; then
+    chown 0:0 "$COOLDOWN_DIR" "$CORE_UID_DIR" "$PORT_DIR" "$LEASE_DIR" \
+      "$LEASE_PID_DIR" "$SESSION_DIR" 2>/dev/null || return 1
+  fi
+  chmod 0700 "$COOLDOWN_DIR" "$CORE_UID_DIR" "$PORT_DIR" \
+    "$LEASE_PID_DIR" 2>/dev/null || return 1
+  chmod 0711 "$LEASE_DIR" "$SESSION_DIR" 2>/dev/null || return 1
+  reset_runtime_state
+  return 0
+}
+
+package_enabled() {
+  enabled_package=$1
+  [ -f "$CFG_PKGS" ] && [ -f "$CFG_STATES" ] || return 1
+  exec 3< "$CFG_STATES" || return 1
+  exec 4< "$CFG_PKGS" || {
+    exec 3<&-
+    return 1
+  }
+  slot_index=0
+  slot_match=1
+  while [ "$slot_index" -lt 10 ]; do
+    slot_state=
+    slot_package=
+    IFS= read -r slot_state <&3 || true
+    IFS= read -r slot_package <&4 || true
+    if [ "$slot_state" = "1" ] && [ "$slot_package" = "$enabled_package" ]; then
+      slot_match=0
+      break
+    fi
+    slot_index=$((slot_index + 1))
+  done
+  exec 3<&-
+  exec 4<&-
+  return "$slot_match"
+}
+
+mode_allows_package() {
+  allowed_package=$1
+  [ -r "$CFG_STATE" ] || return 1
+  current_mode=
+  IFS= read -r current_mode < "$CFG_STATE" || true
+  case "$current_mode" in
+    enabled) return 0 ;;
+    disabled) package_enabled "$allowed_package" ;;
+    *) return 1 ;;
+  esac
+}
+
+package_uid() {
+  uid_package=$1
+  [ -r "$PACKAGES_LIST" ] || return 1
+  awk -v package="$uid_package" '$1 == package { print $2; exit }' \
+    "$PACKAGES_LIST" 2>/dev/null
+}
+
+process_starttime() {
+  process_pid=$1
+  case "$process_pid" in ''|*[!0-9]*) return 1 ;; esac
+  process_stat=
+  IFS= read -r process_stat < "/proc/$process_pid/stat" 2>/dev/null || return 1
+  process_tail=${process_stat##*) }
+  [ "$process_tail" != "$process_stat" ] || return 1
+  set -- $process_tail
+  [ "$#" -ge 20 ] || return 1
+  shift 19
+  process_value=$1
+  case "$process_value" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$process_value"
+}
+
+read_lease_record() {
+  lease_record_path=$1
+  lease_read_pid=
+  lease_read_start=
+  lease_read_owner=
+  [ ! -r "$lease_record_path" ] || \
+    IFS=' ' read -r lease_read_pid lease_read_start lease_read_owner < \
+      "$lease_record_path" || true
+  case "$lease_read_pid" in ''|*[!0-9]*) return 1 ;; esac
+  case "$lease_read_start" in ''|*[!0-9]*) return 1 ;; esac
+  case "$lease_read_owner" in ''|*[!0-9.]*) return 1 ;; esac
+  return 0
+}
+
+lease_alive() {
+  alive_package=$1
+  read_lease_record "$LEASE_PID_DIR/$alive_package" || return 1
+  alive_start=$(process_starttime "$lease_read_pid") || return 1
+  [ "$alive_start" = "$lease_read_start" ] || return 1
+  kill -0 "$lease_read_pid" 2>/dev/null
+}
+
+reset_runtime_state() {
+  for stale_token in "$LEASE_DIR"/*; do
+    [ -f "$stale_token" ] || continue
+    rm -f "$stale_token" 2>/dev/null
+  done
+  for stale_record in "$LEASE_PID_DIR"/*; do
+    [ -f "$stale_record" ] || continue
+    case "$stale_record" in *.owner) continue ;; esac
+    if read_lease_record "$stale_record"; then
+      stale_start=$(process_starttime "$lease_read_pid") || stale_start=
+      if [ "$stale_start" = "$lease_read_start" ]; then
+        kill "$lease_read_pid" 2>/dev/null || true
+      fi
+    fi
+  done
+  rm -f "$LEASE_PID_DIR"/* "$PORT_DIR"/* 2>/dev/null
+  for stale_session_dir in "$SESSION_DIR"/*; do
+    [ -d "$stale_session_dir" ] || continue
+    [ ! -L "$stale_session_dir" ] || continue
+    rm -f "$stale_session_dir"/* 2>/dev/null
+    rmdir "$stale_session_dir" 2>/dev/null || true
+  done
+}
+
+write_lease_token() {
+  lease_package=$1
+  lease_kind=$2
+  lease_token="$LEASE_DIR/$lease_package"
+  printf '%s\n' "$lease_kind" > "$lease_token" 2>/dev/null || return 1
+  chmod 0444 "$lease_token" 2>/dev/null || return 1
+}
+
+promote_lease_token() {
+  promote_package=$1
+  promote_kind=$2
+  promote_token="$LEASE_DIR/$promote_package"
+  current_kind=
+  [ ! -r "$promote_token" ] || IFS= read -r current_kind < "$promote_token" || true
+  if [ "$current_kind" = policy ] && [ "$promote_kind" != policy ]; then
+    return 0
+  fi
+  write_lease_token "$promote_package" "$promote_kind"
+}
+
+start_lease() {
+  lease_package=$1
+  lease_uid=$2
+  lease_kind=$3
+  lease_token="$LEASE_DIR/$lease_package"
+  if lease_alive "$lease_package"; then
+    promote_lease_token "$lease_package" "$lease_kind" || true
+    return 0
+  fi
+
+  rm -f "$LEASE_PID_DIR/$lease_package" 2>/dev/null
+  lease_sequence=$((lease_sequence + 1))
+  lease_owner="$$.$lease_sequence"
+  lease_owner_file="$LEASE_PID_DIR/$lease_package.owner"
+  lease_session_dir="$SESSION_DIR/$lease_package"
+  if [ -L "$lease_session_dir" ]; then
+    log "lease rejected package=$lease_package reason=session-symlink"
+    return 1
+  fi
+  mkdir -p "$lease_session_dir" 2>/dev/null || return 1
+  for stale_session in "$lease_session_dir"/*; do
+    [ -f "$stale_session" ] || continue
+    rm -f "$stale_session" 2>/dev/null
+  done
+  if [ "${A2H_SKIP_CHOWN:-0}" != "1" ]; then
+    chown 0:0 "$lease_session_dir" 2>/dev/null || return 1
+  fi
+  chmod 0711 "$lease_session_dir" 2>/dev/null || return 1
+  lease_session="$lease_session_dir/$lease_owner"
+  : > "$lease_session" 2>/dev/null || return 1
+  if [ "${A2H_SKIP_CHOWN:-0}" != "1" ]; then
+    chown "$lease_uid:$lease_uid" "$lease_session" 2>/dev/null || {
+      rm -f "$lease_session" 2>/dev/null
+      return 1
+    }
+  fi
+  chmod 0600 "$lease_session" 2>/dev/null || {
+    rm -f "$lease_session" 2>/dev/null
+    return 1
+  }
+  promote_lease_token "$lease_package" "$lease_kind" || {
+    rm -f "$lease_session" 2>/dev/null
+    return 1
+  }
+  printf '%s\n' "$lease_owner" > "$lease_owner_file" 2>/dev/null || {
+    rm -f "$lease_token" "$lease_session" 2>/dev/null
+    return 1
+  }
+  lease_command="$TRIGGER_RUNTIME --lease $lease_token $lease_session"
+  (
+    lease_child=
+    trap '[ -z "$lease_child" ] || kill "$lease_child" 2>/dev/null || true; exit 0' INT TERM HUP
+    "$SU_BIN" "$lease_uid" -c "$lease_command" >/dev/null 2>&1 &
+    lease_child=$!
+    wait "$lease_child" 2>/dev/null
+    lease_rc=$?
+    lease_child=
+    rm -f "$lease_token" "$lease_session" 2>/dev/null
+    current_owner=
+    [ ! -r "$lease_owner_file" ] || \
+      IFS= read -r current_owner < "$lease_owner_file" || true
+    if [ "$current_owner" = "$lease_owner" ]; then
+      rm -f "$LEASE_PID_DIR/$lease_package" "$lease_owner_file" 2>/dev/null
+    fi
+    [ "$lease_rc" -eq 0 ] || log "lease trigger FAIL package=$lease_package uid=$lease_uid rc=$lease_rc"
+  ) &
+  lease_worker=$!
+  lease_worker_start=$(process_starttime "$lease_worker") || {
+    rm -f "$lease_token" 2>/dev/null
+    wait "$lease_worker" 2>/dev/null || true
+    rm -f "$lease_session" "$lease_owner_file" 2>/dev/null
+    return 1
+  }
+  printf '%s %s %s\n' "$lease_worker" "$lease_worker_start" "$lease_owner" > \
+    "$LEASE_PID_DIR/$lease_package" 2>/dev/null || {
+    kill "$lease_worker" 2>/dev/null || true
+    rm -f "$lease_token" "$lease_session" "$lease_owner_file" 2>/dev/null
+    return 1
+  }
+  current_owner=
+  [ ! -r "$lease_owner_file" ] || \
+    IFS= read -r current_owner < "$lease_owner_file" || true
+  if [ "$current_owner" != "$lease_owner" ]; then
+    if read_lease_record "$LEASE_PID_DIR/$lease_package" &&
+       [ "$lease_read_owner" = "$lease_owner" ]; then
+      rm -f "$LEASE_PID_DIR/$lease_package" 2>/dev/null
+    fi
+  fi
+  lease_ready_attempt=0
+  while [ "$lease_ready_attempt" -lt 400 ]; do
+    lease_ready_session=
+    lease_ready_state=
+    [ ! -r "$lease_session" ] || \
+      IFS=' ' read -r lease_ready_session lease_ready_state < "$lease_session" || true
+    [ "$lease_ready_state" = ready ] && break
+    lease_live_start=$(process_starttime "$lease_worker") || lease_live_start=
+    [ "$lease_live_start" = "$lease_worker_start" ] || break
+    sleep 0.02
+    lease_ready_attempt=$((lease_ready_attempt + 1))
+  done
+  if [ "$lease_ready_state" != ready ]; then
+    rm -f "$lease_token" 2>/dev/null
+    wait "$lease_worker" 2>/dev/null || true
+    rm -f "$LEASE_PID_DIR/$lease_package" "$lease_owner_file" \
+      "$lease_session" 2>/dev/null
+    return 1
+  fi
+  log "lease started package=$lease_package uid=$lease_uid kind=$lease_kind pid=$lease_worker"
+  return 0
+}
+
+trigger_session_matches() {
+  session_package=$1
+  session_value=$2
+  session_path="$SESSION_DIR/$session_package"
+  [ -d "$session_path" ] || return 1
+  for session_file in "$session_path"/*; do
+    [ -f "$session_file" ] || continue
+    recorded_session=
+    recorded_state=
+    IFS=' ' read -r recorded_session recorded_state < "$session_file" || true
+    [ "$recorded_session" = "$session_value" ] && return 0
+  done
+  return 1
+}
+
+release_policy_lease_if_idle() {
+  idle_package=$1
+  for active_port in "$PORT_DIR"/*; do
+    [ -f "$active_port" ] || continue
+    active_port_package=
+    active_port_session=
+    IFS=' ' read -r active_port_package active_port_session < "$active_port" || true
+    [ "$active_port_package" != "$idle_package" ] || return 0
+  done
+  rm -f "$LEASE_DIR/$idle_package" 2>/dev/null
+}
+
+policy_start() {
+  policy_package=$1
+  policy_port=$2
+  policy_session=$3
+  valid_package "$policy_package" || return 0
+  case "$policy_port" in ''|*[!0-9]*) return 0 ;; esac
+  case "$policy_session" in ''|*[!0-9]*) return 0 ;; esac
+  trigger_session_matches "$policy_package" "$policy_session" && return 0
+  mode_allows_package "$policy_package" || return 0
+  policy_uid=$(package_uid "$policy_package")
+  case "$policy_uid" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$policy_uid" -ge 10000 ] 2>/dev/null || return 0
+  policy_port_file="$PORT_DIR/$policy_port"
+  previous_package=
+  previous_session=
+  if [ -r "$policy_port_file" ]; then
+    IFS=' ' read -r previous_package previous_session < "$policy_port_file" || true
+  fi
+  printf '%s %s\n' "$policy_package" "$policy_session" > "$policy_port_file" 2>/dev/null || return 0
+  chmod 0600 "$policy_port_file" 2>/dev/null || return 0
+  if valid_package "$previous_package" && [ "$previous_package" != "$policy_package" ]; then
+    release_policy_lease_if_idle "$previous_package"
+  fi
+  start_lease "$policy_package" "$policy_uid" policy ||
+    log "lease start FAIL package=$policy_package uid=$policy_uid kind=policy"
+}
+
+policy_stop() {
+  policy_port=$1
+  policy_session=$2
+  case "$policy_port" in ''|*[!0-9]*) return 0 ;; esac
+  case "$policy_session" in ''|*[!0-9]*) return 0 ;; esac
+  policy_port_file="$PORT_DIR/$policy_port"
+  [ -r "$policy_port_file" ] || return 0
+  policy_package=
+  recorded_session=
+  IFS=' ' read -r policy_package recorded_session < "$policy_port_file" || true
+  valid_package "$policy_package" || return 0
+  [ "$recorded_session" = "$policy_session" ] || return 0
+  rm -f "$policy_port_file" 2>/dev/null
+  release_policy_lease_if_idle "$policy_package"
+}
+
+handle_policy_event() {
+  policy_line=$1
+  case "$policy_line" in
+    *'startOutput()'*) policy_action=start ;;
+    *'stopOutput()'*|*'stoptOutput()'*) policy_action=stop ;;
+    *) return 1 ;;
+  esac
+  case "$policy_line" in *'portId '*) ;; *) return 1 ;; esac
+  case "$policy_line" in *'session '*) ;; *) return 1 ;; esac
+  policy_field=${policy_line#*portId }
+  policy_port=${policy_field%%,*}
+  policy_port=${policy_port%% *}
+  policy_field=${policy_line#*session }
+  policy_session=${policy_field%%,*}
+  policy_session=${policy_session%% *}
+  if [ "$policy_action" = start ]; then
+    case "$policy_line" in *'appname '*) ;; *) return 1 ;; esac
+    policy_field=${policy_line#*appname }
+    policy_package=${policy_field%%,*}
+    policy_package=${policy_package%% *}
+    policy_package=${policy_package%%)*}
+    policy_start "$policy_package" "$policy_port" "$policy_session"
+  else
+    policy_stop "$policy_port" "$policy_session"
+  fi
+  return 0
+}
+
+cooldown_accept() {
+  cooldown_package=$1
+  case "$COOLDOWN_SECONDS" in
+    ''|*[!0-9]*) COOLDOWN_SECONDS=8 ;;
+  esac
+  cooldown_now=
+  if [ -r /proc/uptime ]; then
+    IFS=' ' read -r cooldown_now cooldown_unused < /proc/uptime || true
+    cooldown_now=${cooldown_now%%.*}
+  fi
+  case "$cooldown_now" in
+    ''|*[!0-9]*) cooldown_now=$(date +%s 2>/dev/null) ;;
+  esac
+  case "$cooldown_now" in ''|*[!0-9]*) return 1 ;; esac
+  cooldown_file="$COOLDOWN_DIR/$cooldown_package"
+  cooldown_last=
+  if [ -r "$cooldown_file" ]; then
+    IFS= read -r cooldown_last < "$cooldown_file" || true
+  fi
+  case "$cooldown_last" in
+    ''|*[!0-9]*) ;;
+    *)
+      cooldown_age=$((cooldown_now - cooldown_last))
+      if [ "$cooldown_age" -ge 0 ] 2>/dev/null &&
+         [ "$cooldown_age" -lt "$COOLDOWN_SECONDS" ] 2>/dev/null; then
+        return 1
+      fi
+      ;;
+  esac
+  # This directory is root-owned 0700 and has a single writer. A partial stamp
+  # after an abrupt exit only permits one early retry; no transaction is lost.
+  printf '%s\n' "$cooldown_now" > "$cooldown_file" 2>/dev/null
+}
+
+trigger_for_package() {
+  trigger_package=$1
+  mode_allows_package "$trigger_package" || return 0
+  # Core package UIDs are stable for the lifetime of this boot. Cache only
+  # their rejection so repeated SystemUI sounds avoid UID scans and log I/O.
+  [ ! -f "$CORE_UID_DIR/$trigger_package" ] || return 0
+  cooldown_accept "$trigger_package" || return 0
+  trigger_uid=$(package_uid "$trigger_package")
+  case "$trigger_uid" in
+    ''|*[!0-9]*)
+      log "event ignored package=$trigger_package reason=uid-missing"
+      return 0
+      ;;
+  esac
+  if [ "$trigger_uid" -lt 10000 ] 2>/dev/null; then
+    : > "$CORE_UID_DIR/$trigger_package" 2>/dev/null || true
+    log "event ignored package=$trigger_package uid=$trigger_uid reason=core-system-uid"
+    return 0
+  fi
+  # A vendor event without a policy start receives a bounded fallback lease.
+  # If a policy start arrives, it promotes the same token to a real-session
+  # lease; the trigger's own event is suppressed by cooldown/session identity.
+  start_lease "$trigger_package" "$trigger_uid" \
+    "fallback:$FALLBACK_LEASE_SECONDS" ||
+    log "lease start FAIL package=$trigger_package uid=$trigger_uid kind=fallback"
+  return 0
+}
+
+handle_event_line() {
+  event_line=$1
+  handle_policy_event "$event_line" && return 0
+  case "$event_line" in
+    *'"name":"audio_track_message"'*'"app_name":"'*'"scenario":"playback"'*)
+      event_payload=${event_line#*'"app_name":"'}
+      event_package=${event_payload%%\"*}
+      valid_package "$event_package" || return 0
+      trigger_for_package "$event_package"
+      return 0
+      ;;
+    *audio_track_message*) ;;
+    *) return 0 ;;
+  esac
+  event_fields=$(printf '%s\n' "$event_line" | sed -n \
+    's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*"app_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*"scenario"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1|\2|\3/p')
+  event_name=${event_fields%%|*}
+  event_fields=${event_fields#*|}
+  event_package=${event_fields%%|*}
+  event_scenario=${event_fields#*|}
+  [ "$event_name" = "audio_track_message" ] || return 0
+  [ "$event_scenario" = "playback" ] || return 0
+  valid_package "$event_package" || return 0
+  trigger_for_package "$event_package"
+}
+
+process_event_file() {
+  source_file=$1
+  [ -r "$source_file" ] || return 2
+  while IFS= read -r event_line || [ -n "$event_line" ]; do
+    handle_event_line "$event_line"
+  done < "$source_file"
+}
+
+cleanup() {
+  if [ -n "$logcat_pid" ]; then
+    kill "$logcat_pid" 2>/dev/null || true
+    wait "$logcat_pid" 2>/dev/null || true
+  fi
+  logcat_pid=
+  for lease_token in "$LEASE_DIR"/*; do
+    [ -f "$lease_token" ] || continue
+    rm -f "$lease_token" 2>/dev/null
+  done
+  # Token removal is the normal lease shutdown signal. Give every worker one
+  # shared, bounded grace window to close its AAudio stream before escalating;
+  # this runs only during watcher exit/restart and adds no steady-state work.
+  cleanup_grace=0
+  while [ "$cleanup_grace" -lt 25 ]; do
+    cleanup_live=0
+    for lease_record in "$LEASE_PID_DIR"/*; do
+      [ -f "$lease_record" ] || continue
+      case "$lease_record" in *.owner) continue ;; esac
+      read_lease_record "$lease_record" || continue
+      lease_live_start=$(process_starttime "$lease_read_pid") || continue
+      if [ "$lease_live_start" = "$lease_read_start" ] &&
+         kill -0 "$lease_read_pid" 2>/dev/null; then
+        cleanup_live=1
+        break
+      fi
+    done
+    [ "$cleanup_live" -eq 1 ] || break
+    sleep 0.02
+    cleanup_grace=$((cleanup_grace + 1))
+  done
+  for lease_record in "$LEASE_PID_DIR"/*; do
+    [ -f "$lease_record" ] || continue
+    case "$lease_record" in *.owner) continue ;; esac
+    read_lease_record "$lease_record" || continue
+    lease_live_start=$(process_starttime "$lease_read_pid") || continue
+    [ "$lease_live_start" = "$lease_read_start" ] || continue
+    kill "$lease_read_pid" 2>/dev/null || true
+    wait "$lease_read_pid" 2>/dev/null || true
+  done
+  rm -f "$LEASE_PID_DIR"/* "$PORT_DIR"/* 2>/dev/null
+  for lease_session_dir in "$SESSION_DIR"/*; do
+    [ -d "$lease_session_dir" ] || continue
+    [ ! -L "$lease_session_dir" ] || continue
+    rm -f "$lease_session_dir"/* 2>/dev/null
+    rmdir "$lease_session_dir" 2>/dev/null || true
+  done
+  [ -z "$event_fifo" ] || rm -f "$event_fifo" 2>/dev/null
+  event_fifo=
+}
+
+watch_events() {
+  watch_restart=0
+  watch_restart_delay=2
+  while true; do
+    event_fifo="$RUNTIME_DIR/.events.$$"
+    rm -f "$event_fifo" 2>/dev/null
+    mkfifo "$event_fifo" 2>/dev/null || {
+      log "logcat start FAIL reason=fifo"
+      return 1
+    }
+    chmod 0600 "$event_fifo" 2>/dev/null || true
+    "$LOGCAT_BIN" -b main -v raw -T 1 -s "$MEDIAEVENT_TAG:D" \
+      'APM_AudioPolicyManager:D' 'AudioPolicyManager:D' '*:S' \
+      > "$event_fifo" 2>/dev/null &
+    logcat_pid=$!
+    log "logcat start pid=$logcat_pid tag=$MEDIAEVENT_TAG"
+    while IFS= read -r event_line || [ -n "$event_line" ]; do
+      handle_event_line "$event_line"
+    done < "$event_fifo"
+    wait "$logcat_pid" 2>/dev/null
+    logcat_rc=$?
+    logcat_pid=
+    rm -f "$event_fifo" 2>/dev/null
+    event_fifo=
+    reset_runtime_state
+    watch_restart=$((watch_restart + 1))
+    if [ "$watch_restart" -le 4 ] || [ $((watch_restart % 20)) -eq 0 ]; then
+      log "logcat exited rc=$logcat_rc restart=$watch_restart retry_in=${watch_restart_delay}s"
+    fi
+    sleep "$watch_restart_delay"
+    if [ "$watch_restart_delay" -lt 30 ]; then
+      watch_restart_delay=$((watch_restart_delay * 2))
+      [ "$watch_restart_delay" -le 30 ] || watch_restart_delay=30
+    fi
+  done
+}
+
+trap 'exit 0' INT TERM HUP
+trap cleanup EXIT
+
+prepare_runtime || exit 1
+case "${1:-}" in
+  --file)
+    [ -n "${2:-}" ] || exit 2
+    process_event_file "$2"
+    exit $?
+    ;;
+  '')
+    command -v "$LOGCAT_BIN" >/dev/null 2>&1 || {
+      log "start FAIL reason=logcat-missing path=$LOGCAT_BIN"
+      exit 1
+    }
+    log "start pid=$$ mode=mediaevent cooldown=${COOLDOWN_SECONDS}s"
+    watch_events
+    ;;
+  *)
+    exit 2
+    ;;
+esac
