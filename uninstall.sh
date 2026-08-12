@@ -72,6 +72,7 @@ fi
 MODDIR=${MODPATH:-/data/adb/modules/a2h_hook}
 rm -f \
   /data/local/tmp/a2h_config.changed \
+  /data/local/tmp/a2h_config.wake \
   /data/local/tmp/a2h_apply.pending \
   /data/local/tmp/a2h_packages.txt \
   /data/local/tmp/a2h_state \
@@ -80,6 +81,7 @@ rm -rf \
   /data/local/tmp/a2h_apply.worker \
   /data/local/tmp/a2h_apply.lock \
   /data/local/tmp/a2h_config.lock \
+  /data/local/tmp/a2h_hook_runtime \
   "$MODDIR/config/.apply.lock" \
   "$MODDIR/config/.config.lock" \
   "$MODDIR/config/.notification_lock" 2>/dev/null

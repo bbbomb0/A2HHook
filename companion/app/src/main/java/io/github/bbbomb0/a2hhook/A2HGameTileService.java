@@ -15,7 +15,7 @@ public final class A2HGameTileService extends A2HToggleTileService {
 
     @Override
     protected String tileLabel() {
-        return "游戏时暂停音乐触感";
+        return "游戏时启动后台音乐触感";
     }
 
     @Override
@@ -25,7 +25,7 @@ public final class A2HGameTileService extends A2HToggleTileService {
 
     @Override
     protected String inactiveSubtitle() {
-        return "已关闭";
+        return "遵循官方策略";
     }
 
     @Override
@@ -34,12 +34,22 @@ public final class A2HGameTileService extends A2HToggleTileService {
     }
 
     @Override
+    protected String initialState() {
+        return "enabled";
+    }
+
+    @Override
+    protected boolean isActiveState(String state) {
+        return "disabled".equals(state);
+    }
+
+    @Override
     protected int activeIcon() {
-        return drawableId("ic_a2h_tile_game_on");
+        return drawableId("ic_a2h_tile_game_off");
     }
 
     @Override
     protected int inactiveIcon() {
-        return drawableId("ic_a2h_tile_game_off");
+        return drawableId("ic_a2h_tile_game_on");
     }
 }

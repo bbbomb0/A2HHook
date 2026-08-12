@@ -1,7 +1,35 @@
 # 更新日志
 
+## v1.5.7-fix
+
+- 修复控制中心磁贴长按进入伴生 WebUI 后“跟随系统”仍固定浅色的问题：伴生宿主不再继承固定 Light 主题，改由 Android DayNight `uiMode` 作为系统主题真值，并在运行中切换主题时同步页面、原生背景和系统栏；页面自身继续负责手动浅色/深色覆盖，禁止 WebView 算法暗化二次改色。
+- 优化 KSU/ReSukiSU 内 WebUI 的交互帧优先级和配置落地：开关先完成 DOM 首帧反馈，点击与 Root 提交的短窗口暂停装饰 SVG 动画，完成后自动恢复；缺少原生震感桥时把可选 Root 震感排在配置命令入队之后，避免与保存争用同一 bridge/su。fast-controls 的模式/策略前后认证合并为每轮一份 `stat` 快照，继续保留锁内表不变校验、失败回滚、五文件事务和 native 最终验证。
+- 修复 watcher 退出或 logcat 重启时与租约 trigger 正常关闭的竞态：先撤销全部 token，并为所有 worker 提供共享且有界的优雅关闭窗口，再终止仍存活的 PID+starttime owner。该等待只发生在退出/重启，不增加稳态轮询或 SoC 空转。
+- 修复部分原生低延迟游戏有真实 `FAST` 扬声器音轨、却因系统未向 HAL 下发 `appname` 生命周期而无法进入全局/自定义 matcher 的问题。新增事件驱动音轨 watcher，从厂商 `audio_track_message` playback 事件读取实际包名，精确映射 `/data/system/packages.list` UID，并以该 UID 建立一次极短静音登记流；全局接受任意合法普通应用包，自定义只接受 10 槽中已启用的精确包名。实现不硬编码游戏、不猜前台应用、不持续轮询 `dumpsys`，以同包冷却阻止触发器事件递归，并使用 root `0711/0555` 固定运行时目录防止应用替换触发器；核心系统 UID 拒绝结果按本次开机缓存，重复系统提示音不再扫描 UID 或写日志。
+- 修复 OS3.0.305 上短 AAudio 流在 HAL 完成包名登记前已经关闭、但旧触发器仍打印成功的问题。触发器现在等待 `STARTED` 和首次静音 data callback 后才发布真实 `session ready`，持续供给静音帧并检查异步错误，结束时验证 `STOPPED` 与 close；watcher 以 AudioPolicy `portId/session` 维持租约到最后一条真实应用音轨停止，兼容字段顺序变化、`stopOutput/stoptOutput` 和 stop 无 appname。厂商事件作为通用入口与无 policy 日志时的 70 秒有界 fallback；PID+starttime owner、防自 session 递归、异常重启清理和多端口状态机均已加入回归，不按 ROM 版本或游戏包名分支。
+- 版本迭代为 `v1.5.7-fix / versionCode=1571`，生成独立 `a2h_hook_v1.5.7-fix.zip`；用户指定的 v1.5.7 正确回滚 ZIP 保持原文件和哈希，不覆盖、不删除。
+
+## v1.5.7
+
+- WebUI 新增不依赖第三方模块的沉浸式系统栏适配：伴生 APK 使用透明状态栏/导航栏和原生 edge-to-edge，按四边 WindowInsets 将挖孔、状态栏与手势小白条安全区传入同一份 HTML；WebUI 使用 `viewport-fit=cover`、CSS safe-area 和宿主能力检测覆盖 KernelSU 系宿主，不调用会隐藏系统栏的全屏接口，也不修改其他应用的全局沉浸规则。深浅主题切换会同步 A2H 伴生界面的状态栏图标与手势条明暗。
+- 根据 REDMI K80 Ultra / ReSukiSU 真机 WebView 可用高度进一步收紧纵向节奏，完整显示两个模式项、10 个白名单槽位和底栏，无需短距离滚动；保留 17px 主要文字、49×28 开关和至少 44px 槽位触控高度。伴生 Activity 将 WindowInsets 从物理像素换算为 WebView CSS 像素，WebUI 同时消费 KernelSU 注入的 `--safe-area-inset-*`，消除磁贴入口额外滚动并统一两种宿主的安全区。移除 BottomSheet 顶缘阴影并隔离圆角合成，修复“关于”页圆角处出现黑边的问题。
+- WebUI 进一步按 Miuix/HyperOS 设置语义重构：`SwitchPreference`、28px 圆角 BottomSheet、反转色 Snackbar、浅/深色主题、间距与焦点行为均由原生 HTML/CSS/JavaScript 实现，不引入 Compose、Wasm、CDN 或新运行时。新增软键盘 `visualViewport` 避让、弹层焦点回归/拖拽关闭、Snackbar 滑动关闭和更完整的 Android 返回处理。
+- 修复 KernelSU 模块 WebUI 没有震动反馈：伴生 APK 继续优先使用原生 HyperOS/Android 震感；KernelSU 管理器没有 `window.ksu.haptic` 时，通过原有 `window.ksu.exec` 调用 `vibrator_manager`，并兼容旧 `vibrator` 服务。触感调用独立、短时、失败静默，不改变配置事务。
+- 将 WebUI 与控制中心的反向“游戏时暂停”改为正向“游戏时启动后台音乐触感”。底层 `game_auto_pause` 配置格式和默认值不变；默认关闭代表遵循官方暂停策略，开启代表游戏期间继续后台音乐触感。游戏磁贴的 active 状态、图标和副标题同步按新语义反转。
+- WebUI 默认跟随系统浅/深色主题，并保留浅色、深色和跟随系统三态切换。标题改为“A2H 音乐触感白名单”；底栏爱心直接进入“支持我们”，关于页作者行可跳转酷安个人主页；QQ群入口显式指定 QQ 包名，无法启动 QQ 时只提示而不打开浏览器。
+- WebUI 的“关于与支持”改为 Miuix 风格分层底部弹层。首先展示 A2HHook 项目卡、项目地址、QQ群和捐赠支持，不再打开即显示赞赏二维码。
+- “支持我们”只列出微信支付、微信赞赏和支付宝三个选项，移除每项下方的扫码说明；三枚入口按用户最终参考图转换为 96×96 RGBA WebP，合计约 12.4 KB，首次进入支持页时才加载。用户选择后才加载对应二维码。点击底部弹层外或使用返回键，均按“二维码 → 支持我们 → 关于 → 主页”逐层动画收起，伴生 APK 在主页再次返回时才退出。
+- 主页旧“A2”方块与关于页蓝底标识统一替换为透明底“双音轨环 + 双音符 + 连续弧形触感波”项目图标，完全移除三角/箭头元素。纯 CSS/SVG 图标只保留前台可见时的较快、大幅无限循环；循环只使用 `transform/opacity`，离开对应页面、进入后台或系统启用减少动态效果时立即停止，无定时器、帧循环、滤镜或后台服务。
+- 项目地址使用 GitHub 图标；QQ群使用无眼睛、嘴部等表情细节的腾讯 QQ 纯色企鹅轮廓，图标保持静态并继承当前明暗主题。
+- 四档交互震感滑块收敛为单一“强劲震感”开关。开启时开关、按钮和页面动作统一使用 HyperOS 强反馈，失败仍按原边界回退且不影响 Root 配置事务。
+- 性能与体积收尾：配置队列保留五文件原子事务和完整 native 校验；patcher 能力按二进制版本缓存，现代 patcher 成功后不再额外执行第二次完整 ptrace check，单次进程内复用严格 ELF 符号结果。模块自身严格提交会生成带 schema 的配置指纹，模式、游戏策略与 23 参数完整提交可直接走快速准备；文件管理器外部修改仍因指纹失配回退全量规范化。配置变化直接启动唯一合并 worker，成功应用后删除冗余二次准备；快速连续提交产生的旧 pending 只有在当前五文件原始签名与刚完成事务完全一致时才会合并，检测到更新则继续保留，避免对同一 revision 重复执行 native 事务。稳定监听改为 FIFO 阻塞到事件或 30 秒健康超时，音轨事件常见路径合并为 shell 内建解析，logcat 异常使用 `2/4/8/16/30s` 封顶退避。worker/native 只尝试短时 `nice=-10`，不锁频、不固定 CPU、不常驻。最终 APK 为 161,040 bytes，ZIP 为 570,976 bytes；相较 638,651-byte 未优化基线减少 67,675 bytes（约 10.6%）。
+- 版本统一迭代为 `v1.5.7 / versionCode=1570`。保留 v1.5.6-fix 历史包与用户同目录副本，不覆盖或删除。
+
 ## v1.5.6-fix
 
+- WebUI 重构为离线 Miuix 风格紧凑设置页：两个核心模式项与 10 槽白名单继续保持单页高密度布局，伴生 APK 和 KernelSU / ReKernelSU / ReSukiSU 模块页复用同一份资源，不引入 Compose、SolidJS、CDN 或本地网络守护进程。
+- 新增统一交互震感接口。伴生 APK 优先反射 HyperOS `HapticFeedbackUtil`，再回退到 WebView/Android `VibrationEffect`；开关、按钮、赞赏方式和震感强度滑块使用不同的短反馈，强度可设为关闭、轻柔、清晰或强劲，反馈失败不影响配置事务。
+- 新增“关于与支持”底部弹层，离线包含微信支付、微信赞赏和支付宝赞赏码；更新 QQ群入口为 `https://qm.qq.com/q/nOF82hSWwU`。三张资源均进入严格 WebView本地路径白名单、签名APK资产校验和模块ZIP固定清单，网络/文件/content访问边界不放宽。
 - 修复锁屏解锁仍会触发短暂音乐触感，以及 APP 返回时偶发震动的问题。根因不是单一系统包名，也不是必须禁用所有 `flags=0` 输出，而是媒体/游戏 handoff 在应用表和活动输出都已归零后仍可能保持为 1，使后续系统短流继承旧 A2H mode。
 - 保留 v1.5.6 的完整32位游戏 output flags、同包名多流交接与事件驱动重算；额外限制只有 `FAST`、`DEEP_BUFFER`、`COMPRESS_OFFLOAD`、`SPATIALIZER` 退出流可建立 handoff。该门禁用于阻止系统短流自行建立交接状态，但不再被误当作过期 handoff 的唯一修复。
 - 在四份 HAL 一致的 `isA2HAllowed()` 零活动路径加入 guarded idle-clear。普通 `updateA2HMode()+0xec` 会先跳过 helper；只有零活动分支跳到 `+0xf0`，执行 `mov w19,wzr`、清除 manager `+0x519` handoff，再跳回原厂 `+0x18c mov w26,#1`，完整保留返回值 `2` 的清理语义。

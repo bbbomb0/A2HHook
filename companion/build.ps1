@@ -5,8 +5,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$VersionName = '1.5.6-fix'
-$VersionCode = '1561'
+$VersionName = '1.5.7-fix'
+$VersionCode = '1571'
 $Platform = Join-Path $SdkRoot 'platforms\android-36\android.jar'
 $BuildTools = Join-Path $SdkRoot 'build-tools\36.0.0'
 $BuildDir = Join-Path $PSScriptRoot 'build'
@@ -61,7 +61,13 @@ if (Test-Path -LiteralPath $BuildDir) {
 }
 New-Item -ItemType Directory -Path $ClassesDir, $DexDir, $AssetsDir -Force | Out-Null
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\webroot\index.html') -Destination $AssetsDir
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot '..\webroot\coolapk.png') -Destination $AssetsDir
+foreach ($Asset in @(
+    'coolapk.webp',
+    'donate-wechat-pay.webp', 'donate-wechat.webp', 'donate-alipay.webp',
+    'payment-wechat-pay.webp', 'payment-wechat-reward.webp', 'payment-alipay.webp'
+)) {
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot "..\webroot\$Asset") -Destination $AssetsDir
+}
 
 Invoke-Checked $Aapt2 @(
     'compile', '--dir', (Join-Path $PSScriptRoot 'app\src\main\res'), '-o', $ResZip

@@ -32,8 +32,9 @@ endif()
 
 # Runtime patcher (scans maps + process_vm_writev)
 add_executable(a2h_patch patcher_v3.c)
-target_compile_options(a2h_patch PRIVATE -Oz -static -Wall -Wextra)
-target_link_options(a2h_patch PRIVATE -static)
+target_compile_options(a2h_patch PRIVATE -Oz -static -flto -Wall -Wextra
+  -fno-unwind-tables -fno-asynchronous-unwind-tables)
+target_link_options(a2h_patch PRIVATE -static -flto)
 set_target_properties(a2h_patch PROPERTIES
     OUTPUT_NAME "a2h_patch"
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/../bin"
@@ -41,7 +42,9 @@ set_target_properties(a2h_patch PROPERTIES
 
 # Audio trigger (AAudio stream to force HAL loading)
 add_executable(a2h_trigger trigger.c)
-target_compile_options(a2h_trigger PRIVATE -Os -Wall)
+target_compile_options(a2h_trigger PRIVATE -Os -flto -Wall
+  -fno-unwind-tables -fno-asynchronous-unwind-tables)
+target_link_options(a2h_trigger PRIVATE -flto)
 target_link_libraries(a2h_trigger PRIVATE aaudio)
 set_target_properties(a2h_trigger PROPERTIES
     OUTPUT_NAME "a2h_trigger"
@@ -56,7 +59,7 @@ if(A2H_RELEASE_HARDEN)
     if(TARGET ${tgt})
       target_compile_options(${tgt} PRIVATE -fvisibility=hidden -ffunction-sections -fdata-sections)
       target_link_options(${tgt} PRIVATE -Wl,--gc-sections -Wl,--build-id=none)
-      # strip after build if toolchain strip exists
+      # Strip after build if toolchain strip exists.
       add_custom_command(TARGET ${tgt} POST_BUILD
         COMMAND ${CMAKE_STRIP} --strip-all $<TARGET_FILE:${tgt}>
         COMMENT "Stripping ${tgt}"

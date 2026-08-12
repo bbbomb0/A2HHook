@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import zipfile
+import zlib
 from pathlib import Path
 
 
@@ -24,11 +25,18 @@ FILES = (
     "config/game_auto_pause",
     "bin/a2h_patch",
     "bin/a2h_trigger",
+    "bin/a2h_audio_watch",
     "post-fs-data.sh",
     "wrapper.sh",
     "uninstall.sh",
     "webroot/index.html",
-    "webroot/coolapk.png",
+    "webroot/coolapk.webp",
+    "webroot/donate-wechat-pay.webp",
+    "webroot/donate-wechat.webp",
+    "webroot/donate-alipay.webp",
+    "webroot/payment-wechat-pay.webp",
+    "webroot/payment-wechat-reward.webp",
+    "webroot/payment-alipay.webp",
 )
 
 EXECUTABLE = {
@@ -37,6 +45,7 @@ EXECUTABLE = {
     "bin/a2h_apply",
     "bin/a2h_patch",
     "bin/a2h_trigger",
+    "bin/a2h_audio_watch",
     "post-fs-data.sh",
     "wrapper.sh",
     "uninstall.sh",
@@ -48,6 +57,7 @@ TEXT_FILES = {
     "customize.sh",
     "service.sh",
     "bin/a2h_apply",
+    "bin/a2h_audio_watch",
     "config/packages.txt",
     "config/package_states",
     "config/state",
@@ -59,6 +69,12 @@ TEXT_FILES = {
 }
 
 ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)
+
+
+def select_compression(data: bytes) -> int:
+    compressor = zlib.compressobj(9, zlib.DEFLATED, -15)
+    compressed = compressor.compress(data) + compressor.flush()
+    return zipfile.ZIP_DEFLATED if len(compressed) < len(data) else zipfile.ZIP_STORED
 
 
 def read_version(root: Path) -> str:
@@ -105,6 +121,8 @@ def verify_archive(path: Path) -> None:
                 raise ValueError(
                     f"Invalid ZIP mode for {info.filename}: {actual:o}, expected {expected:o}"
                 )
+            if info.compress_size > info.file_size:
+                raise ValueError(f"Inefficient ZIP compression for {info.filename}")
 
 
 def package(root: Path) -> Path:
@@ -133,11 +151,18 @@ def package(root: Path) -> Path:
 
                 info = zipfile.ZipInfo(filename=relative, date_time=ZIP_TIMESTAMP)
                 info.create_system = 3
-                info.compress_type = zipfile.ZIP_DEFLATED
+                compression = select_compression(data)
+                info.compress_type = compression
                 mode = 0o100755 if relative in EXECUTABLE else 0o100644
                 info.external_attr = mode << 16
-                archive.writestr(info, data, compresslevel=9)
-                print(f"  + {relative} mode={mode & 0o777:o}")
+                archive.writestr(
+                    info,
+                    data,
+                    compress_type=compression,
+                    compresslevel=9 if compression == zipfile.ZIP_DEFLATED else None,
+                )
+                method = "deflate" if compression == zipfile.ZIP_DEFLATED else "store"
+                print(f"  + {relative} mode={mode & 0o777:o} method={method}")
 
         verify_archive(temporary)
         os.replace(temporary, output)

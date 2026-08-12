@@ -14,7 +14,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Shared fast-feedback state machine for both A2H quick settings tiles. */
 abstract class A2HToggleTileService extends TileService {
     private static final String TAG = "A2HToggleTile";
-    private static final String STATE_MARKER = "__A2H_TILE_STATE__";
     private static final ExecutorService EXECUTOR = Executors.newFixedThreadPool(2, r -> {
         Thread thread = new Thread(r, "a2h-tile-root");
         thread.setDaemon(true);
@@ -39,6 +38,14 @@ abstract class A2HToggleTileService extends TileService {
 
     protected abstract String pendingSubtitle();
 
+    protected String initialState() {
+        return "disabled";
+    }
+
+    protected boolean isActiveState(String state) {
+        return "enabled".equals(state);
+    }
+
     protected abstract int activeIcon();
 
     protected abstract int inactiveIcon();
@@ -46,12 +53,14 @@ abstract class A2HToggleTileService extends TileService {
     @Override
     public void onStartListening() {
         super.onStartListening();
+        if (!loaded) knownState = initialState();
         refresh(false);
     }
 
     @Override
     public void onClick() {
         if (!loaded) {
+            knownState = initialState();
             updateTile(knownState, "读取中");
             refresh(true);
             return;
@@ -64,9 +73,7 @@ abstract class A2HToggleTileService extends TileService {
         // Predict the visual state immediately; root/native work remains serialized below.
         updateTile(next, pendingSubtitle());
         EXECUTOR.execute(() -> {
-            RootShell.Result result = RootShell.run(
-                    "sh " + toggleCommand() + "; rc=$?; printf '\\n" + STATE_MARKER + "\\n'; cat "
-                            + statePath() + " 2>/dev/null; exit $rc", 20000);
+            RootShell.Result result = RootShell.run("sh " + toggleCommand(), 10000);
             String applied = parseState(result.stdout);
             boolean success = result.code == 0 && next.equals(applied);
             if (!success) {
@@ -114,7 +121,7 @@ abstract class A2HToggleTileService extends TileService {
     private void updateTile(String state, String error) {
         Tile tile = getQsTile();
         if (tile == null) return;
-        boolean enabled = "enabled".equals(state);
+        boolean enabled = isActiveState(state);
         tile.setLabel(tileLabel());
         tile.setSubtitle(error != null ? error : (enabled ? activeSubtitle() : inactiveSubtitle()));
         tile.setState(enabled ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
@@ -128,9 +135,7 @@ abstract class A2HToggleTileService extends TileService {
 
     private static String parseState(String output) {
         if (output == null) return null;
-        int marker = output.lastIndexOf(STATE_MARKER);
-        String value = marker >= 0 ? output.substring(marker + STATE_MARKER.length()) : output;
-        for (String line : value.split("\\R")) {
+        for (String line : output.split("\\R")) {
             String state = line.trim();
             if ("enabled".equals(state) || "disabled".equals(state)) return state;
         }

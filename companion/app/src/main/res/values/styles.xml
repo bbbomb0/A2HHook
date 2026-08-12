@@ -1,9 +1,12 @@
 <resources>
-    <style name="Theme.A2HHook" parent="android:style/Theme.Material.Light.NoActionBar">
+    <style name="Theme.A2HHook" parent="android:style/Theme.DeviceDefault.DayNight">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#08775A</item>
-        <item name="android:navigationBarColor">#F3F5F6</item>
-        <item name="android:statusBarColor">#F3F5F6</item>
-        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:colorAccent">#3482FF</item>
+        <item name="android:windowActionBar">false</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowDrawsSystemBarBackgrounds">true</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:windowActionModeOverlay">true</item>
     </style>
 </resources>
