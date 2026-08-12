@@ -12,6 +12,13 @@ env:
   NDK_VERSION: "r26d"
   API_LEVEL: 31
 
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     name: Build arm64-v8a module
@@ -19,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install host tools
         run: |
@@ -59,18 +66,20 @@ jobs:
             --expected-code "$MODULE_VERSION_CODE"
 
       - name: Upload module ZIP
-        uses: actions/upload-artifact@v4
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ env.ZIP_NAME }}
           path: ${{ env.ZIP_NAME }}
-          retention-days: 90
+          retention-days: 30
 
       - name: Upload native binaries
-        uses: actions/upload-artifact@v4
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v7
         with:
           name: a2h_native_arm64-v8a
           path: |
             bin/a2h_apply
             bin/a2h_patch
             bin/a2h_trigger
-          retention-days: 90
+          retention-days: 30
