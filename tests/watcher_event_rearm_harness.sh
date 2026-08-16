@@ -99,6 +99,11 @@ wait_for_watch_tick() {
   watch_elapsed_ticks=1
 }
 
+service_lock_owner=test-owner
+service_lock_still_owned() {
+  return 0
+}
+
 config_inotify_enabled=1
 config_inotify_pid=$$
 audio_watcher_pid=$$

@@ -1,5 +1,22 @@
 # 更新日志
 
+## v1.5.8
+
+- 修复切换全局/白名单模式时，当前正在播放的媒体流不会立即重新计算 A2H 的问题。AudioPolicy 活动端口现在保留合法包名、session 和 portId 事实记录；模式切换后 watcher 会按最新模式立即重算。
+- native 配置事务成功后写入一次性 root-only reconcile 标记，并通过受控 logcat 唤醒唯一 watcher。允许的包安全重启一条 A2H 租约，不允许的包只撤销 A2H 租约，不暂停实际媒体播放、不杀 audioserver、不恢复周期 ptrace。
+- 同包多端口只处理一次；租约停止严格校验 PID+starttime，保留原子 claim、失败清理、全局/10 槽白名单和游戏策略语义。
+- 在原有严格回归基础上新增“白名单拒绝端口→切换全局立即启动”“切回禁用立即停止”“启用槽重新启动”“同包多端口只重算一次”动态覆盖；完整门禁为 `78 PASS / 0 FAIL / 0 GAP`。
+- 版本迭代为 `v1.5.8 / versionCode=1580`。本人 K80U / HyperOS 3.0.302 已完成开机自动应用、播放中白名单↔全局即时重算、租约释放/恢复、35 秒稳态与 `TracerPid=0` 门禁。
+- 可复现产物：伴生 APK `161041` 字节，SHA-256=`A1887F33A8BBBF4BFF029A915468BAE9E520B076DFE2F24409F31A4E0D08922D`；模块 ZIP `582213` 字节，SHA-256=`EE445FF510E7D3504DCF49EC33C57CFD85305AB5CBBB08CEA80BA1B9C1B3A690`。
+
+- 修复 Root 管理器或异常启动路径同时拉起两个模块 service 后，出现多个 `a2h_audio_watch`、同一应用累积多条长期静音 `a2h_trigger` 的问题。关闭“游戏时启动后台音乐触感”时，后台椒盐音乐等真实第二媒体应用与前台抖音并存，本来就会触发小米官方并发暂停策略；重复 watcher 生成的伪音轨还会额外放大该现象。两种情况现已明确区分，不再误归因为白名单或 native matcher 掉补丁。
+- `service.sh` 新增 PID + `/proc` starttime + root 所有权单例锁，watcher 新增第二层独立单例锁；每包 AAudio 租约新增原子 claim。重复 service、重复 watcher 与同包事件风暴均被分层拒绝，fallback 到真实 AudioPolicy 租约的原位提升语义保持不变。
+- 锁恢复采用两次稳定复核：创建中 owner、有效 owner、陈旧 owner、PID 复用与非所有者释放均有动态回归。开机早期清理模块固定 service 锁和音轨运行目录；外来非 root 同名目录失败关闭，不删除或接管。
+- 修复 Android mksh 对带空格厂商 JSON 的回退解析：不再使用会把 `|` 当扩展模式的参数展开，改为 `IFS='|' read` 三字段解析。紧凑 JSON 快路径、包名验证、UID 边界和 10 槽精确匹配不变。
+- 社区现场执行 `killall audioserver` 后恢复，仅作为“旧音轨/音频会话被清空”的诊断旁证；模块不会常规杀死 audioserver，避免中断通话、录音、蓝牙或其他系统音频。
+- native HAL 补丁代码除版本字符串外没有变化；严格 ELF/控制流定位、完整所有权、协调快照、双写、两次 I-cache 同步、最终验证与失败回滚全部保留。
+- 上述运行时单例修复与播放中即时重算共同作为 `v1.5.8 / versionCode=1580` 发布；最终 ADB/NDK/四 ROM 严格套件达到 `78 PASS / 0 FAIL / 0 GAP`。
+
 ## v1.5.7-fix
 
 - 本节与下方 `v1.5.7` 小节共同构成 `v1.5.7-fix` 相较 `v1.5.6-fix` 的完整变更：包含 WebUI/磁贴重构、配置与运行效率优化、任意普通应用包名的音轨补登记，以及本节新增的 callback-ready / AudioPolicy 租约修复。`v1.5.7` 是本次开发过程中的中间版本标识，GitHub 正式发布版本为 `v1.5.7-fix`。

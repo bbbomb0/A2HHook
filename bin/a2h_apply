@@ -35,6 +35,10 @@ CONFIG_LOCK=/data/local/tmp/a2h_config.lock
 ACTION_LOG="$MODDIR/action.log"
 MAIN_LOG="$MODDIR/a2h_patch.log"
 SELF="$MODDIR/bin/a2h_apply"
+AUDIO_RUNTIME_DIR=${A2H_AUDIO_RUNTIME_DIR:-/data/local/tmp/a2h_hook_runtime}
+AUDIO_RECONCILE_MARKER="$AUDIO_RUNTIME_DIR/reconcile"
+ANDROID_LOGGER=${A2H_ANDROID_LOGGER:-/system/bin/log}
+RECONCILE_LOG_TAG=${A2H_RECONCILE_LOG_TAG:-a2h_audio_watch}
 
 CURRENT_MODE=disabled
 CURRENT_GAME_AUTO_PAUSE=enabled
@@ -83,6 +87,20 @@ write_value_atomic() {
     return 1
   fi
   commit_tmp "$value_tmp" "$value_dest" "$value_mode"
+}
+
+signal_audio_reconcile() {
+  [ "${A2H_SKIP_AUDIO_RECONCILE:-0}" != "1" ] || return 0
+  reconcile_marker=${AUDIO_RECONCILE_MARKER:-${A2H_AUDIO_RUNTIME_DIR:-/data/local/tmp/a2h_hook_runtime}/reconcile}
+  reconcile_logger=${ANDROID_LOGGER:-/system/bin/log}
+  reconcile_tag=${RECONCILE_LOG_TAG:-a2h_audio_watch}
+  reconcile_value="$CURRENT_REVISION $CURRENT_SNAPSHOT"
+  write_value_atomic "$reconcile_marker" "$reconcile_value" 0600 || return 1
+  if [ -x "$reconcile_logger" ]; then
+    "$reconcile_logger" -t "$reconcile_tag" -p i \
+      '__A2H_RECONCILE__' >/dev/null 2>&1 || true
+  fi
+  return 0
 }
 
 compute_path_fingerprint() {
@@ -1564,6 +1582,9 @@ apply_stable() {
     if [ "$stable_patch_rc" -eq 0 ] && [ "$stable_before" = "$stable_after" ]; then
       if refresh_policy_state "$stable_applied_policy"; then
         if record_applied; then
+          if ! signal_audio_reconcile; then
+            log "watcher reconcile signal deferred revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT"
+          fi
           stable_rc=0
         else
           log "apply FAIL reason=$stable_reason error=record-applied"

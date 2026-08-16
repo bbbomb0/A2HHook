@@ -18,16 +18,24 @@ PORT_DIR="$RUNTIME_DIR/ports"
 LEASE_DIR="$RUNTIME_DIR/leases"
 LEASE_PID_DIR="$RUNTIME_DIR/lease_pids"
 SESSION_DIR="$RUNTIME_DIR/sessions"
+LEASE_CLAIM_DIR="$RUNTIME_DIR/lease_claims"
+WATCH_LOCK_DIR=${A2H_WATCH_LOCK_DIR:-$RUNTIME_DIR/watcher.lock}
+WATCH_LOCK_RECORD="$WATCH_LOCK_DIR/owner"
+RECONCILE_MARKER="$RUNTIME_DIR/reconcile"
 LOG=${A2H_LOG_FILE:-$MODDIR/a2h_patch.log}
 LOGCAT_BIN=${A2H_LOGCAT_BIN:-logcat}
 SU_BIN=${A2H_SU_BIN:-su}
 MEDIAEVENT_TAG=${A2H_MEDIAEVENT_TAG:-vendor.xiaomi.hardware.mediaeventgatherservice-service}
+RECONCILE_LOG_TAG=${A2H_RECONCILE_LOG_TAG:-a2h_audio_watch}
 COOLDOWN_SECONDS=${A2H_COOLDOWN_SECONDS:-8}
 FALLBACK_LEASE_SECONDS=${A2H_FALLBACK_LEASE_SECONDS:-70}
 
 logcat_pid=
 event_fifo=
 lease_sequence=0
+watch_lock_owner=
+lease_claim_path=
+lease_claim_owner=
 
 ts() { date '+%F %T'; }
 log() { printf '[%s] audio-watch %s\n' "$(ts)" "$*" >> "$LOG" 2>/dev/null; }
@@ -66,6 +74,7 @@ prepare_runtime() {
     log "runtime prepare FAIL reason=directory-mode path=$RUNTIME_DIR"
     return 1
   }
+  acquire_watcher_lock || return $?
   [ -f "$TRIGGER_SOURCE" ] || {
     log "runtime prepare FAIL reason=trigger-missing path=$TRIGGER_SOURCE"
     return 1
@@ -97,15 +106,16 @@ prepare_runtime() {
   }
 
   mkdir -p "$COOLDOWN_DIR" "$CORE_UID_DIR" "$PORT_DIR" "$LEASE_DIR" \
-    "$LEASE_PID_DIR" "$SESSION_DIR" 2>/dev/null || return 1
+    "$LEASE_PID_DIR" "$SESSION_DIR" "$LEASE_CLAIM_DIR" 2>/dev/null || return 1
   if [ "${A2H_SKIP_CHOWN:-0}" != "1" ]; then
     chown 0:0 "$COOLDOWN_DIR" "$CORE_UID_DIR" "$PORT_DIR" "$LEASE_DIR" \
-      "$LEASE_PID_DIR" "$SESSION_DIR" 2>/dev/null || return 1
+      "$LEASE_PID_DIR" "$SESSION_DIR" "$LEASE_CLAIM_DIR" 2>/dev/null || return 1
   fi
   chmod 0700 "$COOLDOWN_DIR" "$CORE_UID_DIR" "$PORT_DIR" \
-    "$LEASE_PID_DIR" 2>/dev/null || return 1
+    "$LEASE_PID_DIR" "$LEASE_CLAIM_DIR" 2>/dev/null || return 1
   chmod 0711 "$LEASE_DIR" "$SESSION_DIR" 2>/dev/null || return 1
   reset_runtime_state
+  rm -f "$RECONCILE_MARKER" "$RECONCILE_MARKER".* 2>/dev/null
   return 0
 }
 
@@ -158,7 +168,7 @@ process_starttime() {
   process_pid=$1
   case "$process_pid" in ''|*[!0-9]*) return 1 ;; esac
   process_stat=
-  IFS= read -r process_stat < "/proc/$process_pid/stat" 2>/dev/null || return 1
+  IFS= read -r process_stat 2>/dev/null < "/proc/$process_pid/stat" || return 1
   process_tail=${process_stat##*) }
   [ "$process_tail" != "$process_stat" ] || return 1
   set -- $process_tail
@@ -167,6 +177,147 @@ process_starttime() {
   process_value=$1
   case "$process_value" in ''|*[!0-9]*) return 1 ;; esac
   printf '%s\n' "$process_value"
+}
+
+owned_dir_owner_alive() {
+  owned_record=$1
+  owned_value=
+  [ ! -r "$owned_record" ] || IFS= read -r owned_value < "$owned_record" || true
+  owned_pid=${owned_value%%.*}
+  owned_start=${owned_value#*.}
+  case "$owned_pid" in ''|*[!0-9]*) return 1 ;; esac
+  case "$owned_start" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$owned_start" != "$owned_value" ] || return 1
+  owned_live_start=$(process_starttime "$owned_pid") || return 1
+  [ "$owned_live_start" = "$owned_start" ] && kill -0 "$owned_pid" 2>/dev/null
+}
+
+stale_owned_dir_recheck() {
+  stale_dir=$1
+  stale_record=$2
+  [ -d "$stale_dir" ] && [ ! -L "$stale_dir" ] || return 1
+  owned_dir_owner_alive "$stale_record" && return 1
+  stale_value_1=
+  [ ! -r "$stale_record" ] || IFS= read -r stale_value_1 < "$stale_record" || true
+  sleep 1
+  [ -d "$stale_dir" ] && [ ! -L "$stale_dir" ] || return 1
+  owned_dir_owner_alive "$stale_record" && return 1
+  stale_value_2=
+  [ ! -r "$stale_record" ] || IFS= read -r stale_value_2 < "$stale_record" || true
+  [ "$stale_value_1" = "$stale_value_2" ] || return 1
+  sleep 1
+  [ -d "$stale_dir" ] && [ ! -L "$stale_dir" ] || return 1
+  owned_dir_owner_alive "$stale_record" && return 1
+  stale_value_3=
+  [ ! -r "$stale_record" ] || IFS= read -r stale_value_3 < "$stale_record" || true
+  [ "$stale_value_2" = "$stale_value_3" ] || return 1
+  rm -f "$stale_record" 2>/dev/null || return 1
+  rmdir "$stale_dir" 2>/dev/null
+}
+
+acquire_watcher_lock() {
+  watch_lock_try=0
+  while [ "$watch_lock_try" -lt 4 ]; do
+    if mkdir "$WATCH_LOCK_DIR" 2>/dev/null; then
+      watch_start=$(process_starttime "$$") || {
+        rmdir "$WATCH_LOCK_DIR" 2>/dev/null || true
+        return 1
+      }
+      watch_lock_owner="$$.$watch_start"
+      printf '%s\n' "$watch_lock_owner" > "$WATCH_LOCK_RECORD" 2>/dev/null || {
+        watch_lock_owner=
+        rmdir "$WATCH_LOCK_DIR" 2>/dev/null || true
+        return 1
+      }
+      chmod 0700 "$WATCH_LOCK_DIR" 2>/dev/null || true
+      chmod 0600 "$WATCH_LOCK_RECORD" 2>/dev/null || true
+      return 0
+    fi
+    [ ! -L "$WATCH_LOCK_DIR" ] || {
+      log "singleton rejected reason=symlink path=$WATCH_LOCK_DIR"
+      return 1
+    }
+    if owned_dir_owner_alive "$WATCH_LOCK_RECORD"; then
+      watch_existing=
+      IFS= read -r watch_existing < "$WATCH_LOCK_RECORD" || true
+      log "duplicate ignored owner=$watch_existing"
+      return 75
+    fi
+    stale_owned_dir_recheck "$WATCH_LOCK_DIR" "$WATCH_LOCK_RECORD" || true
+    watch_lock_try=$((watch_lock_try + 1))
+  done
+  log "singleton acquire FAIL"
+  return 1
+}
+
+release_watcher_lock() {
+  [ -n "$watch_lock_owner" ] || return 0
+  watch_current_owner=
+  [ ! -r "$WATCH_LOCK_RECORD" ] || \
+    IFS= read -r watch_current_owner < "$WATCH_LOCK_RECORD" || true
+  if [ "$watch_current_owner" = "$watch_lock_owner" ]; then
+    rm -f "$WATCH_LOCK_RECORD" 2>/dev/null
+    rmdir "$WATCH_LOCK_DIR" 2>/dev/null || true
+  fi
+  watch_lock_owner=
+}
+
+watcher_lock_still_owned() {
+  [ -n "$watch_lock_owner" ] || return 1
+  watch_current_owner=
+  [ ! -r "$WATCH_LOCK_RECORD" ] || \
+    IFS= read -r watch_current_owner < "$WATCH_LOCK_RECORD" || true
+  [ "$watch_current_owner" = "$watch_lock_owner" ] || return 1
+  owned_dir_owner_alive "$WATCH_LOCK_RECORD"
+}
+
+require_watcher_lock() {
+  watcher_lock_still_owned && return 0
+  log "ownership lost expected=$watch_lock_owner; stopping watcher"
+  exit 0
+}
+
+acquire_lease_claim() {
+  claim_package=$1
+  lease_claim_path="$LEASE_CLAIM_DIR/$claim_package"
+  claim_try=0
+  while [ "$claim_try" -lt 4 ]; do
+    if mkdir "$lease_claim_path" 2>/dev/null; then
+      claim_start=$(process_starttime "$$") || {
+        rmdir "$lease_claim_path" 2>/dev/null || true
+        return 1
+      }
+      lease_claim_owner="$$.$claim_start"
+      printf '%s\n' "$lease_claim_owner" > "$lease_claim_path/owner" 2>/dev/null || {
+        lease_claim_owner=
+        rmdir "$lease_claim_path" 2>/dev/null || true
+        return 1
+      }
+      chmod 0700 "$lease_claim_path" 2>/dev/null || true
+      chmod 0600 "$lease_claim_path/owner" 2>/dev/null || true
+      return 0
+    fi
+    [ ! -L "$lease_claim_path" ] || return 1
+    if owned_dir_owner_alive "$lease_claim_path/owner"; then
+      return 2
+    fi
+    stale_owned_dir_recheck "$lease_claim_path" "$lease_claim_path/owner" || true
+    claim_try=$((claim_try + 1))
+  done
+  return 1
+}
+
+release_lease_claim() {
+  [ -n "$lease_claim_path" ] && [ -n "$lease_claim_owner" ] || return 0
+  claim_current_owner=
+  [ ! -r "$lease_claim_path/owner" ] || \
+    IFS= read -r claim_current_owner < "$lease_claim_path/owner" || true
+  if [ "$claim_current_owner" = "$lease_claim_owner" ]; then
+    rm -f "$lease_claim_path/owner" 2>/dev/null
+    rmdir "$lease_claim_path" 2>/dev/null || true
+  fi
+  lease_claim_path=
+  lease_claim_owner=
 }
 
 read_lease_record() {
@@ -207,6 +358,12 @@ reset_runtime_state() {
     fi
   done
   rm -f "$LEASE_PID_DIR"/* "$PORT_DIR"/* 2>/dev/null
+  for stale_claim in "$LEASE_CLAIM_DIR"/*; do
+    [ -d "$stale_claim" ] || continue
+    [ ! -L "$stale_claim" ] || continue
+    rm -f "$stale_claim/owner" 2>/dev/null
+    rmdir "$stale_claim" 2>/dev/null || true
+  done
   for stale_session_dir in "$SESSION_DIR"/*; do
     [ -d "$stale_session_dir" ] || continue
     [ ! -L "$stale_session_dir" ] || continue
@@ -235,7 +392,7 @@ promote_lease_token() {
   write_lease_token "$promote_package" "$promote_kind"
 }
 
-start_lease() {
+start_lease_owned() {
   lease_package=$1
   lease_uid=$2
   lease_kind=$3
@@ -346,6 +503,41 @@ start_lease() {
   return 0
 }
 
+start_lease() {
+  lease_package=$1
+  lease_uid=$2
+  lease_kind=$3
+  if lease_alive "$lease_package"; then
+    promote_lease_token "$lease_package" "$lease_kind" || true
+    return 0
+  fi
+
+  claim_wait=0
+  while [ "$claim_wait" -lt 100 ]; do
+    acquire_lease_claim "$lease_package"
+    claim_rc=$?
+    [ "$claim_rc" -eq 0 ] && break
+    if lease_alive "$lease_package"; then
+      promote_lease_token "$lease_package" "$lease_kind" || true
+      return 0
+    fi
+    [ "$claim_rc" -eq 2 ] || return 1
+    sleep 0.02
+    claim_wait=$((claim_wait + 1))
+  done
+  [ "$claim_rc" -eq 0 ] || return 1
+
+  if lease_alive "$lease_package"; then
+    promote_lease_token "$lease_package" "$lease_kind" || true
+    lease_rc=0
+  else
+    start_lease_owned "$lease_package" "$lease_uid" "$lease_kind"
+    lease_rc=$?
+  fi
+  release_lease_claim
+  return "$lease_rc"
+}
+
 trigger_session_matches() {
   session_package=$1
   session_value=$2
@@ -373,7 +565,94 @@ release_policy_lease_if_idle() {
   rm -f "$LEASE_DIR/$idle_package" 2>/dev/null
 }
 
+package_has_active_port() {
+  active_package=$1
+  for active_port in "$PORT_DIR"/*; do
+    [ -f "$active_port" ] || continue
+    active_port_package=
+    active_port_session=
+    IFS=' ' read -r active_port_package active_port_session < "$active_port" || true
+    [ "$active_port_package" != "$active_package" ] || return 0
+  done
+  return 1
+}
+
+stop_lease_for_reconcile() {
+  stop_package=$1
+  stop_record="$LEASE_PID_DIR/$stop_package"
+  stop_owner="$LEASE_PID_DIR/$stop_package.owner"
+  stop_session_dir="$SESSION_DIR/$stop_package"
+  rm -f "$LEASE_DIR/$stop_package" 2>/dev/null
+  if read_lease_record "$stop_record"; then
+    stop_pid=$lease_read_pid
+    stop_start=$lease_read_start
+    stop_live_start=$(process_starttime "$stop_pid") || stop_live_start=
+    if [ "$stop_live_start" = "$stop_start" ] && kill -0 "$stop_pid" 2>/dev/null; then
+      kill "$stop_pid" 2>/dev/null || true
+      wait "$stop_pid" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$stop_record" "$stop_owner" 2>/dev/null
+  if [ -d "$stop_session_dir" ] && [ ! -L "$stop_session_dir" ]; then
+    rm -f "$stop_session_dir"/* 2>/dev/null
+  fi
+}
+
+reconcile_package() {
+  reconcile_package_name=$1
+  valid_package "$reconcile_package_name" || return 0
+  case "$reconcile_seen" in
+    *"|$reconcile_package_name|"*) return 0 ;;
+  esac
+  reconcile_seen="${reconcile_seen}${reconcile_package_name}|"
+  reconcile_total=$((reconcile_total + 1))
+  reconcile_kind="fallback:$FALLBACK_LEASE_SECONDS"
+  package_has_active_port "$reconcile_package_name" && reconcile_kind=policy
+
+  if ! mode_allows_package "$reconcile_package_name"; then
+    stop_lease_for_reconcile "$reconcile_package_name"
+    reconcile_stopped=$((reconcile_stopped + 1))
+    return 0
+  fi
+
+  reconcile_uid=$(package_uid "$reconcile_package_name")
+  case "$reconcile_uid" in ''|*[!0-9]*) return 0 ;; esac
+  [ "$reconcile_uid" -ge 10000 ] 2>/dev/null || return 0
+  stop_lease_for_reconcile "$reconcile_package_name"
+  if start_lease "$reconcile_package_name" "$reconcile_uid" "$reconcile_kind"; then
+    reconcile_started=$((reconcile_started + 1))
+  else
+    log "reconcile lease FAIL package=$reconcile_package_name uid=$reconcile_uid kind=$reconcile_kind"
+  fi
+}
+
+reconcile_active_leases() {
+  require_watcher_lock
+  [ -f "$RECONCILE_MARKER" ] || return 0
+  reconcile_claim="$RECONCILE_MARKER.$$"
+  mv "$RECONCILE_MARKER" "$reconcile_claim" 2>/dev/null || return 0
+  reconcile_seen='|'
+  reconcile_total=0
+  reconcile_started=0
+  reconcile_stopped=0
+  for reconcile_port in "$PORT_DIR"/*; do
+    [ -f "$reconcile_port" ] || continue
+    reconcile_port_package=
+    reconcile_port_session=
+    IFS=' ' read -r reconcile_port_package reconcile_port_session < "$reconcile_port" || true
+    reconcile_package "$reconcile_port_package"
+  done
+  for reconcile_token in "$LEASE_DIR"/*; do
+    [ -f "$reconcile_token" ] || continue
+    reconcile_package "${reconcile_token##*/}"
+  done
+  rm -f "$reconcile_claim" 2>/dev/null
+  log "reconcile complete total=$reconcile_total started=$reconcile_started stopped=$reconcile_stopped"
+  return 0
+}
+
 policy_start() {
+  require_watcher_lock
   policy_package=$1
   policy_port=$2
   policy_session=$3
@@ -381,7 +660,6 @@ policy_start() {
   case "$policy_port" in ''|*[!0-9]*) return 0 ;; esac
   case "$policy_session" in ''|*[!0-9]*) return 0 ;; esac
   trigger_session_matches "$policy_package" "$policy_session" && return 0
-  mode_allows_package "$policy_package" || return 0
   policy_uid=$(package_uid "$policy_package")
   case "$policy_uid" in ''|*[!0-9]*) return 0 ;; esac
   [ "$policy_uid" -ge 10000 ] 2>/dev/null || return 0
@@ -396,11 +674,16 @@ policy_start() {
   if valid_package "$previous_package" && [ "$previous_package" != "$policy_package" ]; then
     release_policy_lease_if_idle "$previous_package"
   fi
+  if ! mode_allows_package "$policy_package"; then
+    stop_lease_for_reconcile "$policy_package"
+    return 0
+  fi
   start_lease "$policy_package" "$policy_uid" policy ||
     log "lease start FAIL package=$policy_package uid=$policy_uid kind=policy"
 }
 
 policy_stop() {
+  require_watcher_lock
   policy_port=$1
   policy_session=$2
   case "$policy_port" in ''|*[!0-9]*) return 0 ;; esac
@@ -479,6 +762,7 @@ cooldown_accept() {
 }
 
 trigger_for_package() {
+  require_watcher_lock
   trigger_package=$1
   mode_allows_package "$trigger_package" || return 0
   # Core package UIDs are stable for the lifetime of this boot. Cache only
@@ -508,6 +792,10 @@ trigger_for_package() {
 
 handle_event_line() {
   event_line=$1
+  if [ -f "$RECONCILE_MARKER" ]; then
+    reconcile_active_leases
+  fi
+  [ "$event_line" != "__A2H_RECONCILE__" ] || return 0
   handle_policy_event "$event_line" && return 0
   case "$event_line" in
     *'"name":"audio_track_message"'*'"app_name":"'*'"scenario":"playback"'*)
@@ -522,10 +810,12 @@ handle_event_line() {
   esac
   event_fields=$(printf '%s\n' "$event_line" | sed -n \
     's/.*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*"app_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*"scenario"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1|\2|\3/p')
-  event_name=${event_fields%%|*}
-  event_fields=${event_fields#*|}
-  event_package=${event_fields%%|*}
-  event_scenario=${event_fields#*|}
+  event_name=
+  event_package=
+  event_scenario=
+  IFS='|' read -r event_name event_package event_scenario <<EOF
+$event_fields
+EOF
   [ "$event_name" = "audio_track_message" ] || return 0
   [ "$event_scenario" = "playback" ] || return 0
   valid_package "$event_package" || return 0
@@ -546,6 +836,14 @@ cleanup() {
     wait "$logcat_pid" 2>/dev/null || true
   fi
   logcat_pid=
+  cleanup_owned=0
+  watcher_lock_still_owned && cleanup_owned=1
+  if [ "$cleanup_owned" -ne 1 ]; then
+    [ -z "$event_fifo" ] || rm -f "$event_fifo" 2>/dev/null
+    event_fifo=
+    release_watcher_lock
+    return 0
+  fi
   for lease_token in "$LEASE_DIR"/*; do
     [ -f "$lease_token" ] || continue
     rm -f "$lease_token" 2>/dev/null
@@ -581,6 +879,12 @@ cleanup() {
     wait "$lease_read_pid" 2>/dev/null || true
   done
   rm -f "$LEASE_PID_DIR"/* "$PORT_DIR"/* 2>/dev/null
+  for lease_claim in "$LEASE_CLAIM_DIR"/*; do
+    [ -d "$lease_claim" ] || continue
+    [ ! -L "$lease_claim" ] || continue
+    rm -f "$lease_claim/owner" 2>/dev/null
+    rmdir "$lease_claim" 2>/dev/null || true
+  done
   for lease_session_dir in "$SESSION_DIR"/*; do
     [ -d "$lease_session_dir" ] || continue
     [ ! -L "$lease_session_dir" ] || continue
@@ -589,6 +893,7 @@ cleanup() {
   done
   [ -z "$event_fifo" ] || rm -f "$event_fifo" 2>/dev/null
   event_fifo=
+  release_watcher_lock
 }
 
 watch_events() {
@@ -603,7 +908,8 @@ watch_events() {
     }
     chmod 0600 "$event_fifo" 2>/dev/null || true
     "$LOGCAT_BIN" -b main -v raw -T 1 -s "$MEDIAEVENT_TAG:D" \
-      'APM_AudioPolicyManager:D' 'AudioPolicyManager:D' '*:S' \
+      'APM_AudioPolicyManager:D' 'AudioPolicyManager:D' \
+      "$RECONCILE_LOG_TAG:I" '*:S' \
       > "$event_fifo" 2>/dev/null &
     logcat_pid=$!
     log "logcat start pid=$logcat_pid tag=$MEDIAEVENT_TAG"
@@ -631,7 +937,10 @@ watch_events() {
 trap 'exit 0' INT TERM HUP
 trap cleanup EXIT
 
-prepare_runtime || exit 1
+prepare_runtime
+prepare_rc=$?
+[ "$prepare_rc" -eq 75 ] && exit 0
+[ "$prepare_rc" -eq 0 ] || exit 1
 case "${1:-}" in
   --file)
     [ -n "${2:-}" ] || exit 2
