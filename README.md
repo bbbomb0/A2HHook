@@ -34,18 +34,9 @@ A2HHook 是面向 REDMI K80 Ultra / K80U 的音乐触感模块，目标是在 Ke
 - **陈旧状态恢复：** 创建中的锁不会被短等待误删；只有 owner 连续两次稳定、PID/starttime 已失效时才回收。开机早期只清理模块固定 service 锁与音轨运行目录，非 root 同名目录拒绝接管。
 - **Android 解析兼容：** 修复 mksh 将 `${value%%|*}` 中 `|` 解释为扩展模式、导致带空格 JSON 三字段变空的问题，改为确定性的 `IFS='|' read`，紧凑 JSON 快路径保持不变。
 - **安全边界：** 不把 `killall audioserver` 作为日常修复，不修改 native HAL 双写、两次 I-cache、所有权验证或事务回滚，也不新增周期 `ptrace`、`dumpsys` 或高优先级常驻轮询。
-- **验证：** Android shell、同包 20 次事件风暴、重复 watcher、创建中/陈旧/PID 复用锁、全局/白名单与四份 OS2/OS3 HAL fixture 的严格套件达到 `77 PASS / 0 FAIL / 0 GAP`。
+- **运行时回归：** Android shell、同包 20 次事件风暴、重复 watcher、创建中/陈旧/PID 复用锁、全局/白名单与四份 OS2/OS3 HAL fixture 已全部纳入最终 `78 PASS / 0 FAIL / 0 GAP` 门禁。
 
-## v1.5.7-fix 相较 v1.5.6-fix
-
-- **游戏与应用兼容：** 新增厂商 playback 事件与 AudioPolicy 端口生命周期 watcher，为没有向 HAL 登记 `appname` 的原生低延迟音轨补齐真实包名。全局模式接受任意合法普通应用包名，自定义模式接受 10 槽中任意已启用的精确包名；不硬编码游戏、不猜前台应用，也不周期轮询 `dumpsys`。
-- **音频生命周期：** AAudio 登记流只有在 `STARTED` 且首个静音 callback 实际执行后才报告 ready，并由真实 `portId/session` 维持到最后一个应用端口停止；兼容字段顺序差异、`stopOutput/stoptOutput`、stop 缺少包名、多端口和无 policy 日志时的 70 秒有界 fallback。
-- **WebUI 与磁贴：** 统一离线 Miuix 风格界面、系统安全区、三态主题、分层“关于/支持我们”、强劲震感和正向“游戏时启动后台音乐触感”语义。修复磁贴入口“跟随系统”固定浅色；KSU 内开关先立即切换，再短暂变灰等待 Root 严格读回，失败自动恢复。
-- **配置与运行效率：** 合并重复配置认证和 worker 请求，缓存 patcher 能力与进程内 ELF 符号解析，稳定监听改为 FIFO 阻塞，音轨热路径优先使用 shell 内建解析，logcat 异常采用有界退避；稳态不增加周期 `ptrace`、CPU 锁频、固定亲和性或常驻高优先级服务。
-- **安全与兼容：** 保留唯一 ELF/控制流证明、完整所有权检查、协调快照、双写、两次 I-cache 同步、native 最终验证和失败全量回滚。OS2.0.208、OS2.0.218、OS3.0.302、OS3.0.305 归档 HAL 已通过静态 fixture；K80U / HyperOS OS3.0.302 / Android 16 已完成实机验证，其他系统仍须在目标设备上通过运行时语义门禁，不能等同于全系统实机验证。
-- **验证与产物：** 最终严格套件为 `76 PASS / 0 FAIL / 0 GAP`。发布包为 578,677 bytes，相较 638,651-byte 优化前基线减少 59,974 bytes（约 9.4%）；SHA-256 为 `C415043ABF883E64D04B7B40256A24B7541E2CB8A2D59D1848138ACFA86A7613`。
-
-完整提交差异见 [v1.5.6-fix...v1.5.7-fix](https://github.com/bbbomb0/A2HHook/compare/v1.5.6-fix...v1.5.7-fix)，面向用户的完整说明见 [v1.5.7-fix Release](https://github.com/bbbomb0/A2HHook/releases/tag/v1.5.7-fix)。
+上一公开版 v1.5.7-fix 的完整历史说明请查看 [CHANGELOG.md](CHANGELOG.md) 与 [GitHub 历史 Release](https://github.com/bbbomb0/A2HHook/releases)；本首页只保留对当前 v1.5.8 有帮助的比较信息。
 
 ## 下载安装
 
@@ -134,7 +125,7 @@ python package_module.py .
 构建完成后会生成：
 
 ```text
-a2h_hook_v1.5.7.zip
+a2h_hook_v1.5.8.zip
 ```
 
 ## 仓库结构
