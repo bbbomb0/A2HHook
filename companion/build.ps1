@@ -5,8 +5,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$VersionName = '1.5.7-fix'
-$VersionCode = '1571'
+$VersionName = '1.5.8'
+$VersionCode = '1580'
 $Platform = Join-Path $SdkRoot 'platforms\android-36\android.jar'
 $BuildTools = Join-Path $SdkRoot 'build-tools\36.0.0'
 $BuildDir = Join-Path $PSScriptRoot 'build'

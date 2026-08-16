@@ -19,16 +19,29 @@ CONFIG="$MODULE/config"
 BIN="$MODULE/bin"
 RUNTIME="$BASE/runtime"
 EVENTS="$BASE/events"
+DUP_EVENTS="$BASE/duplicate-events"
 SU_LOG="$BASE/su.log"
 TRIGGER_LOG="$BASE/trigger.log"
 WATCH_LOG="$BASE/watch.log"
 WATCH_PID=
+DUP_PID=
+: > "$SU_LOG"
+: > "$TRIGGER_LOG"
+: > "$WATCH_LOG"
 
 cleanup() {
   exec 5>&- 2>/dev/null || true
   if [ -n "$WATCH_PID" ]; then
     kill "$WATCH_PID" 2>/dev/null || true
     wait "$WATCH_PID" 2>/dev/null || true
+  fi
+  if [ -n "$DUP_PID" ]; then
+    kill "$DUP_PID" 2>/dev/null || true
+    wait "$DUP_PID" 2>/dev/null || true
+  fi
+  if [ "${A2H_TEST_KEEP:-0}" = "1" ]; then
+    printf 'KEPT %s\n' "$BASE" >&2
+    return 0
   fi
   rm -rf "$BASE"
 }
@@ -63,6 +76,7 @@ exec "${A2H_TEST_SHELL:-/system/bin/sh}" -c "$3"
 EOF
 chmod 0755 "$BASE/fake-su"
 mkfifo "$EVENTS" || exit 1
+printf '%s\n' 'TransferEvent event = {"name":"audio_track_message","audio_event":{"app_name":"com.example.game", "scenario":"playback"}}' > "$DUP_EVENTS"
 
 wait_for() {
   wait_attempt=0
@@ -87,6 +101,18 @@ directory_empty() {
   empty_dir=$1
   for empty_item in "$empty_dir"/*; do
     [ ! -e "$empty_item" ] || return 1
+  done
+  return 0
+}
+
+session_tree_has_no_state() {
+  session_root=$1
+  for session_entry in "$session_root"/*; do
+    if [ ! -e "$session_entry" ] && [ ! -L "$session_entry" ]; then
+      continue
+    fi
+    [ -d "$session_entry" ] && [ ! -L "$session_entry" ] || return 1
+    directory_empty "$session_entry" || return 1
   done
   return 0
 }
@@ -119,10 +145,46 @@ A2H_TEST_TRIGGER_LOG="$TRIGGER_LOG" \
 WATCH_PID=$!
 exec 5> "$EVENTS"
 
+wait_for test -r "$RUNTIME/watcher.lock/owner" || {
+  echo "FAIL watcher-lock-missing"
+  exit 1
+}
+A2H_MODDIR="$MODULE" \
+A2H_CONFIG_DIR="$CONFIG" \
+A2H_PACKAGES_LIST="$BASE/packages.list" \
+A2H_RUNTIME_DIR="$RUNTIME" \
+A2H_LOG_FILE="$WATCH_LOG" \
+A2H_SU_BIN="$BASE/fake-su" \
+A2H_SKIP_CHOWN=1 \
+A2H_COOLDOWN_SECONDS=0 \
+A2H_TEST_SU_LOG="$SU_LOG" \
+A2H_TEST_TRIGGER_LOG="$TRIGGER_LOG" \
+  "${A2H_TEST_SHELL:-/system/bin/sh}" "$WATCHER" --file "$DUP_EVENTS" &
+DUP_PID=$!
+wait "$DUP_PID"
+DUP_RC=$?
+DUP_PID=
+[ "$DUP_RC" -eq 0 ] && kill -0 "$WATCH_PID" 2>/dev/null || {
+  echo "FAIL duplicate-watcher-ownership"
+  exit 1
+}
+[ "$(wc -l < "$SU_LOG")" -eq 0 ] || {
+  echo "FAIL duplicate-watcher-triggered"
+  exit 1
+}
+[ "$(grep -c 'audio-watch duplicate ignored owner=' "$WATCH_LOG")" -eq 1 ] || {
+  echo "FAIL duplicate-watcher-log"
+  exit 1
+}
+
 mkdir -p "$RUNTIME/sessions/com.example.game"
 stale_session="$RUNTIME/sessions/com.example.game/stale"
 printf '7777 ready\n' > "$stale_session"
-printf '%s\n' 'TransferEvent event = {"name":"audio_track_message","audio_event":{"app_name":"com.example.game", "scenario":"playback"}}' >&5
+storm_count=0
+while [ "$storm_count" -lt 20 ]; do
+  printf '%s\n' 'TransferEvent event = {"name":"audio_track_message","audio_event":{"app_name":"com.example.game", "scenario":"playback"}}' >&5
+  storm_count=$((storm_count + 1))
+done
 wait_for file_equals "$RUNTIME/leases/com.example.game" fallback:70 || {
   echo "FAIL fallback-lease"
   exit 1
@@ -182,6 +244,15 @@ wait_for test ! -e "$RUNTIME/leases/com.example.game" || {
   echo "FAIL live-stop"
   exit 1
 }
+
+# A watcher whose lock record was replaced must fence itself before it can
+# create another lease, and must not delete the replacement owner's record.
+printf '999999.1\n' > "$RUNTIME/watcher.lock/owner"
+printf '%s\n' 'TransferEvent event = {"name":"audio_track_message","audio_event":{"app_name":"com.example.game", "scenario":"playback"}}' >&5
+wait_for sh -c "! kill -0 $WATCH_PID 2>/dev/null" || {
+  echo "FAIL watcher-ownership-loss-not-fenced"
+  exit 1
+}
 exec 5>&-
 wait "$WATCH_PID"
 WATCH_RC=$?
@@ -191,6 +262,16 @@ WATCH_PID=
   echo "FAIL watcher-rc-$WATCH_RC"
   exit 1
 }
+[ "$(cat "$RUNTIME/watcher.lock/owner")" = 999999.1 ] || {
+  echo "FAIL foreign-watcher-owner-removed"
+  exit 1
+}
+grep -F -q 'audio-watch ownership lost expected=' "$WATCH_LOG" || {
+  echo "FAIL watcher-ownership-loss-log"
+  exit 1
+}
+rm -f "$RUNTIME/watcher.lock/owner"
+rmdir "$RUNTIME/watcher.lock"
 [ "$(wc -l < "$SU_LOG")" -eq 1 ] || {
   echo "FAIL recursive-trigger"
   exit 1
@@ -203,9 +284,14 @@ WATCH_PID=
 directory_empty "$RUNTIME/ports" &&
 directory_empty "$RUNTIME/leases" &&
 directory_empty "$RUNTIME/lease_pids" &&
-directory_empty "$RUNTIME/sessions" || {
+directory_empty "$RUNTIME/lease_claims" &&
+session_tree_has_no_state "$RUNTIME/sessions" || {
   echo "FAIL runtime-cleanup"
   exit 1
 }
+[ ! -e "$RUNTIME/watcher.lock" ] || {
+  echo "FAIL watcher-lock-cleanup"
+  exit 1
+}
 
-echo "PASS audio policy lease lifecycle"
+echo "PASS audio policy lease lifecycle and singleton storm guard"

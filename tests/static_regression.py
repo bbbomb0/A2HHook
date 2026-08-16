@@ -29,7 +29,7 @@ OFFICIAL = (
     "com.luna.music",
 )
 
-EXPECTED_RELEASE = ("v1.5.7-fix", "1571")
+EXPECTED_RELEASE = ("v1.5.8", "1580")
 
 HAL_CASES = {
     "OS2.0.208.0.VONCNXM": {
@@ -566,11 +566,13 @@ def locate_ndk(explicit: Path | None) -> Path | None:
 
 
 def locate_posix_shell() -> str | None:
+    override = os.environ.get("A2H_TEST_POSIX_SHELL")
     git_shells = [
         r"C:\Program Files\Git\bin\sh.exe",
         r"C:\Program Files\Git\usr\bin\sh.exe",
     ]
-    candidates = git_shells + [shutil.which("sh")] if os.name == "nt" else [shutil.which("sh")]
+    candidates = ([override, shutil.which("sh")] + git_shells
+                  if os.name == "nt" else [override, shutil.which("sh")])
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return str(candidate)
@@ -579,18 +581,37 @@ def locate_posix_shell() -> str | None:
 
 def locate_bash_shell() -> str | None:
     """Locate a shell that supports the timeout form used by the host FIFO harness."""
+    override = os.environ.get("A2H_TEST_BASH_SHELL")
     git_shells = [
         r"C:\Program Files\Git\bin\bash.exe",
         r"C:\Program Files\Git\usr\bin\bash.exe",
     ]
-    candidates = git_shells + [shutil.which("bash")] if os.name == "nt" else [shutil.which("bash")]
+    candidates = ([override, shutil.which("bash")] + git_shells
+                  if os.name == "nt" else [override, shutil.which("bash")])
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return str(candidate)
     return None
 
 
+def posix_shell_command(shell: str, *arguments: str) -> list[str]:
+    if os.name == "nt":
+        return [
+            shell, "-c",
+            'PATH=/usr/bin:/bin:$PATH; export PATH; exec sh "$@"',
+            "sh", *arguments,
+        ]
+    return [shell, *arguments]
+
+
 def run_command(command: list[str], cwd: Path, input_bytes: bytes | None = None) -> tuple[int, str]:
+    if (os.name == "nt" and len(command) == 2 and command[1] == "-s"
+            and Path(command[0]).name.lower() in {"sh.exe", "bash.exe"}):
+        shell_name = "bash" if Path(command[0]).name.lower() == "bash.exe" else "sh"
+        command = [
+            command[0], "-c",
+            f"PATH=/usr/bin:/bin:$PATH; export PATH; exec /usr/bin/{shell_name} -s",
+        ]
     completed = subprocess.run(
         command,
         cwd=cwd,
@@ -990,7 +1011,7 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         report.gap("watcher steady-state runtime regression", "POSIX sh is required")
     else:
         rc, output = run_command(
-            [shell, "tests/watcher_steady_state_harness.sh", "service.sh"], root
+            posix_shell_command(shell, "tests/watcher_steady_state_harness.sh", "service.sh"), root
         )
         report.check(
             rc == 0 and "WATCHER_STEADY_PASS" in output,
@@ -999,7 +1020,7 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
             output.strip() or f"harness exited {rc}",
         )
         rc, output = run_command(
-            [shell, "tests/watcher_event_rearm_harness.sh", "service.sh"], root
+            posix_shell_command(shell, "tests/watcher_event_rearm_harness.sh", "service.sh"), root
         )
         report.check(
             rc == 0 and "WATCHER_REARM_PASS" in output,
@@ -1042,7 +1063,7 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
 
     postfs = (root / "post-fs-data.sh").read_text(encoding="utf-8")
     postfs_contract = (
-        'cleanup_stale_runtime /data/local/tmp' in postfs
+        'cleanup_stale_runtime "$POSTFS_LOCAL_TMP"' in postfs
         and 'getprop sys.boot_completed' in postfs
         and '!= "1"' in postfs
         and "a2h_apply.pending" in postfs
@@ -1052,13 +1073,18 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and "a2h_packages.txt" in postfs
         and "a2h_state" in postfs
         and "a2h_config.wake" in postfs
-        and "rm -rf /data/local/tmp/a2h_hook_runtime" in postfs
+        and 'POSTFS_AUDIO_RUNTIME=${A2H_POSTFS_AUDIO_RUNTIME:-$POSTFS_LOCAL_TMP/a2h_hook_runtime}' in postfs
+        and 'POSTFS_SERVICE_LOCK=${A2H_POSTFS_SERVICE_LOCK:-$POSTFS_LOCAL_TMP/a2h_hook_service.lock}' in postfs
+        and "runtime_owner_alive" in postfs
+        and "lock_epoch_signature" in postfs
+        and "cleanup_previous_boot_runtime" in postfs
+        and 'grep -a -F -q "$owned_process_name"' in postfs
     )
     report.check(
         postfs_contract,
         "previous-boot runtime cleanup contract",
-        "post-fs-data gates module-only pending/lock/temp cleanup before boot completion",
-        "early-boot guard or one of the module runtime artifacts is missing",
+        "post-fs-data removes only stable non-live module epochs and preserves temporary-root owners",
+        "owner-aware early-boot cleanup or one of the module runtime artifacts is missing",
     )
 
     audio_watcher = (root / "bin/a2h_audio_watch").read_text(encoding="utf-8")
@@ -1069,6 +1095,7 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "vendor.xiaomi.hardware.mediaeventgatherservice-service" in audio_watcher
         and 'event_name" = "audio_track_message"' in audio_watcher
         and 'event_scenario" = "playback"' in audio_watcher
+        and "IFS='|' read -r event_name event_package event_scenario" in audio_watcher
         and "/data/system/packages.list" in audio_watcher
         and 'exec 3< "$CFG_STATES"' in audio_watcher
         and 'exec 4< "$CFG_PKGS"' in audio_watcher
@@ -1101,6 +1128,29 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and 'policy_port_file="$PORT_DIR/$policy_port"' in audio_watcher
         and 'trigger_session_matches "$policy_package" "$policy_session"' in audio_watcher
         and 'lease_worker_start=$(process_starttime "$lease_worker")' in audio_watcher
+        and 'RECONCILE_MARKER="$RUNTIME_DIR/reconcile"' in audio_watcher
+        and 'reconcile_active_leases()' in audio_watcher
+        and 'stop_lease_for_reconcile()' in audio_watcher
+        and '"__A2H_RECONCILE__"' in audio_watcher
+        and '"$RECONCILE_LOG_TAG:I"' in audio_watcher
+        and 'SERVICE_LOCK_DIR=/data/local/tmp/a2h_hook_service.lock' in service
+        and "acquire_service_lock" in service
+        and "service_lock_root_owned" in service
+        and "stale_service_lock_recheck" in service
+        and "release_service_lock" in service
+        and "service_lock_still_owned" in service
+        and "service ownership lost" in service
+        and 'WATCH_LOCK_DIR=${A2H_WATCH_LOCK_DIR:-$RUNTIME_DIR/watcher.lock}' in audio_watcher
+        and "acquire_watcher_lock" in audio_watcher
+        and "stale_owned_dir_recheck" in audio_watcher
+        and "release_watcher_lock" in audio_watcher
+        and "watcher_lock_still_owned" in audio_watcher
+        and "require_watcher_lock" in audio_watcher
+        and "ownership lost expected=" in audio_watcher
+        and 'LEASE_CLAIM_DIR="$RUNTIME_DIR/lease_claims"' in audio_watcher
+        and "acquire_lease_claim" in audio_watcher
+        and "release_lease_claim" in audio_watcher
+        and "start_lease_owned" in audio_watcher
         and "dumpsys" not in audio_watcher
         and "ptrace" not in audio_watcher.lower()
         and "com.tencent.tmgp.sgame" not in audio_watcher
@@ -1118,8 +1168,23 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     report.check(
         audio_watcher_contract,
         "arbitrary audio UID watcher contract",
-        "vendor playback and AudioPolicy ports use exact global/slot policy, real UID/session, callback-ready lease and PID/starttime cleanup",
+        "vendor playback and AudioPolicy ports use exact global/slot policy, real UID/session, singleton ownership, atomic per-package claims and PID/starttime cleanup",
         "audio watcher metadata, UID, lifecycle, or no-hardcoded-package contract is incomplete",
+    )
+
+    applier_reconcile_contract = (
+        'AUDIO_RECONCILE_MARKER="$AUDIO_RUNTIME_DIR/reconcile"' in applier
+        and "signal_audio_reconcile()" in applier
+        and "record_applied" in applier
+        and "signal_audio_reconcile" in applier
+        and "__A2H_RECONCILE__" in applier
+        and "A2H_SKIP_AUDIO_RECONCILE" in applier
+    )
+    report.check(
+        applier_reconcile_contract,
+        "mode-switch audio reconcile contract",
+        "successful configuration transactions signal the single watcher to re-evaluate active media leases",
+        "applier is missing the root-only reconcile marker/log wake path",
     )
 
     packager = (root / "package_module.py").read_text(encoding="utf-8")
@@ -1197,14 +1262,9 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     if not scripts_found or not node:
         report.gap("WebUI JavaScript syntax", "inline script or Node.js unavailable")
     else:
-        with tempfile.NamedTemporaryFile("w", suffix=".js", encoding="utf-8", newline="\n", delete=False) as stream:
-            stream.write("\n".join(scripts_found))
-            temporary = Path(stream.name)
-        try:
-            rc, output = run_command([node, "--check", str(temporary)], root)
-            report.check(rc == 0, "WebUI JavaScript syntax", "node --check passed", output.strip())
-        finally:
-            temporary.unlink(missing_ok=True)
+        script_bytes = "\n".join(scripts_found).encode("utf-8")
+        rc, output = run_command([node, "--check", "-"], root, script_bytes)
+        report.check(rc == 0, "WebUI JavaScript syntax", "node --check passed", output.strip())
 
 
 def check_companion(root: Path, report: Report) -> None:
@@ -1261,13 +1321,13 @@ def check_companion(root: Path, report: Report) -> None:
 
     build_script = (root / "companion/build.ps1").read_text(encoding="utf-8")
     report.check(
-        "$VersionName = '1.5.7-fix'" in build_script
-        and "$VersionCode = '1571'" in build_script
+        "$VersionName = '1.5.8'" in build_script
+        and "$VersionCode = '1580'" in build_script
         and "--min-sdk-version', '29'" in build_script
         and "--target-sdk-version', '35'" in build_script
         and "signing.properties" in build_script,
         "companion build metadata",
-        "version 1.5.7-fix/1571, API 29-35, external stable signing config",
+        "version 1.5.8/1580, API 29-35, external stable signing config",
         "companion build version/API/signing metadata mismatch",
     )
 
@@ -1412,7 +1472,7 @@ def check_companion(root: Path, report: Report) -> None:
     uninstall_script = (root / "uninstall.sh").read_text(encoding="utf-8")
     installer_script = (root / "customize.sh").read_text(encoding="utf-8")
     lifecycle_ok = (
-        "COMPANION_VERSION_CODE=1571" in service_script
+        "COMPANION_VERSION_CODE=1580" in service_script
         and "ensure_companion_installed()" in service_script
         and "ensure_companion_installed &" in service_script
         and 'pm install --user 0 "$COMPANION_APK"' in service_script
@@ -1573,6 +1633,103 @@ printf 'PASS pid-starttime lock regression\n'
         "PID lock runtime regression",
         "paired/reused/legacy/creating/release cases passed",
         output.strip(),
+    )
+
+
+def check_service_singleton_lock(root: Path, report: Report, use_adb: bool) -> None:
+    service = (root / "service.sh").read_text(encoding="utf-8")
+    lock_block = extract_function(service, "process_starttime() {", "raw_config_signature() {")
+    if not lock_block:
+        report.add("FAIL", "service singleton lock regression", "service lock functions not found")
+        return
+
+    harness = lock_block + r'''
+fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
+log() { :; }
+base=__SERVICE_LOCK_TEST_BASE__/a2h_service_lock_$$
+SERVICE_LOCK_DIR="$base/lock"
+SERVICE_LOCK_RECORD="$SERVICE_LOCK_DIR/owner"
+service_lock_owner=
+A2H_SERVICE_LOCK_SKIP_OWNER_CHECK=1
+writer_pid=
+cleanup() {
+  [ -z "$writer_pid" ] || kill "$writer_pid" 2>/dev/null || true
+  [ -z "$writer_pid" ] || wait "$writer_pid" 2>/dev/null || true
+  rm -f "$SERVICE_LOCK_RECORD" 2>/dev/null || true
+  rmdir "$SERVICE_LOCK_DIR" "$base" 2>/dev/null || true
+}
+trap cleanup 0 1 2 15
+mkdir "$base" || fail mkdir-base
+
+acquire_service_lock || fail initial-acquire
+first_owner=$service_lock_owner
+service_lock_still_owned || fail initial-ownership-check
+printf '999999.1\n' > "$SERVICE_LOCK_RECORD"
+service_lock_still_owned && fail foreign-owner-accepted
+printf '%s\n' "$first_owner" > "$SERVICE_LOCK_RECORD"
+service_lock_still_owned || fail restored-owner-rejected
+acquire_service_lock
+duplicate_rc=$?
+[ "$duplicate_rc" -eq 2 ] || fail live-duplicate-accepted
+service_lock_owner=$first_owner
+release_service_lock || fail initial-release
+[ ! -e "$SERVICE_LOCK_DIR" ] || fail initial-release-left-lock
+
+mkdir "$SERVICE_LOCK_DIR" || fail mkdir-creating
+self_start=$(process_starttime "$$") || fail self-start
+(
+  sleep 0.2
+  printf '%s\n' "$$.$self_start" > "$SERVICE_LOCK_RECORD"
+) &
+writer_pid=$!
+service_lock_owner=
+acquire_service_lock
+creating_rc=$?
+wait "$writer_pid" 2>/dev/null || true
+writer_pid=
+[ "$creating_rc" -eq 2 ] || fail creating-owner-removed
+[ -f "$SERVICE_LOCK_RECORD" ] || fail creating-record-missing
+service_lock_owner="$$.$self_start"
+release_service_lock || fail creating-release
+
+mkdir "$SERVICE_LOCK_DIR" || fail mkdir-stale
+printf '999999.1\n' > "$SERVICE_LOCK_RECORD"
+service_lock_owner=
+acquire_service_lock || fail stale-recovery
+stale_owner=$service_lock_owner
+[ "$stale_owner" = "$$.$self_start" ] || fail stale-owner-format
+printf '%s\n' "$$.$((self_start + 1))" > "$SERVICE_LOCK_RECORD"
+release_service_lock || true
+[ -d "$SERVICE_LOCK_DIR" ] || fail foreign-release-deleted
+printf '%s\n' "$stale_owner" > "$SERVICE_LOCK_RECORD"
+service_lock_owner=$stale_owner
+release_service_lock || fail stale-release
+[ ! -e "$SERVICE_LOCK_DIR" ] || fail stale-release-left-lock
+printf 'PASS service singleton lock regression\n'
+'''
+
+    if use_adb:
+        adb = shutil.which("adb")
+        if not adb:
+            report.add("FAIL", "service singleton lock regression", "adb requested but not found")
+            return
+        command = [adb, "shell", "sh", "-s"]
+        test_base = "/data/local/tmp"
+    else:
+        shell = locate_posix_shell()
+        if not shell or not Path("/proc/self/stat").is_file():
+            report.gap("service singleton lock regression", "rerun with --adb or on a Linux host")
+            return
+        command = [shell, "-s"]
+        test_base = "${TMPDIR:-/tmp}"
+
+    payload = harness.replace("__SERVICE_LOCK_TEST_BASE__", test_base).encode("utf-8")
+    rc, output = run_command(command, root, payload)
+    report.check(
+        rc == 0 and "PASS service singleton lock regression" in output,
+        "service singleton lock regression",
+        "live duplicate, ownership fence, creating owner, stale owner, PID reuse and foreign release cases passed",
+        output.strip() or f"harness exited {rc}",
     )
 
 
@@ -2254,20 +2411,18 @@ printf 'PASS boot last-pid failure regression\n'
 
 def check_postfs_runtime_cleanup(root: Path, report: Report, use_adb: bool) -> None:
     postfs = (root / "post-fs-data.sh").read_text(encoding="utf-8")
-    postfs = postfs.replace(
-        "cleanup_stale_runtime /data/local/tmp",
-        'cleanup_stale_runtime "$runtime_test_dir"',
-    )
-    postfs = postfs.replace(
-        "rm -rf /data/local/tmp/a2h_hook_runtime",
-        'rm -rf "$audio_runtime_test_dir"',
-    )
     harness = r'''
 set -eu
 base=__POSTFS_TEST_BASE__/a2h_postfs_cleanup_$$
 runtime_test_dir="$base/runtime"
 audio_runtime_test_dir="$base/audio-runtime"
+service_lock_test_dir="$base/service-lock"
 BOOT_STATE=0
+live_pid=
+A2H_POSTFS_LOCAL_TMP="$runtime_test_dir"
+A2H_POSTFS_AUDIO_RUNTIME="$audio_runtime_test_dir"
+A2H_POSTFS_SERVICE_LOCK="$service_lock_test_dir"
+export A2H_POSTFS_LOCAL_TMP A2H_POSTFS_AUDIO_RUNTIME A2H_POSTFS_SERVICE_LOCK
 
 fail() { printf 'FAIL: %s\n' "$1"; exit 1; }
 getprop() {
@@ -2278,16 +2433,21 @@ getprop() {
 }
 resetprop() { :; }
 setprop() { :; }
-cleanup() { rm -rf "$base"; }
+cleanup() {
+  [ -z "$live_pid" ] || kill "$live_pid" 2>/dev/null || true
+  [ -z "$live_pid" ] || wait "$live_pid" 2>/dev/null || true
+  rm -rf "$base"
+}
 trap cleanup 0 1 2 15
 
 seed_runtime() {
-  rm -rf "$runtime_test_dir" "$audio_runtime_test_dir"
+  rm -rf "$runtime_test_dir" "$audio_runtime_test_dir" "$service_lock_test_dir"
   mkdir -p \
     "$runtime_test_dir/a2h_apply.lock" \
     "$runtime_test_dir/a2h_apply.worker" \
     "$runtime_test_dir/a2h_config.lock"
   mkdir -p "$audio_runtime_test_dir/cooldown"
+  mkdir -p "$service_lock_test_dir"
   printf 'trigger\n' > "$audio_runtime_test_dir/a2h_trigger"
   printf 'pending\n' > "$runtime_test_dir/a2h_apply.pending"
   printf 'pending-tmp\n' > "$runtime_test_dir/a2h_apply.pending.tmp.123"
@@ -2307,16 +2467,46 @@ seed_runtime
 [ "$(find "$runtime_test_dir" -mindepth 1 ! -name unrelated.keep | wc -l | tr -d ' ')" = 0 ] ||
   fail early-target-remains
 [ ! -e "$audio_runtime_test_dir" ] || fail early-audio-runtime-remains
+[ ! -e "$service_lock_test_dir" ] || fail early-service-lock-remains
+
+# Temporary-root activation can run post-fs-data twice in one boot. A live
+# service owner must preserve its complete runtime epoch.
+seed_runtime
+cat > "$base/service.sh" <<'EOF'
+#!/bin/sh
+sleep 20
+EOF
+chmod 0755 "$base/service.sh"
+sh "$base/service.sh" &
+live_pid=$!
+live_start=$(process_starttime "$live_pid") || fail live-starttime
+printf '%s\n' "$live_pid.$live_start" > "$service_lock_test_dir/owner"
+before=$(find "$runtime_test_dir" -mindepth 1 -print | sort | cksum)
+before_audio=$(find "$audio_runtime_test_dir" -mindepth 1 -print | sort | cksum)
+before_service=$(find "$service_lock_test_dir" -mindepth 1 -print | sort | cksum)
+''' + postfs + r'''
+after=$(find "$runtime_test_dir" -mindepth 1 -print | sort | cksum)
+after_audio=$(find "$audio_runtime_test_dir" -mindepth 1 -print | sort | cksum)
+after_service=$(find "$service_lock_test_dir" -mindepth 1 -print | sort | cksum)
+[ "$after" = "$before" ] || fail live-owner-mutated-runtime
+[ "$after_audio" = "$before_audio" ] || fail live-owner-mutated-audio-runtime
+[ "$after_service" = "$before_service" ] || fail live-owner-mutated-service-lock
+kill "$live_pid" 2>/dev/null || true
+wait "$live_pid" 2>/dev/null || true
+live_pid=
 
 seed_runtime
 before=$(find "$runtime_test_dir" -mindepth 1 -print | sort | cksum)
 before_audio=$(find "$audio_runtime_test_dir" -mindepth 1 -print | sort | cksum)
+before_service=$(find "$service_lock_test_dir" -mindepth 1 -print | sort | cksum)
 BOOT_STATE=1
 ''' + postfs + r'''
 after=$(find "$runtime_test_dir" -mindepth 1 -print | sort | cksum)
 after_audio=$(find "$audio_runtime_test_dir" -mindepth 1 -print | sort | cksum)
+after_service=$(find "$service_lock_test_dir" -mindepth 1 -print | sort | cksum)
 [ "$after" = "$before" ] || fail completed-boot-mutated-runtime
 [ "$after_audio" = "$before_audio" ] || fail completed-boot-mutated-audio-runtime
+[ "$after_service" = "$before_service" ] || fail completed-boot-mutated-service-lock
 printf 'PASS post-fs-data runtime cleanup regression\n'
 '''
 
@@ -2340,7 +2530,7 @@ printf 'PASS post-fs-data runtime cleanup regression\n'
     report.check(
         rc == 0 and "PASS post-fs-data runtime cleanup regression" in output,
         "post-fs-data runtime cleanup regression",
-        "early boot removes only module runtime artifacts; completed boot preserves all files",
+        "stable stale epochs are removed; live temporary-root and completed-boot epochs are preserved",
         output.strip() or f"harness exited {rc}",
     )
 
@@ -2419,7 +2609,50 @@ printf 'PASS config wake FIFO regression\n'
     )
 
 
-def check_audio_uid_watcher(root: Path, report: Report) -> None:
+def check_audio_uid_watcher(root: Path, report: Report, use_adb: bool) -> None:
+    if use_adb:
+        adb = shutil.which("adb")
+        if not adb:
+            report.add("FAIL", "audio UID watcher semantics", "adb requested but not found")
+            return
+        harness = (root / "tests/audio_uid_watcher_harness.sh").resolve()
+        watcher = (root / "bin/a2h_audio_watch").resolve()
+        remote_harness = "/data/local/tmp/a2h_uid_watcher_harness.sh"
+        remote_watcher = "/data/local/tmp/a2h_uid_watcher_target.sh"
+        outputs: list[str] = []
+        rc = 1
+        try:
+            for local, remote in ((harness, remote_harness), (watcher, remote_watcher)):
+                pushed = subprocess.run(
+                    [adb, "push", str(local), remote], cwd=root,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+                )
+                outputs.append(pushed.stdout.decode("utf-8", errors="replace"))
+                if pushed.returncode != 0:
+                    raise OSError(f"adb push failed for {local.name}")
+            completed = subprocess.run(
+                [adb, "shell", "su", "-c",
+                 f"A2H_TEST_BASE=/data/local/tmp sh {remote_harness} {remote_watcher}"],
+                cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+            )
+            rc = completed.returncode
+            outputs.append(completed.stdout.decode("utf-8", errors="replace"))
+        except OSError as exc:
+            outputs.append(str(exc))
+        finally:
+            subprocess.run(
+                [adb, "shell", "su", "-c", f"rm -f {remote_harness} {remote_watcher}"],
+                cwd=root, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+            )
+        output = "".join(outputs)
+        report.check(
+            rc == 0 and "PASS audio UID watcher semantics" in output,
+            "audio UID watcher semantics",
+            "global arbitrary/long app package, cached core-system UID rejection, spaced JSON fallback, enabled exact slot, UID mapping, cooldown and failure rc all verified",
+            output.strip() or f"harness exited {rc}",
+        )
+        return
+
     shell = locate_posix_shell()
     if not shell:
         report.gap("audio UID watcher semantics", "POSIX sh is required")
@@ -2428,7 +2661,15 @@ def check_audio_uid_watcher(root: Path, report: Report) -> None:
     watcher = (root / "bin/a2h_audio_watch").resolve()
 
     def shell_path(path: Path) -> str:
-        return path.resolve().as_posix()
+        resolved = path.resolve()
+        if os.name == "nt":
+            try:
+                return resolved.relative_to(root.resolve()).as_posix()
+            except ValueError:
+                value = resolved.as_posix()
+                if re.match(r"^[A-Za-z]:/", value):
+                    return f"/{value[0].lower()}{value[2:]}"
+        return resolved.as_posix()
 
     def event(package: str, name: str = "audio_track_message",
               scenario: str = "playback") -> str:
@@ -2446,7 +2687,9 @@ def check_audio_uid_watcher(root: Path, report: Report) -> None:
         )
 
     try:
-        with tempfile.TemporaryDirectory(prefix="a2h-audio-watch-") as temporary:
+        temporary_parent = root if os.name == "nt" else None
+        with tempfile.TemporaryDirectory(
+                prefix=".a2h-audio-watch-", dir=temporary_parent) as temporary:
             base = Path(temporary)
             module = base / "module"
             config = module / "config"
@@ -2519,7 +2762,9 @@ def check_audio_uid_watcher(root: Path, report: Report) -> None:
                     "A2H_TEST_SU_RC": str(su_rc),
                 })
                 completed = subprocess.run(
-                    [shell, shell_path(watcher), "--file", shell_path(event_file)],
+                    posix_shell_command(
+                        shell, shell_path(watcher), "--file", shell_path(event_file),
+                    ),
                     cwd=root,
                     env=environment,
                     stdout=subprocess.PIPE,
@@ -2667,9 +2912,9 @@ def check_audio_policy_lease(root: Path, report: Report, use_adb: bool) -> None:
         )
     output = "".join(outputs)
     report.check(
-        rc == 0 and "PASS audio policy lease lifecycle" in output,
+        rc == 0 and "PASS audio policy lease lifecycle and singleton storm guard" in output,
         "audio policy lease lifecycle",
-        "fallback promotion, self-session suppression, order-independent start/stop parsing, multi-port release and cleanup passed",
+        "duplicate watcher rejection, same-package event storm coalescing, fallback promotion, self-session suppression, multi-port release and cleanup passed",
         output.strip() or f"harness exited {rc}",
     )
 
@@ -3779,6 +4024,7 @@ def main() -> int:
     check_release_tree(root, report, args.adb)
     check_companion(root, report)
     check_lock_protocol(root, report, args.adb)
+    check_service_singleton_lock(root, report, args.adb)
     check_config_hotupdate(root, report, args.adb)
     check_control_transaction(root, report, args.adb)
     check_policy_refresh_transaction(root, report, args.adb)
@@ -3787,7 +4033,7 @@ def main() -> int:
     check_boot_last_pid_failure(root, report, args.adb)
     check_config_wake_fifo(root, report, args.adb)
     check_postfs_runtime_cleanup(root, report, args.adb)
-    check_audio_uid_watcher(root, report)
+    check_audio_uid_watcher(root, report, args.adb)
     check_audio_policy_lease(root, report, args.adb)
     check_webui_writer_transaction(root, report, args.adb)
     check_apply_capability_runtime(root, report, args.adb)

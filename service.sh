@@ -41,7 +41,10 @@ TMP_PKGS=/data/local/tmp/a2h_packages.txt
 LOG="$MODDIR/a2h_patch.log"
 COMPANION_APK="$MODDIR/companion/a2h_companion.apk"
 COMPANION_PACKAGE=io.github.bbbomb0.a2hhook
-COMPANION_VERSION_CODE=1571
+COMPANION_VERSION_CODE=1580
+SERVICE_LOCK_DIR=/data/local/tmp/a2h_hook_service.lock
+SERVICE_LOCK_RECORD="$SERVICE_LOCK_DIR/owner"
+service_lock_owner=
 
 # A successfully installed module supersedes any one-shot companion cleanup
 # left by an earlier uninstall. The cleanup script independently checks both
@@ -52,6 +55,130 @@ rm -f \
 
 ts() { date '+%F %T'; }
 log() { printf '[%s] %s\n' "$(ts)" "$*" >> "$LOG" 2>/dev/null; }
+
+process_starttime() {
+  process_pid=$1
+  case "$process_pid" in ''|*[!0-9]*) return 1 ;; esac
+  process_stat=
+  IFS= read -r process_stat 2>/dev/null < "/proc/$process_pid/stat" || return 1
+  process_tail=${process_stat##*) }
+  [ "$process_tail" != "$process_stat" ] || return 1
+  set -- $process_tail
+  [ "$#" -ge 20 ] || return 1
+  shift 19
+  process_value=$1
+  case "$process_value" in ''|*[!0-9]*) return 1 ;; esac
+  printf '%s\n' "$process_value"
+}
+
+service_lock_owner_alive() {
+  owner_value=
+  [ ! -r "$SERVICE_LOCK_RECORD" ] || \
+    IFS= read -r owner_value < "$SERVICE_LOCK_RECORD" || true
+  owner_pid=${owner_value%%.*}
+  owner_start=${owner_value#*.}
+  case "$owner_pid" in ''|*[!0-9]*) return 1 ;; esac
+  case "$owner_start" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$owner_start" != "$owner_value" ] || return 1
+  owner_live_start=$(process_starttime "$owner_pid") || return 1
+  [ "$owner_live_start" = "$owner_start" ] && kill -0 "$owner_pid" 2>/dev/null
+}
+
+service_lock_root_owned() {
+  [ "${A2H_SERVICE_LOCK_SKIP_OWNER_CHECK:-0}" = "1" ] && return 0
+  service_lock_identity=$(stat -c '%u:%g' "$SERVICE_LOCK_DIR" 2>/dev/null) || return 1
+  [ "$service_lock_identity" = "0:0" ]
+}
+
+stale_service_lock_recheck() {
+  [ -d "$SERVICE_LOCK_DIR" ] && [ ! -L "$SERVICE_LOCK_DIR" ] || return 1
+  service_lock_root_owned || return 1
+  service_lock_owner_alive && return 1
+  stale_owner_1=
+  [ ! -r "$SERVICE_LOCK_RECORD" ] || \
+    IFS= read -r stale_owner_1 < "$SERVICE_LOCK_RECORD" || true
+  sleep 1
+  [ -d "$SERVICE_LOCK_DIR" ] && [ ! -L "$SERVICE_LOCK_DIR" ] || return 1
+  service_lock_root_owned || return 1
+  service_lock_owner_alive && return 1
+  stale_owner_2=
+  [ ! -r "$SERVICE_LOCK_RECORD" ] || \
+    IFS= read -r stale_owner_2 < "$SERVICE_LOCK_RECORD" || true
+  [ "$stale_owner_1" = "$stale_owner_2" ] || return 1
+  sleep 1
+  [ -d "$SERVICE_LOCK_DIR" ] && [ ! -L "$SERVICE_LOCK_DIR" ] || return 1
+  service_lock_root_owned || return 1
+  service_lock_owner_alive && return 1
+  stale_owner_3=
+  [ ! -r "$SERVICE_LOCK_RECORD" ] || \
+    IFS= read -r stale_owner_3 < "$SERVICE_LOCK_RECORD" || true
+  [ "$stale_owner_2" = "$stale_owner_3" ] || return 1
+  rm -f "$SERVICE_LOCK_RECORD" 2>/dev/null || return 1
+  rmdir "$SERVICE_LOCK_DIR" 2>/dev/null
+}
+
+acquire_service_lock() {
+  service_lock_try=0
+  while [ "$service_lock_try" -lt 4 ]; do
+    if mkdir "$SERVICE_LOCK_DIR" 2>/dev/null; then
+      chmod 0700 "$SERVICE_LOCK_DIR" 2>/dev/null || {
+        rmdir "$SERVICE_LOCK_DIR" 2>/dev/null || true
+        return 1
+      }
+      service_start=$(process_starttime "$$") || {
+        rmdir "$SERVICE_LOCK_DIR" 2>/dev/null || true
+        return 1
+      }
+      service_lock_owner="$$.$service_start"
+      printf '%s\n' "$service_lock_owner" > "$SERVICE_LOCK_RECORD" 2>/dev/null || {
+        service_lock_owner=
+        rmdir "$SERVICE_LOCK_DIR" 2>/dev/null || true
+        return 1
+      }
+      chmod 0600 "$SERVICE_LOCK_RECORD" 2>/dev/null || true
+      return 0
+    fi
+    [ ! -L "$SERVICE_LOCK_DIR" ] || {
+      log "service singleton rejected reason=symlink path=$SERVICE_LOCK_DIR"
+      return 1
+    }
+    service_lock_root_owned || {
+      log "service singleton rejected reason=foreign-owner path=$SERVICE_LOCK_DIR"
+      return 1
+    }
+    if service_lock_owner_alive; then
+      service_existing=
+      IFS= read -r service_existing < "$SERVICE_LOCK_RECORD" || true
+      log "service duplicate ignored owner=$service_existing"
+      return 2
+    fi
+    stale_service_lock_recheck || true
+    service_lock_try=$((service_lock_try + 1))
+  done
+  log "service singleton acquire FAIL"
+  return 1
+}
+
+release_service_lock() {
+  [ -n "$service_lock_owner" ] || return 0
+  service_current_owner=
+  [ ! -r "$SERVICE_LOCK_RECORD" ] || \
+    IFS= read -r service_current_owner < "$SERVICE_LOCK_RECORD" || true
+  if [ "$service_current_owner" = "$service_lock_owner" ]; then
+    rm -f "$SERVICE_LOCK_RECORD" 2>/dev/null
+    rmdir "$SERVICE_LOCK_DIR" 2>/dev/null || true
+  fi
+  service_lock_owner=
+}
+
+service_lock_still_owned() {
+  [ -n "$service_lock_owner" ] || return 1
+  service_current_owner=
+  [ ! -r "$SERVICE_LOCK_RECORD" ] || \
+    IFS= read -r service_current_owner < "$SERVICE_LOCK_RECORD" || true
+  [ "$service_current_owner" = "$service_lock_owner" ] || return 1
+  service_lock_owner_alive
+}
 
 raw_config_signature() {
   raw_config_result=$({
@@ -173,6 +300,7 @@ service_cleanup() {
   stop_config_inotify
   stop_config_wake_fifo
   rm -f "$CONFIG_EVENT_MARKER" 2>/dev/null
+  release_service_lock
 }
 
 find_hal_pid() {
@@ -427,6 +555,15 @@ set_runtime_status() {
   fi
 }
 
+acquire_service_lock
+service_lock_rc=$?
+if [ "$service_lock_rc" -eq 2 ]; then
+  exit 0
+fi
+[ "$service_lock_rc" -eq 0 ] || exit 1
+trap 'exit 0' INT TERM HUP
+trap service_cleanup EXIT
+
 module_version=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n 1)
 [ -n "$module_version" ] || module_version=unknown
 printf '[a2h_hook] %s %s\n' "$module_version" "$(date)" > "$LOG" 2>/dev/null
@@ -506,9 +643,6 @@ if start_config_inotify; then
 else
   log "watcher config events=polling fallback=${watch_tick_seconds:-2}s"
 fi
-trap 'exit 0' INT TERM HUP
-trap service_cleanup EXIT
-
 last_pid=
 [ ! -r "$LAST_PID_FILE" ] || IFS= read -r last_pid < "$LAST_PID_FILE" || true
 last_raw_signature=$(raw_config_signature)
@@ -527,6 +661,11 @@ log "watcher start pid=${last_pid:-none} tick=${watch_tick_seconds}s stable_tick
 while true; do
   wait_for_watch_tick
   watch_cycle=$((watch_cycle + watch_elapsed_ticks))
+
+  if ! service_lock_still_owned; then
+    log "service ownership lost expected=$service_lock_owner; stopping owned workers"
+    exit 0
+  fi
 
   health_due=0
   [ "$watch_cycle" -ge "$next_health_cycle" ] && health_due=1
