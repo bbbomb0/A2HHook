@@ -12,7 +12,8 @@
 - native 收尾审计补充 checked `uintptr_t`/`uint64_t` 加法、ELF PHDR/symbol 文件偏移、`pread_exact`、ptrace 分块步进、ADRP/ADD 解码和 whitelist/auxiliary 事务地址区间门禁；新增边界断言通过，未改变设备 live 配置或写入范围。
 - 修复 HyperOS/KernelSU WebUI root bridge 的读取兼容性：执行设备配置命令时显式进入嵌套 root `sh -c`，避免 bridge 直接启动 `cat` 落入 `shell` SELinux 域而出现“设备配置读取失败”；伴生 APK 与模块 WebUI 同步更新。
 - 修复日志开关加入后的 WebUI 配置解析边界：此前完整回读把 `log_enabled` 从日志 marker 一直截取到总结束 marker，导致包名和槽位内容被并入日志值并抛出 `invalid-device-log`；Root 管理器和伴生 APK 因而统一显示“设备配置读取失败”，但 native 白名单仍正常生效。现改为在包名 marker 前结束日志段，并新增真实 10 槽 marker 动态回归。
-- 本次 parser 修复后离线严格套件为 `76 PASS / 0 FAIL / 5 GAP`（仅设备离线项）；APK Signature Scheme v3、ZIP verifier、严格 NDK 编译和两次独立打包通过。当前 ZIP 为 `585401` bytes，SHA-256=`0C52B00D1631BD9F9E6E16B8CA739C72E0699C5249023E2A52633A06A635D1E8`，伴生 APK SHA-256=`A701BEA03E057B83BA359BD08176C9CB9F1878A6B27312E91F4D791CE6177DC0`。
+- parser 修复后 K80U ADB 严格套件为 `81 PASS / 0 FAIL / 0 GAP`；ARM64 事务 harness、APK Signature Scheme v3、ZIP verifier、严格 NDK 编译和两次独立打包通过。当前 ZIP 为 `585401` bytes，SHA-256=`0C52B00D1631BD9F9E6E16B8CA739C72E0699C5249023E2A52633A06A635D1E8`，伴生 APK SHA-256=`A701BEA03E057B83BA359BD08176C9CB9F1878A6B27312E91F4D791CE6177DC0`。
+- 模块 WebUI 与恢复 Root 授权后的伴生 APK 均已在 K80U 现场读取 7/10 白名单；安装器重新安装 APK 可能清除原 Root 授权，需在管理器内恢复授权并重启伴生应用。
 - 同步修正 `service.sh`：`config/log_enabled=disabled` 时开机/热更新 apply 不再无条件把 native stderr 写入 `a2h_patch.log`；启用日志后才恢复该重定向。
 
 ## v1.5.8
