@@ -633,6 +633,8 @@ static int test_executable_tail_layout(void) {
 
 static int test_checked_absolute_ranges(void) {
     uintptr_t start = 0, end = 0;
+    uint64_t wide = 0;
+    size_t span = 0;
     if (!checked_absolute_range(0x1000u, 0x200u, 0x30u,
                                 &start, &end) ||
         start != 0x1200u || end != 0x1230u) {
@@ -649,6 +651,60 @@ static int test_checked_absolute_ranges(void) {
         fprintf(stderr, "FAIL checked absolute range length wrap accepted\n");
         return 0;
     }
+    if (!checked_uintptr_add(0x100u, 0x20u, &start) || start != 0x120u ||
+        checked_uintptr_add(UINTPTR_MAX, 1u, &start)) {
+        fprintf(stderr, "FAIL checked uintptr add boundary\n");
+        return 0;
+    }
+    if (!checked_u64_add(UINT64_MAX - 1u, 1u, &wide) || wide != UINT64_MAX ||
+        checked_u64_add(UINT64_MAX, 1u, &wide)) {
+        fprintf(stderr, "FAIL checked u64 add boundary\n");
+        return 0;
+    }
+    if (!checked_offset_range(0x1000u, 0x200u, 0x30u, 0x10u,
+                              &start) || start != 0x1230u ||
+        checked_offset_range(UINTPTR_MAX - 0x10u, 0x10u, 1u, 1u,
+                             &start)) {
+        fprintf(stderr, "FAIL checked offset range boundary\n");
+        return 0;
+    }
+    if (!checked_span_from_offsets(0x20u, 0x40u, 0x10u, &span) ||
+        span != 0x30u || checked_span_from_offsets(0x40u, 0x20u, 1u,
+                                                   &span) ||
+        checked_span_from_offsets(0u, SIZE_MAX, 1u, &span)) {
+        fprintf(stderr, "FAIL checked span boundary\n");
+        return 0;
+    }
+    return 1;
+}
+
+static int test_checked_native_boundaries(void) {
+    unsigned char byte = 0;
+    long deadline = 0;
+    if (mem_r(42, UINTPTR_MAX - 1u, &byte, 4u) == 0 || errno != EOVERFLOW) {
+        fprintf(stderr, "FAIL mem_r address overflow guard\n");
+        return 0;
+    }
+    if (mem_w(42, UINTPTR_MAX - 1u, &byte, 4u) == 0 || errno != EOVERFLOW) {
+        fprintf(stderr, "FAIL mem_w address overflow guard\n");
+        return 0;
+    }
+    if (checked_deadline_ms(-1, &deadline) || errno != EINVAL) {
+        fprintf(stderr, "FAIL negative deadline guard\n");
+        return 0;
+    }
+    if (checked_deadline_ms(LONG_MAX, &deadline) || errno != EOVERFLOW) {
+        fprintf(stderr, "FAIL deadline overflow guard\n");
+        return 0;
+    }
+    memset(&g_trace_group, 0, sizeof(g_trace_group));
+    g_trace_group.capacity = SIZE_MAX / 2u + 1u;
+    if (trace_group_reserve(SIZE_MAX) || errno != EOVERFLOW) {
+        fprintf(stderr, "FAIL trace-group growth overflow guard\n");
+        memset(&g_trace_group, 0, sizeof(g_trace_group));
+        return 0;
+    }
+    memset(&g_trace_group, 0, sizeof(g_trace_group));
     return 1;
 }
 
@@ -1783,6 +1839,45 @@ static int test_stream_ref_overlay_generation(void) {
     return 1;
 }
 
+static int test_hyperos4_inline_layout_shape(void) {
+    unsigned char events[STREAM_EVENT_PATCH_COUNT]
+                         [STREAM_EVENT_PATCH_MAX_BYTES] = {{0}};
+    unsigned char ref[STREAM_REF_PATCH_BYTES];
+    memcpy(events, STREAM_EVENT_STOCK_TEMPLATE, sizeof(events));
+    /* The event-0 BL target is ROM-local and represented by a placeholder. */
+    store_u32le(events[0] + 16u, 0x94000000u);
+    /* HyperOS 4.0.0.7 Beta moves the event's global/string literals. */
+    /* Preserve the x24 register tuple while changing only the LDR imm12. */
+    store_u32le(events[1] + 4u, 0xF946D718u);
+    store_u32le(events[1] + 20u, 0xD0FFECC3u);
+    store_u32le(events[1] + 24u, 0x912D0C63u);
+    if (!stream_event_stock_shape(events)) {
+        fprintf(stderr, "FAIL HyperOS4 event immediate drift rejected\n");
+        return 0;
+    }
+    events[1][8] ^= 1u;
+    if (stream_event_stock_shape(events)) {
+        fprintf(stderr, "FAIL HyperOS4 event opcode drift accepted\n");
+        return 0;
+    }
+    memcpy(ref, STREAM_REF_STOCK_TEMPLATE, sizeof(ref));
+    /* The Beta build changes ADRP/LDR page and addends in the reference path. */
+    store_u32le(ref + 0x1Cu, 0xF946D508u);
+    store_u32le(ref + 0x48u, 0xF9469042u);
+    store_u32le(ref + 0x64u, 0xD0FFECC3u);
+    store_u32le(ref + 0x6Cu, 0xF0FFED21u);
+    if (!stream_ref_stock_shape(ref)) {
+        fprintf(stderr, "FAIL HyperOS4 reference immediate drift rejected\n");
+        return 0;
+    }
+    ref[0x20u] ^= 1u;
+    if (stream_ref_stock_shape(ref)) {
+        fprintf(stderr, "FAIL HyperOS4 reference opcode drift accepted\n");
+        return 0;
+    }
+    return 1;
+}
+
 typedef struct {
     int present;
     size_t device_count;
@@ -2233,13 +2328,15 @@ int main(void) {
               test_outer_second_cache_failure() &&
               test_executable_tail_layout() &&
               test_checked_absolute_ranges() &&
+              test_checked_native_boundaries() &&
               test_dynamic_semantic_layouts() &&
               test_update_flags_overlay() &&
               test_concurrent_helper_generation() &&
               test_concurrent_generation_ownership() &&
-              test_app_policy_overlay_generation() &&
-              test_stream_ref_overlay_generation() &&
-              test_concurrent_latch_semantics() &&
+             test_app_policy_overlay_generation() &&
+             test_stream_ref_overlay_generation() &&
+             test_hyperos4_inline_layout_shape() &&
+             test_concurrent_latch_semantics() &&
               test_stream_ref_handoff_semantics() &&
              test_auxiliary_transactions() &&
              test_coordinated_whitelist_rollback() &&

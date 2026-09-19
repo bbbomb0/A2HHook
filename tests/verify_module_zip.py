@@ -24,6 +24,7 @@ FILES = (
     "config/package_states",
     "config/state",
     "config/game_auto_pause",
+    "config/log_enabled",
     "bin/a2h_patch",
     "bin/a2h_trigger",
     "bin/a2h_audio_watch",
@@ -48,7 +49,7 @@ EXECUTABLE = {
 TEXT = {
     "module.prop", "LICENSE", "customize.sh", "service.sh", "bin/a2h_apply",
     "config/packages.txt", "config/package_states", "config/state",
-    "config/game_auto_pause", "bin/a2h_audio_watch",
+    "config/game_auto_pause", "config/log_enabled", "bin/a2h_audio_watch",
     "post-fs-data.sh", "wrapper.sh", "uninstall.sh", "webroot/index.html",
 }
 
@@ -186,6 +187,8 @@ def validate(path: Path, expected_version: str | None = None, expected_code: str
             raise ValueError("default mode is not whitelist/disabled")
         if archive.read("config/game_auto_pause") != b"enabled\n":
             raise ValueError("default game auto-pause policy is not Xiaomi stock/enabled")
+        if archive.read("config/log_enabled") != b"enabled\n":
+            raise ValueError("default log recording state is not enabled")
 
         audio_watcher = archive.read("bin/a2h_audio_watch").decode("utf-8")
         watcher_markers = (

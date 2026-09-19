@@ -29,7 +29,7 @@ OFFICIAL = (
     "com.luna.music",
 )
 
-EXPECTED_RELEASE = ("v1.5.8", "1580")
+EXPECTED_RELEASE = ("v1.5.9", "1590")
 
 HAL_CASES = {
     "OS2.0.208.0.VONCNXM": {
@@ -266,6 +266,7 @@ TEXT_RELEASE_FILES = (
     "config/package_states",
     "config/state",
     "config/game_auto_pause",
+    "config/log_enabled",
     "companion/app/src/main/AndroidManifest.xml",
     "webroot/index.html",
 )
@@ -723,6 +724,13 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "enabled (Xiaomi stock behavior)",
         f"unexpected value: {game_policy!r}",
     )
+    log_policy = (root / "config/log_enabled").read_text(encoding="utf-8")
+    report.check(
+        log_policy == "enabled\n",
+        "default log recording state",
+        "enabled",
+        f"unexpected value: {log_policy!r}",
+    )
 
     patcher = (root / "src/patcher_v3.c").read_text(encoding="utf-8")
     version_match = re.search(r'#define\s+A2H_VERSION\s+"([^"]+)"', patcher)
@@ -901,6 +909,7 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and "renderMode();" in request_apply
         and "window[callbackName]=" in raw_bridge
         and "command,'{}',callbackName" in raw_bridge
+        and "const wrapped='sh -c '+shellQuote(payload);" in webui
         and "verifyDeviceConfig(text,data,writePackages);" in apply_loop
         and "loadDeviceConfig({preserveNotice:true})" in apply_loop
         and "if(!applyPending) interactionBusy=false;" in apply_loop
@@ -1186,6 +1195,30 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "successful configuration transactions signal the single watcher to re-evaluate active media leases",
         "applier is missing the root-only reconcile marker/log wake path",
     )
+    watcher_source = (root / "bin/a2h_audio_watch").read_text(encoding="utf-8")
+    log_contract = (
+        'CFG_LOG_ENABLED="$CFG_DIR/log_enabled"' in applier
+        and "logging_enabled()" in applier
+        and "set-log|set_log|logging)" in applier
+        and "run_with_main_log()" in applier
+        and 'Do not redirect to /proc/self/fd/2' in applier
+        and 'CFG_LOG_ENABLED="$CFG_DIR/log_enabled"' in service
+        and "logging_enabled()" in service
+        and "apply_once()" in service
+        and 'if logging_enabled; then' in extract_function(service, "apply_once() {", "\n}\n")
+        and 'sh "$APPLIER" apply >> "$LOG" 2>&1' in extract_function(service, "apply_once() {", "\n}\n")
+        and 'CFG_LOG_ENABLED="$CFG_DIR/log_enabled"' in watcher_source
+        and "logging_enabled()" in watcher_source
+        and "logEnabled" in webui
+        and "buildLogCommand" in webui
+        and "__A2H_LOG_ENABLED__" in webui
+    )
+    report.check(
+        log_contract,
+        "runtime log switch contract",
+        "config/log_enabled is atomically writable and honored by native applier, service, watcher, and WebUI",
+        "log switch plumbing is incomplete",
+    )
 
     packager = (root / "package_module.py").read_text(encoding="utf-8")
     forbidden = ("tests/", "zygisk/", "a2h_hook.so", "a2h_inject")
@@ -1230,7 +1263,7 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "first install can emit a missing .package_baseline redirection error",
     )
     report.check(
-        "for name in state game_auto_pause packages.txt package_states config_generation .package_baseline" in installer
+        "for name in state game_auto_pause log_enabled packages.txt package_states config_generation .package_baseline" in installer
         and re.search(r'repair_backslash_entry\s+"\$MODDIR/config\\\\game_auto_pause"', installer) is not None
         and 'pm install --user 0 "$companion_apk"' in installer
         and 'pm uninstall io.github.bbbomb0.a2hhook' in installer,
@@ -1321,13 +1354,13 @@ def check_companion(root: Path, report: Report) -> None:
 
     build_script = (root / "companion/build.ps1").read_text(encoding="utf-8")
     report.check(
-        "$VersionName = '1.5.8'" in build_script
-        and "$VersionCode = '1580'" in build_script
+        "$VersionName = '1.5.9'" in build_script
+        and "$VersionCode = '1590'" in build_script
         and "--min-sdk-version', '29'" in build_script
         and "--target-sdk-version', '35'" in build_script
         and "signing.properties" in build_script,
         "companion build metadata",
-        "version 1.5.8/1580, API 29-35, external stable signing config",
+        "version 1.5.9/1590, API 29-35, external stable signing config",
         "companion build version/API/signing metadata mismatch",
     )
 
@@ -1472,7 +1505,7 @@ def check_companion(root: Path, report: Report) -> None:
     uninstall_script = (root / "uninstall.sh").read_text(encoding="utf-8")
     installer_script = (root / "customize.sh").read_text(encoding="utf-8")
     lifecycle_ok = (
-        "COMPANION_VERSION_CODE=1580" in service_script
+        "COMPANION_VERSION_CODE=1590" in service_script
         and "ensure_companion_installed()" in service_script
         and "ensure_companion_installed &" in service_script
         and 'pm install --user 0 "$COMPANION_APK"' in service_script
@@ -1955,21 +1988,25 @@ printf 'PASS mode/policy transaction regression\n'
 
 def check_policy_refresh_transaction(root: Path, report: Report, use_adb: bool) -> None:
     applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
+    logging_block = extract_function(applier, "logging_enabled() {", "\nlog() {")
     atomic_block = extract_function(applier, "commit_tmp() {", "write_default_packages() {")
     refresh_block = extract_function(applier, "refresh_policy_state() {", "mark_pending() {")
-    if not atomic_block or not refresh_block:
+    if not logging_block or not atomic_block or not refresh_block:
         report.add("FAIL", "game policy immediate refresh regression", "production refresh functions not found")
         return
 
-    harness = atomic_block + refresh_block + r'''
+    harness = logging_block + atomic_block + refresh_block + r'''
 set -eu
 base=__POLICY_REFRESH_TEST_BASE__/a2h_policy_refresh_$$
 CFG_DIR="$base/config"
+CFG_LOG_ENABLED="$CFG_DIR/log_enabled"
 APPLIED_GAME_POLICY="$CFG_DIR/applied_game_auto_pause"
 APPLIED_REVISION="$CFG_DIR/applied_revision"
 APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
 MAIN_LOG="$base/main.log"
 ACTION_LOG="$base/action.log"
+AUDIORUNTIME_DIR="$base/audio-runtime"
+AUDIO_RUNTIME_DIR="$AUDIORUNTIME_DIR"
 TRIGGER="$base/trigger"
 TRIGGER_COUNT="$base/trigger.count"
 TRIGGER_FAIL="$base/trigger.fail"
@@ -2238,16 +2275,18 @@ printf 'PASS revision metadata repair regression\n'
 
 def check_last_pid_write_failure(root: Path, report: Report, use_adb: bool) -> None:
     applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
+    logging_block = extract_function(applier, "logging_enabled() {", "\nlog() {")
     atomic_block = extract_function(applier, "commit_tmp() {", "write_default_packages() {")
     apply_block = extract_function(applier, "apply_current() {", "mark_pending() {")
-    if not atomic_block or not apply_block:
+    if not logging_block or not atomic_block or not apply_block:
         report.add("FAIL", "last-pid write failure regression", "production atomic/apply functions not found")
         return
 
-    harness = atomic_block + apply_block + r'''
+    harness = logging_block + atomic_block + apply_block + r'''
 set -eu
 base=__LAST_PID_TEST_BASE__/a2h_last_pid_failure_$$
 CFG_DIR="$base/config"
+CFG_LOG_ENABLED="$CFG_DIR/log_enabled"
 LAST_PID_FILE="$CFG_DIR/last_pid"
 PATCHER="$base/patcher"
 PATCHER_CALL_LOG="$base/patcher.calls"
@@ -3152,15 +3191,53 @@ printf 'PASS WebUI writer/apply transaction regression\n'
     )
 
 
+def check_webui_device_config_parser(root: Path, report: Report) -> None:
+    node = shutil.which("node")
+    if not node:
+        report.gap("WebUI device-config parser regression", "node is required to execute the production parser")
+        return
+
+    webui = (root / "webroot/index.html").read_text(encoding="utf-8")
+    normalizers = extract_function(webui, "function normalizeSlot", "function isValidPackage")
+    parser = extract_function(webui, "function parseDeviceSection(", "function verifyDeviceConfig(")
+    if not normalizers or not parser:
+        report.add("FAIL", "WebUI device-config parser regression", "production parser functions could not be extracted")
+        return
+
+    javascript = "\n".join(
+        (
+            "'use strict';",
+            "const DEFAULTS=[]; let slots=[];",
+            "const DEVICE_MARKERS={state:'__A2H_DEVICE_STATE__',policy:'__A2H_GAME_AUTO_PAUSE__',log:'__A2H_LOG_ENABLED__',packages:'__A2H_DEVICE_PACKAGES__',states:'__A2H_DEVICE_STATES__',end:'__A2H_DEVICE_END__'};",
+            normalizers,
+            parser,
+            "const full=['__A2H_DEVICE_STATE__','disabled','__A2H_GAME_AUTO_PAUSE__','disabled','__A2H_LOG_ENABLED__','disabled','__A2H_DEVICE_PACKAGES__','com.kugou.android','com.tencent.qqmusic','com.netease.cloudmusic','cn.kuwo.player','com.miui.player','com.luna.music','com.kugou.android.lite','','','', '__A2H_DEVICE_STATES__','1','1','1','1','1','1','1','0','0','0','__A2H_DEVICE_END__'].join('\\n');",
+            "const compact=['__A2H_DEVICE_STATE__','disabled','__A2H_GAME_AUTO_PAUSE__','enabled','__A2H_LOG_ENABLED__','disabled','__A2H_DEVICE_END__'].join('\\n');",
+            "const data=parseDeviceConfig(full);",
+            "if(data.mode!=='whitelist'||data.gameAutoPause!=='disabled'||data.logEnabled!=='disabled'||data.packages[6]!=='com.kugou.android.lite'||data.enabled[6]!==true||data.enabled[7]!==false) throw new Error(JSON.stringify(data));",
+            "if(parseDeviceLog(compact)!=='disabled') throw new Error('compact-log-boundary');",
+            "process.stdout.write('PASS WebUI device-config parser regression\\n');",
+        )
+    )
+    rc, output = run_command([node, "-e", javascript], root)
+    report.check(
+        rc == 0 and "PASS WebUI device-config parser regression" in output,
+        "WebUI device-config parser regression",
+        "full readback isolates log_enabled before package markers and preserves slot 7",
+        output.strip() or f"node rc={rc}",
+    )
+
+
 def check_apply_capability_runtime(root: Path, report: Report, use_adb: bool) -> None:
     applier = (root / "bin/a2h_apply").read_text(encoding="utf-8")
+    logging_block = extract_function(applier, "logging_enabled() {", "\nlog() {")
     capability_functions = extract_function(
         applier, "probe_patcher_capabilities() {", "apply_current() {"
     )
     apply_current = extract_function(
         applier, "apply_current() {", "refresh_policy_state() {"
     )
-    if not capability_functions or not apply_current:
+    if not logging_block or not capability_functions or not apply_current:
         report.add(
             "FAIL",
             "native apply capability runtime regression",
@@ -3168,10 +3245,11 @@ def check_apply_capability_runtime(root: Path, report: Report, use_adb: bool) ->
         )
         return
 
-    harness = capability_functions + apply_current + r'''
+    harness = logging_block + capability_functions + apply_current + r'''
 set -eu
 base=__CAPABILITY_TEST_BASE__/a2h_capability_$$
 CFG_DIR="$base/config"
+CFG_LOG_ENABLED="$CFG_DIR/log_enabled"
 PATCHER_SUPPORT_MARKER="$CFG_DIR/.patcher_packages_support"
 CALLS="$base/calls"
 MODE_FILE="$base/mode"
@@ -3921,13 +3999,17 @@ def check_hal_fixtures(root: Path, report: Report, archive: Path) -> None:
         )
 
     source = (root / "src/patcher_v3.c").read_text(encoding="utf-8")
-    source_upper = source.upper()
-    missing_offsets = [
-        system
-        for system, item in HAL_CASES.items()
-        if f"0X{int(item['symbol']):X}" not in source_upper
-    ]
-    report.check(not missing_offsets, "profile fixture offsets", "all archived offsets appear in patcher profiles", f"missing offsets for {missing_offsets}")
+    embedded_profile_tokens = (
+        "profile_t", "PROFILES[]", "apply_profile(", "score_profile(",
+        "profile_official_strings_exact",
+    )
+    embedded_profiles = [token for token in embedded_profile_tokens if token in source]
+    report.check(
+        not embedded_profiles and 'snprintf(g_profile, sizeof(g_profile), "none")' in source,
+        "profile-free native resolver",
+        "inline path uses ELF/semantic discovery with runtime profile=none",
+        f"embedded profile tokens: {embedded_profiles!r}",
+    )
     lifecycle_contracts = (
         "#define UPDATE_APP_POLICY_BYTES 72u" in source
         and "build_update_app_policy_overlay" in source
@@ -4019,7 +4101,17 @@ def main() -> int:
     args = parser.parse_args()
 
     root = args.repo.resolve()
-    archive = (args.archive or (root / "compatibility_archive")).resolve()
+    if args.archive:
+        archive = args.archive.resolve()
+    else:
+        archive = (root / "compatibility_archive").resolve()
+        # Release checkouts intentionally exclude the large compatibility
+        # archive. Reuse the sibling historical archive when it is present,
+        # so available evidence is not reported as a false GAP.
+        if not archive.is_dir():
+            sibling = root.parent / "A2HHook" / "compatibility_archive"
+            if sibling.is_dir():
+                archive = sibling.resolve()
     report = Report()
     check_release_tree(root, report, args.adb)
     check_companion(root, report)
@@ -4035,6 +4127,7 @@ def main() -> int:
     check_postfs_runtime_cleanup(root, report, args.adb)
     check_audio_uid_watcher(root, report, args.adb)
     check_audio_policy_lease(root, report, args.adb)
+    check_webui_device_config_parser(root, report)
     check_webui_writer_transaction(root, report, args.adb)
     check_apply_capability_runtime(root, report, args.adb)
     check_source_contracts(root, report)

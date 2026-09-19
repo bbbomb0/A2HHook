@@ -1,5 +1,21 @@
 # 更新日志
 
+## v1.5.9
+
+- 修复 HyperOS 4.0.0.7 Beta inline path：stream event/ref 的 ROM-local ADRP/LDR/ADD 地址立即数改为寄存器与指令类别语义校验，保留控制流、关键数据流和 PLT 目标校验，避免全局变量移动导致 `semantic_hits=0`。
+- native patcher 移除所有内置 ROM profile、固定 profile 偏移和 profile 评分回退；目标解析仅使用映射 HAL 的 ELF 符号或通用语义扫描，运行摘要明确标记 `profile=none` / `ELF/semantic-only`。
+- K80U / HyperOS 4.0.0.7 Beta / Android 17 真实 audioserver 已验证：ELF symbol 定位、stream layout、148-byte stream handoff overlay、delete/update/strlen PLT 目标和 `--show` 辅助目标生成通过。
+- WebUI 新增“日志记录”开关，使用 `config/log_enabled` 原子保存；关闭后 service、applier、audio watcher 不再持久写入 `a2h_patch.log` / `action.log`，直接调用失败仍返回 stderr，重新开启即可恢复记录。
+- 加强 native 边界拒绝：线程/任务数组扩容、单调时钟 deadline、ptrace code-write 与 `/proc/*/mem` fallback 的地址/长度溢出均 fail-closed；新增对应 ARM64 transaction harness 断言，不改变现有事务、I-cache 或回滚语义。
+- 版本统一为 `v1.5.9 / versionCode=1590`；独立产物为 `a2h_hook_v1.5.9.zip`。
+- 历史中间产物曾通过 NDK `-Wall -Wextra -Werror`、ARM64 transaction harness 和 K80U HyperOS 4 ADB 严格套件；当前最终产物与验证结果见下方修复后记录。
+- native 收尾审计补充 checked `uintptr_t`/`uint64_t` 加法、ELF PHDR/symbol 文件偏移、`pread_exact`、ptrace 分块步进、ADRP/ADD 解码和 whitelist/auxiliary 事务地址区间门禁；新增边界断言通过，未改变设备 live 配置或写入范围。
+- 修复 HyperOS/KernelSU WebUI root bridge 的读取兼容性：执行设备配置命令时显式进入嵌套 root `sh -c`，避免 bridge 直接启动 `cat` 落入 `shell` SELinux 域而出现“设备配置读取失败”；伴生 APK 与模块 WebUI 同步更新。
+- 修复日志开关加入后的 WebUI 配置解析边界：此前完整回读把 `log_enabled` 从日志 marker 一直截取到总结束 marker，导致包名和槽位内容被并入日志值并抛出 `invalid-device-log`；Root 管理器和伴生 APK 因而统一显示“设备配置读取失败”，但 native 白名单仍正常生效。现改为在包名 marker 前结束日志段，并新增真实 10 槽 marker 动态回归。
+- parser 修复后 K80U ADB 严格套件为 `81 PASS / 0 FAIL / 0 GAP`；ARM64 事务 harness、APK Signature Scheme v3、ZIP verifier、严格 NDK 编译和两次独立打包通过。当前 ZIP 为 `585401` bytes，SHA-256=`0C52B00D1631BD9F9E6E16B8CA739C72E0699C5249023E2A52633A06A635D1E8`，伴生 APK SHA-256=`A701BEA03E057B83BA359BD08176C9CB9F1878A6B27312E91F4D791CE6177DC0`。
+- 模块 WebUI 与恢复 Root 授权后的伴生 APK 均已在 K80U 现场读取 7/10 白名单；安装器重新安装 APK 可能清除原 Root 授权，需在管理器内恢复授权并重启伴生应用。
+- 同步修正 `service.sh`：`config/log_enabled=disabled` 时开机/热更新 apply 不再无条件把 native stderr 写入 `a2h_patch.log`；启用日志后才恢复该重定向。
+
 ## v1.5.8
 
 - 修复切换全局/白名单模式时，当前正在播放的媒体流不会立即重新计算 A2H 的问题。AudioPolicy 活动端口现在保留合法包名、session 和 portId 事实记录；模式切换后 watcher 会按最新模式立即重算。

@@ -15,34 +15,36 @@ A2HHook 是面向 REDMI K80 Ultra / K80U 的音乐触感模块，目标是在 Ke
 - 游戏 `FAST` / `FAST|RAW` / 空间音频输出迁移与应用生命周期适配；
 - 对没有向 HAL 下发 `appname` 生命周期的低延迟游戏，按真实音轨事件和应用 UID 自动补登记；
 - 可选择在游戏期间继续启动后台音乐触感，默认关闭并遵循小米官方暂停策略；
+- 可在 WebUI 中独立开启或关闭运行日志记录，关闭后不再持久写入 `a2h_patch.log` 与 `action.log`；
 - 两枚控制中心磁贴：“A2H 全局音乐触感”切换全局/白名单，“游戏时启动后台音乐触感”切换游戏期间的后台触感；两者长按均打开同版 WebUI。
 
-当前版本：`v1.5.8`。本版在上一公开版 v1.5.7-fix 基础上，同时修复临时 Root/重复启动导致的多 service、多 watcher 与同包重复租约竞态，以及模式切换时当前媒体流不即时重算的问题。切换全局/白名单后，活动 AudioPolicy 端口会被重新评估，允许的包立即重新登记 A2H，不允许的包立即撤销 A2H 租约；实际媒体播放不被暂停，也不杀 audioserver。v1.5.7 与 v1.5.7-fix 继续作为独立历史基线保留。
+当前版本：`v1.5.9`。本版在 v1.5.8 基础上适配 HyperOS 4.0.0.7 Beta 的 inline path。native patcher 不内置 ROM profile，运行时通过映射 HAL 的 ELF 符号和语义布局定位；已在 K80U / HyperOS 4.0.0.7 Beta audioserver 上以 `profile=none` 完成 stream handoff overlay 与 PLT 目标生成验证。v1.5.8 与更早版本继续作为独立历史基线保留。
 
 本版性能收尾保留所有配置锁、五文件原子回滚、native 双写、两次 I-cache 同步和最终校验。重复的 patcher 能力探测按二进制大小与时间戳缓存；现代 patcher 成功后复用同一次事务内的最终验证，不再额外启动第二个完整 ptrace check；ELF 符号解析在单次进程内缓存。模块自身提交的严格规范配置会记录带 schema 的 inode/纳秒时间戳指纹，后续直接走快速准备；Root 文件管理器修改使指纹失配时仍自动回退完整规范化。配置提交只启动一个合并 worker；快速连续提交时，worker 只在当前五文件原始签名与刚完成事务完全一致时合并旧请求，检测到更新则继续保留待处理标记。稳定配置监听使用 FIFO 阻塞到事件或 30 秒健康超时，音轨 watcher 的常见事件走 shell 内建快路径，核心系统 UID 的拒绝在本次开机内只解析和记录一次。worker 仅在短时工作期间尝试提高调度优先级，不锁频、不常驻高优先级，也不绑定固定 CPU 编号。
 
-## v1.5.8 相较上一公开版 v1.5.7-fix
+## v1.5.9 相较 v1.5.8
 
 - **模式切换即时重算：** native 应用事务成功后写入一次性 root-only reconcile 标记，watcher 通过受控 logcat 唤醒并原子认领；活动 AudioPolicy 端口和 fallback 租约按最新全局/白名单配置重算。
 - **当前媒体不再等待下一次播放：** 已在播放的包若新模式允许，会安全关闭旧 A2H 登记流并重新建立一次；若新模式不允许，只撤销 A2H 租约。不会暂停媒体播放器本身、不会执行 `killall audioserver`，也不引入周期 ptrace。
 - **白名单切换可恢复：** 即使活动端口最初因白名单不匹配未建立租约，watcher 仍保留合法包的 `portId/session` 事实记录，切换到全局或启用对应槽后可立即登记。
 - **同包多流只重算一次：** 多个活动端口共享同一包名时，reconcile 只重启一条租约，继续沿用 PID/starttime 所有权、原子 claim 和失败清理。
-- **版本与验证：** 版本统一为 `v1.5.8 / versionCode=1580`；严格套件达到 `78 PASS / 0 FAIL / 0 GAP`，并新增模式切换、当前端口、禁用/启用和同包多端口动态场景。本人 K80U / HyperOS 3.0.302 已完成重启自启和播放中模式往返门禁；OS2/OS3 其他版本仍以静态 fixture 或目标设备实测为准。
+- **版本与验证：** 版本统一为 `v1.5.9 / versionCode=1590`；HyperOS 4.0.0.7 Beta 的真实 audioserver 已完成 inline layout、stream handoff 和 PLT 生成验证。
 
 - **重复实例隔离：** `service.sh` 使用 PID、`/proc` starttime 与 root 所有权组成的单例锁；音轨 watcher 再使用独立单例锁。Root 管理器重复拉起模块服务时，后来的实例会安全退出，不再创建第二套 logcat watcher。
 - **同包租约原子化：** 每个包名在建立 AAudio 登记流前必须取得原子 claim；同一包名的并发 playback 事件或事件风暴只会创建一条租约，已有 fallback 可原位提升为真实 AudioPolicy 租约。
 - **陈旧状态恢复：** 创建中的锁不会被短等待误删；只有 owner 连续两次稳定、PID/starttime 已失效时才回收。开机早期只清理模块固定 service 锁与音轨运行目录，非 root 同名目录拒绝接管。
 - **Android 解析兼容：** 修复 mksh 将 `${value%%|*}` 中 `|` 解释为扩展模式、导致带空格 JSON 三字段变空的问题，改为确定性的 `IFS='|' read`，紧凑 JSON 快路径保持不变。
 - **安全边界：** 不把 `killall audioserver` 作为日常修复，不修改 native HAL 双写、两次 I-cache、所有权验证或事务回滚，也不新增周期 `ptrace`、`dumpsys` 或高优先级常驻轮询。
-- **运行时回归：** Android shell、同包 20 次事件风暴、重复 watcher、创建中/陈旧/PID 复用锁、全局/白名单与四份 OS2/OS3 HAL fixture 已全部纳入最终 `78 PASS / 0 FAIL / 0 GAP` 门禁。
+- **WebUI 配置回读修复：** 日志值只解析到包名 marker 为止，不再把后续白名单误并入 `log_enabled`；KernelSU bridge 通过嵌套 root shell 读取设备配置。模块 WebUI 与伴生 APK 均可显示真实 10 槽和开关状态。
+- **验证与产物：** K80U / HyperOS 4.0.0.7 Beta ADB 严格套件 `81 PASS / 0 FAIL / 0 GAP`，ARM64 事务与故障注入 harness、APK v3 签名、ZIP 校验及两次可复现构建通过。发布包 `a2h_hook_v1.5.9.zip` 为 585,401 bytes，SHA-256 `0C52B00D1631BD9F9E6E16B8CA739C72E0699C5249023E2A52633A06A635D1E8`。跨其他系统的运行时行为仍需目标设备门禁。
 
-上一公开版 v1.5.7-fix 的完整历史说明请查看 [CHANGELOG.md](CHANGELOG.md) 与 [GitHub 历史 Release](https://github.com/bbbomb0/A2HHook/releases)；本首页只保留对当前 v1.5.8 有帮助的比较信息。
+上一公开版 v1.5.7-fix 的完整历史说明见 [CHANGELOG.md](CHANGELOG.md) 与 [GitHub 历史 Release](https://github.com/bbbomb0/A2HHook/releases)；首页聚焦当前版本。
 
 ## 下载安装
 
 请到 GitHub Releases 下载：
 
-- `a2h_hook_v1.5.8.zip`
+- `a2h_hook_v1.5.9.zip`
 
 刷入方式：
 
@@ -51,7 +53,10 @@ A2HHook 是面向 REDMI K80 Ultra / K80U 的音乐触感模块，目标是在 Ke
 3. 进入模块卡片 WebUI；
 4. 开启“全局模式”即对所有应用生效；关闭后自动切换为白名单模式；
 5. 10 个包名可分别使用右侧开关，模式、包名或开关变化会自动保存并应用。
-6. 需要快捷切换时，将“A2H 全局音乐触感”和“游戏时启动后台音乐触感”添加到控制中心；首次使用按 Root 管理器提示授权。后者默认关闭并遵循官方暂停策略，开启后允许游戏期间继续后台音乐触感；两枚磁贴长按均打开 WebUI。
+6. 在“日志记录”中可随时关闭或恢复 `a2h_patch.log` / `action.log` 的持久记录；关闭不会停用补丁，仅隐藏详细持久日志。
+7. 需要快捷切换时，将“A2H 全局音乐触感”和“游戏时启动后台音乐触感”添加到控制中心；首次使用按 Root 管理器提示授权。后者默认关闭并遵循官方暂停策略，开启后允许游戏期间继续后台音乐触感；两枚磁贴长按均打开 WebUI。
+
+升级时如果伴生 APK 被重新安装，请在 Root 管理器中重新授予它 Root 权限，并重启伴生应用后再读取设备配置。
 
 WebUI 使用本地 HTML/CSS/JavaScript 实现 Miuix 设置页风格，不依赖网络、CDN、Compose、Wasm 或 SolidJS 运行时。主页保留两个核心开关和 10 槽编辑；“关于”“支持我们”和二维码均采用带遮罩的底部弹层，点击弹层外会复用同一历史栈带动画逐层返回。关于弹层先展示 A2HHook 项目、项目地址、QQ群和捐赠支持，进入“支持我们”并选择赞赏方式后才按需显示对应二维码；主页底栏爱心会直接进入“支持我们”，作者行可打开酷安个人主页。浅色/深色主题首次默认跟随系统，也可在跟随系统、浅色和深色三种模式间切换。主页旧“A2”方块与关于页蓝底标识已统一替换为透明底“双音轨环 + 双音符 + 连续弧形触感波”SVG，不包含三角或箭头结构；动画仅改变合成友好的位移、旋转、缩放和透明度，并在页面不可见或系统要求减少动态效果时停止。项目地址使用 GitHub 图标，QQ群入口通过显式 Android 包名直接交给 QQ，不回退浏览器。微信支付、微信赞赏与支付宝入口使用本地 WebP，并在首次进入支持页时加载。Android 返回会按当前弹层历史逐层收起。伴生 APK 优先调用 HyperOS/Android 原生震感；KernelSU 模块 WebUI 在没有原生震感接口时，通过现有 `window.ksu.exec` 调用系统振动服务作为短时回退。界面只保留一个“强劲震感”开关，任何震感失败都不会阻断配置保存。
 
@@ -125,7 +130,7 @@ python package_module.py .
 构建完成后会生成：
 
 ```text
-a2h_hook_v1.5.8.zip
+a2h_hook_v1.5.9.zip
 ```
 
 ## 仓库结构
