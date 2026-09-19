@@ -8,6 +8,7 @@ CFG_DIR=${A2H_CONFIG_DIR:-$MODDIR/config}
 CFG_STATE="$CFG_DIR/state"
 CFG_PKGS="$CFG_DIR/packages.txt"
 CFG_STATES="$CFG_DIR/package_states"
+CFG_LOG_ENABLED="$CFG_DIR/log_enabled"
 PACKAGES_LIST=${A2H_PACKAGES_LIST:-/data/system/packages.list}
 TRIGGER_SOURCE=${A2H_TRIGGER_SOURCE:-$MODDIR/bin/a2h_trigger}
 RUNTIME_DIR=${A2H_RUNTIME_DIR:-/data/local/tmp/a2h_hook_runtime}
@@ -38,7 +39,18 @@ lease_claim_path=
 lease_claim_owner=
 
 ts() { date '+%F %T'; }
-log() { printf '[%s] audio-watch %s\n' "$(ts)" "$*" >> "$LOG" 2>/dev/null; }
+logging_enabled() {
+  logging_value=enabled
+  if [ -r "$CFG_LOG_ENABLED" ]; then
+    IFS= read -r logging_value < "$CFG_LOG_ENABLED" || logging_value=enabled
+    logging_value=$(printf '%s' "$logging_value" | tr -d '\r')
+  fi
+  [ "$logging_value" != "disabled" ]
+}
+log() {
+  logging_enabled || return 0
+  printf '[%s] audio-watch %s\n' "$(ts)" "$*" >> "$LOG" 2>/dev/null
+}
 
 valid_package() {
   package_value=$1

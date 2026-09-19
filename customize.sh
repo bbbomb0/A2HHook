@@ -60,6 +60,7 @@ repair_backslash_entry "$MODDIR/bin\\a2h_inject"
 repair_backslash_entry "$MODDIR/config\\packages.txt"
 repair_backslash_entry "$MODDIR/config\\state"
 repair_backslash_entry "$MODDIR/config\\game_auto_pause"
+repair_backslash_entry "$MODDIR/config\\log_enabled"
 repair_backslash_entry "$MODDIR/companion\\a2h_companion.apk"
 
 mkdir -p \
@@ -74,7 +75,7 @@ old_states_present=0
 if [ "$MODDIR" != "$OLD_MODULE" ] && [ -d "$OLD_MODULE/config" ]; then
   [ -f "$OLD_MODULE/config/packages.txt" ] && old_packages_present=1
   [ -f "$OLD_MODULE/config/package_states" ] && old_states_present=1
-  for name in state game_auto_pause packages.txt package_states config_generation .package_baseline; do
+  for name in state game_auto_pause log_enabled packages.txt package_states config_generation .package_baseline; do
     [ -f "$OLD_MODULE/config/$name" ] || continue
     cp -f "$OLD_MODULE/config/$name" "$MODDIR/config/$name" 2>/dev/null
   done
@@ -127,6 +128,9 @@ if [ ! -f "$MODDIR/config/state" ]; then
 fi
 if [ ! -f "$MODDIR/config/game_auto_pause" ]; then
   printf '%s\n' enabled > "$MODDIR/config/game_auto_pause"
+fi
+if [ ! -f "$MODDIR/config/log_enabled" ]; then
+  printf '%s\n' enabled > "$MODDIR/config/log_enabled"
 fi
 
 packages_preexisting=0
@@ -193,7 +197,7 @@ if [ ! -f "$MODDIR/config/package_states" ]; then
 fi
 
 # Strip UTF-8 BOM from critical text files if any
-for f in "$MODDIR/module.prop" "$MODDIR/config/packages.txt" "$MODDIR/config/package_states" "$MODDIR/config/config_generation" "$MODDIR/config/.package_baseline" "$MODDIR/config/state" "$MODDIR/config/game_auto_pause" "$MODDIR/webroot/index.html"; do
+for f in "$MODDIR/module.prop" "$MODDIR/config/packages.txt" "$MODDIR/config/package_states" "$MODDIR/config/config_generation" "$MODDIR/config/.package_baseline" "$MODDIR/config/state" "$MODDIR/config/game_auto_pause" "$MODDIR/config/log_enabled" "$MODDIR/webroot/index.html"; do
   [ -f "$f" ] || continue
   # remove BOM if present
   if [ "$(dd if="$f" bs=1 count=3 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "efbbbf" ]; then
@@ -272,6 +276,7 @@ chmod 644 \
   "$MODDIR/config/config_generation" \
   "$MODDIR/config/state" \
   "$MODDIR/config/game_auto_pause" \
+  "$MODDIR/config/log_enabled" \
   "$MODDIR/webroot/index.html" \
   "$MODDIR/webroot/coolapk.webp" 2>/dev/null
 

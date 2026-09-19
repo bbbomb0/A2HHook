@@ -96,7 +96,7 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
       </div>
     </div>
     <div class="top-actions">
-      <span class="version">v1.5.8</span>
+      <span class="version">v1.5.9</span>
       <button class="icon-btn" id="theme" data-haptic="button" type="button" title="切换主题" aria-label="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2M12 19v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M3 12h2M19 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/><circle cx="12" cy="12" r="4"/></svg></button>
       <button class="icon-btn" id="about" data-haptic="button" type="button" title="关于" aria-label="关于"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/></svg></button>
     </div>
@@ -111,6 +111,10 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     <label class="preference" for="gamePause">
       <span class="pref-copy"><span class="pref-title">游戏时启动后台音乐触感</span><span class="pref-summary" id="policyValue">关闭 · 遵循官方策略</span></span>
       <span class="switch"><input id="gamePause" type="checkbox" role="switch" aria-label="游戏时启动后台音乐触感"><span class="track"></span></span>
+    </label>
+    <label class="preference" for="logEnabled">
+      <span class="pref-copy"><span class="pref-title">日志记录</span><span class="pref-summary" id="logValue">开启 · 记录运行日志</span></span>
+      <span class="switch"><input id="logEnabled" type="checkbox" role="switch" aria-label="日志记录"><span class="track"></span></span>
     </label>
   </section>
 
@@ -151,7 +155,7 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
       <div class="project-mark" aria-hidden="true"><svg class="a2h-logo project-logo" viewBox="0 0 64 64"><circle class="logo-orbit outer" cx="32" cy="32" r="26" pathLength="100"/><circle class="logo-orbit inner" cx="32" cy="32" r="19" pathLength="100"/><g class="logo-core"><path class="logo-note" d="M27 18v27M27 23l20-5v21M27 29l20-5"/><ellipse class="logo-note-head" cx="21" cy="46" rx="6.5" ry="5" transform="rotate(-10 21 46)"/><ellipse class="logo-note-head" cx="41" cy="40" rx="6.5" ry="5" transform="rotate(-10 41 40)"/></g><path class="logo-wave left" d="M11 19c-9 7-9 19 0 26"/><path class="logo-wave right" d="M53 19c9 7 9 19 0 26"/></svg></div>
       <div class="project-name">A2HHook</div>
       <div class="project-sub">REDMI K80 Ultra 音乐触感</div>
-      <div class="version-chip">v1.5.8</div>
+      <div class="version-chip">v1.5.9</div>
     </section>
     <div class="about-actions">
       <a class="about-action" data-system-link data-haptic="button" href="https://github.com/bbbomb0/A2HHook" target="_blank" rel="noopener noreferrer"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .3A12 12 0 0 0 8.2 23.7c.6.1.8-.3.8-.6v-2.3c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3z"/></svg><span>项目地址</span></a>
@@ -210,9 +214,10 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
   const LABELS=['酷狗音乐','QQ音乐','网易云音乐','酷我音乐','小米音乐','Luna音乐','自定义 1','自定义 2','自定义 3','自定义 4'];
   const STORAGE_KEY='a2h_config_v6';
   const LEGACY_STORAGE_KEYS=['a2h_config_v5','a2h_config_v4'];
-  const DEVICE_MARKERS={state:'__A2H_DEVICE_STATE__',policy:'__A2H_GAME_AUTO_PAUSE__',packages:'__A2H_DEVICE_PACKAGES__',states:'__A2H_DEVICE_STATES__',end:'__A2H_DEVICE_END__'};
+  const DEVICE_MARKERS={state:'__A2H_DEVICE_STATE__',policy:'__A2H_GAME_AUTO_PAUSE__',log:'__A2H_LOG_ENABLED__',packages:'__A2H_DEVICE_PACKAGES__',states:'__A2H_DEVICE_STATES__',end:'__A2H_DEVICE_END__'};
   let mode='whitelist';
   let gameAutoPause='enabled';
+  let logEnabled='enabled';
   let slots=DEFAULTS.slice();
   let slotEnabled=[true,true,true,true,true,true,false,false,false,false];
   let configRevision=0;
@@ -220,6 +225,8 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
   let deviceConfigStatus='loading';
   let applyPending=false;
   let packageWritePending=false;
+  let logWritePending=false;
+  let logOnlyPending=false;
   let applyBusy=false;
   let interactionBusy=false;
   let applyDrainScheduled=false;
@@ -525,10 +532,11 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
       }
       mode=data&&data.mode==='global'?'global':'whitelist';
       gameAutoPause=data&&data.gameAutoPause==='disabled'?'disabled':'enabled';
+      logEnabled=data&&data.logEnabled==='disabled'?'disabled':'enabled';
     }catch(error){}
   }
   function saveLocal(){
-    try{localStorage.setItem(STORAGE_KEY,JSON.stringify({version:6,mode,gameAutoPause,packages:slots,enabled:slotEnabled}));}catch(error){}
+    try{localStorage.setItem(STORAGE_KEY,JSON.stringify({version:6,mode,gameAutoPause,logEnabled,packages:slots,enabled:slotEnabled}));}catch(error){}
   }
   function setNotice(text,kind,sticky){
     const toast=$('toast');
@@ -688,6 +696,10 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     $('gamePause').checked=backgroundHaptic;
     $('gamePause').disabled=!deviceConfigReady||interactionLocked;
     $('policyValue').textContent=deviceConfigReady?(backgroundHaptic?'开启 · 游戏内保持触感':'关闭 · 遵循官方策略'):(deviceConfigStatus==='error'?'读取失败':'正在读取');
+    const recording=logEnabled!=='disabled';
+    $('logEnabled').checked=recording;
+    $('logEnabled').disabled=!deviceConfigReady||interactionLocked;
+    $('logValue').textContent=deviceConfigReady?(recording?'开启 · 记录运行日志':'关闭 · 不写入日志文件'):(deviceConfigStatus==='error'?'读取失败':'正在读取');
     $('reset').disabled=!deviceConfigReady||interactionLocked;
     document.querySelectorAll('.slot-input').forEach(input=>{input.disabled=!deviceConfigReady||interactionLocked;});
     document.querySelectorAll('.slot-switch input').forEach(toggle=>{
@@ -817,9 +829,9 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
   }
   function snapshotConfig(){
     const packages=cloneSlots(slots);
-    return {mode:mode==='global'?'global':'whitelist',gameAutoPause:gameAutoPause==='disabled'?'disabled':'enabled',packages,enabled:cloneEnabled(slotEnabled,packages),generation:String(Date.now())};
+    return {mode:mode==='global'?'global':'whitelist',gameAutoPause:gameAutoPause==='disabled'?'disabled':'enabled',logEnabled:logEnabled==='disabled'?'disabled':'enabled',packages,enabled:cloneEnabled(slotEnabled,packages),generation:String(Date.now())};
   }
-  function snapshotKey(data){return JSON.stringify({mode:data.mode,gameAutoPause:data.gameAutoPause,packages:data.packages,enabled:data.enabled});}
+  function snapshotKey(data){return JSON.stringify({mode:data.mode,gameAutoPause:data.gameAutoPause,logEnabled:data.logEnabled,packages:data.packages,enabled:data.enabled});}
   function validationMessage(data){
     const seen=new Set();
     for(let index=0;index<10;index++){
@@ -845,6 +857,9 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     while(states.length<10) states.push('0');
     return ['sh /data/adb/modules/a2h_hook/bin/a2h_apply commit-queue',shellQuote(mode),shellQuote(policy),shellQuote(data.generation)]
       .concat(values.map(shellQuote),states.map(shellQuote)).join(' ');
+  }
+  function buildLogCommand(value){
+    return 'sh /data/adb/modules/a2h_hook/bin/a2h_apply set-log '+shellQuote(value==='disabled'?'disabled':'enabled');
   }
   function buildCommand(state,snapshot,writePackages){
     const data=snapshot||snapshotConfig();
@@ -932,7 +947,10 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     const bridge=findExecBridge();
     if(!bridge) throw new Error('no-exec');
     const rcMarker='__A2H_EXEC_RC_'+Date.now()+'_'+(++execSerial)+'__';
-    const wrapped='( '+command+'\n); a2h_exec_rc=$?; printf \'\\n'+rcMarker+'%s\\n\' "$a2h_exec_rc"; exit 0';
+    // Some KernelSU su bridges launch direct external commands in the shell
+    // domain; an explicit nested shell keeps config reads in the root domain.
+    const payload='( '+command+'\n); a2h_exec_rc=$?; printf \'\\n'+rcMarker+'%s\\n\' "$a2h_exec_rc"; exit 0';
+    const wrapped='sh -c '+shellQuote(payload);
     const raw=bridge.kind==='raw'?await invokeRawBridge(bridge,wrapped,timeoutMs):await invokeGenericBridge(bridge,wrapped,timeoutMs);
     const result=normalizeExecResult(raw);
     const markerAt=result.stdout.lastIndexOf(rcMarker);
@@ -974,10 +992,22 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
   function requestApply(reason,writePackages){
     if(!deviceConfigReady){setNotice('正在读取设备配置','warn');return;}
     applyPending=true;
+    logOnlyPending=false;
     packageWritePending=packageWritePending||Boolean(writePackages);
     applyReason=reason||'配置已更新';
     // Publish the local state immediately, then keep configuration controls
     // greyed out until the root transaction has authoritative readback.
+    interactionBusy=true;
+    renderMode();
+    prioritizeInteraction(420);
+    scheduleApplyDrain();
+  }
+  function requestLogApply(reason){
+    if(!deviceConfigReady){setNotice('正在读取设备配置','warn');return;}
+    applyPending=true;
+    logWritePending=true;
+    logOnlyPending=true;
+    applyReason=reason||'日志设置已更新';
     interactionBusy=true;
     renderMode();
     prioritizeInteraction(420);
@@ -1003,15 +1033,23 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
         applyPending=false;
         const writePackages=packageWritePending;
         packageWritePending=false;
+        const writeLog=logWritePending;
+        logWritePending=false;
+        const logOnly=logOnlyPending&&!writePackages;
+        logOnlyPending=false;
         const data=snapshotConfig();
         const error=validationMessage(data);
         if(error){refreshValidation();setNotice(error,'err');continue;}
         const key=snapshotKey(data);
-        if(key===lastAppliedKey&&!writePackages){saveLocal();continue;}
+        if(key===lastAppliedKey&&!writePackages&&!writeLog){saveLocal();continue;}
         const state=data.mode==='global'?'enabled':'disabled';
         setNotice('正在保存：'+applyReason,'',true);
         try{
-          const command=buildCommitCommand(state,data,writePackages)+' && '+buildReadDeviceCommand(writePackages);
+          const commandParts=[];
+          if(writeLog) commandParts.push(buildLogCommand(data.logEnabled));
+          if(!logOnly) commandParts.push(buildCommitCommand(state,data,writePackages));
+          commandParts.push(buildReadDeviceCommand(writePackages));
+          const command=commandParts.join(' && ');
           const commit=execRoot(command,15000);
           flushRootHaptic();
           const text=extractStdout(await commit);
@@ -1025,6 +1063,8 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
         }catch(error){
           console&&console.warn&&console.warn(error);
           packageWritePending=packageWritePending||writePackages;
+          logWritePending=logWritePending||writeLog;
+          logOnlyPending=logOnlyPending||logOnly;
           if(applyPending||snapshotKey(snapshotConfig())!==key){
             setNotice('上一项保存失败，正在处理最新配置','warn');
             continue;
@@ -1034,6 +1074,8 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
           setNotice('保存校验失败，正在恢复设备状态','warn',true);
           const restored=await loadDeviceConfig({preserveNotice:true});
           packageWritePending=false;
+          logWritePending=false;
+          logOnlyPending=false;
           setNotice(restored?'保存失败，已恢复设备状态':'保存失败，设备状态读取失败','err');
         }
       }
@@ -1064,7 +1106,9 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
       "printf '%s\\n' "+shellQuote(DEVICE_MARKERS.state),
       'cat /data/adb/modules/a2h_hook/config/state 2>/dev/null || exit 2',
       "printf '%s\\n' "+shellQuote(DEVICE_MARKERS.policy),
-      'cat /data/adb/modules/a2h_hook/config/game_auto_pause 2>/dev/null || exit 2'
+      'cat /data/adb/modules/a2h_hook/config/game_auto_pause 2>/dev/null || exit 2',
+      "printf '%s\\n' "+shellQuote(DEVICE_MARKERS.log),
+      "cat /data/adb/modules/a2h_hook/config/log_enabled 2>/dev/null || printf 'enabled\\n'"
     ];
     if(includePackages){
       lines.push(
@@ -1091,6 +1135,13 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     if(policy!=='enabled'&&policy!=='disabled') throw new Error('invalid-device-policy');
     return policy;
   }
+  function parseDeviceLog(text,endMarker){
+    const logText=parseDeviceSection(text,DEVICE_MARKERS.log,endMarker||DEVICE_MARKERS.end);
+    if(logText===null) throw new Error('missing-device-log');
+    const value=logText.trim();
+    if(value!=='enabled'&&value!=='disabled') throw new Error('invalid-device-log');
+    return value;
+  }
   function parseDeviceConfig(text){
     if(text.indexOf(DEVICE_MARKERS.end)<0) throw new Error('incomplete-device-config');
     const packageText=parseDeviceSection(text,DEVICE_MARKERS.packages,DEVICE_MARKERS.states);
@@ -1099,12 +1150,13 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     const packages=Array(10).fill('');
     packageText.replace(/\r/g,'').split('\n').slice(0,10).forEach((line,index)=>{packages[index]=normalizeSlot(line);});
     const rawStates=stateText.replace(/\r/g,'').split('\n').map(value=>value.trim());
-    return {mode:parseDeviceMode(text,DEVICE_MARKERS.policy),gameAutoPause:parseDevicePolicy(text,DEVICE_MARKERS.packages),packages,enabled:cloneEnabled(rawStates,packages)};
+    return {mode:parseDeviceMode(text,DEVICE_MARKERS.policy),gameAutoPause:parseDevicePolicy(text,DEVICE_MARKERS.log),logEnabled:parseDeviceLog(text,DEVICE_MARKERS.packages),packages,enabled:cloneEnabled(rawStates,packages)};
   }
   function verifyDeviceConfig(text,expected,includePackages){
-    const actual=includePackages?parseDeviceConfig(text):{mode:parseDeviceMode(text),gameAutoPause:parseDevicePolicy(text)};
+    const actual=includePackages?parseDeviceConfig(text):{mode:parseDeviceMode(text),gameAutoPause:parseDevicePolicy(text,DEVICE_MARKERS.log),logEnabled:parseDeviceLog(text)};
     if(actual.mode!==expected.mode) throw new Error('device-mode-mismatch');
     if(actual.gameAutoPause!==expected.gameAutoPause) throw new Error('device-policy-mismatch');
+    if(actual.logEnabled!==expected.logEnabled) throw new Error('device-log-mismatch');
     if(includePackages){
       const expectedPackages=cloneSlots(expected.packages);
       const expectedEnabled=cloneEnabled(expected.enabled,expectedPackages);
@@ -1130,6 +1182,7 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
       const data=parseDeviceConfig(text);
       mode=data.mode;
       gameAutoPause=data.gameAutoPause;
+      logEnabled=data.logEnabled;
       slots=data.packages;
       slotEnabled=data.enabled;
       deviceConfigReady=true;
@@ -1167,6 +1220,14 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     renderMode();
     haptic('toggle');
     requestApply(event.target.checked?'游戏后台音乐触感已开启':'已恢复官方游戏策略',false);
+  });
+  $('logEnabled').addEventListener('change',event=>{
+    if(!deviceConfigReady){event.target.checked=logEnabled!=='disabled';haptic('error');setNotice('设备配置尚未载入','warn');return;}
+    logEnabled=event.target.checked?'enabled':'disabled';
+    configRevision++;
+    renderMode();
+    haptic('toggle');
+    requestLogApply(event.target.checked?'日志记录已开启':'日志记录已关闭');
   });
   $('theme').addEventListener('click',()=>{
     const root=document.documentElement;

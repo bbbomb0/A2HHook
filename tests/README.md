@@ -74,8 +74,8 @@ does not attach to or modify the phone audio process.
 ## ZIP verification
 
 ```powershell
-python tests/verify_module_zip.py .\a2h_hook_v1.5.8.zip `
-  --expected-version v1.5.8 --expected-code 1580
+python tests/verify_module_zip.py .\a2h_hook_v1.5.9.zip `
+  --expected-version v1.5.9 --expected-code 1590
 ```
 
 This independently checks the exact member list, duplicates, path portability,
@@ -89,7 +89,7 @@ Preflight only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.8
+  -ExpectedVersion v1.5.9
 ```
 
 Full two-round test after the candidate module is installed and the phone has
@@ -97,7 +97,7 @@ rebooted:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.8 -Execute -AllowAudioRestart
+  -ExpectedVersion v1.5.9 -Execute -AllowAudioRestart
 ```
 
 The device case waits for the apply queue to become idle, backs up persistent

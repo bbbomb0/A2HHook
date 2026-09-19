@@ -19,6 +19,7 @@ CFG_BASELINE="$CFG_DIR/.package_baseline"
 CFG_SNAPSHOT="$CFG_DIR/config_snapshot"
 CFG_REVISION="$CFG_DIR/revision"
 CFG_NORMALIZED_FINGERPRINT="$CFG_DIR/.normalized_fingerprint"
+CFG_LOG_ENABLED="$CFG_DIR/log_enabled"
 APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
 APPLIED_REVISION="$CFG_DIR/applied_revision"
 APPLIED_GAME_POLICY="$CFG_DIR/applied_game_auto_pause"
@@ -58,8 +59,28 @@ umask 077
 
 ts() { date '+%F %T'; }
 
+logging_enabled() {
+  logging_value=enabled
+  if [ -r "$CFG_LOG_ENABLED" ]; then
+    IFS= read -r logging_value < "$CFG_LOG_ENABLED" || logging_value=enabled
+    logging_value=$(printf '%s' "$logging_value" | tr -d '\r')
+  fi
+  [ "$logging_value" != "disabled" ]
+}
+
+run_with_main_log() {
+  if logging_enabled; then
+    "$@" >> "$MAIN_LOG" 2>&1
+  else
+    # Do not redirect to /proc/self/fd/2: Android shell callers may expose
+    # stderr as a socket that cannot be opened for append redirection.
+    "$@"
+  fi
+}
+
 log() {
   log_line="[$(ts)] $*"
+  logging_enabled || return 0
   printf '%s\n' "$log_line" >> "$ACTION_LOG" 2>/dev/null
   printf '%s\n' "$log_line" >> "$MAIN_LOG" 2>/dev/null
 }
@@ -730,6 +751,27 @@ set_game_auto_pause_unlocked() {
   write_value_atomic "$CFG_GAME_POLICY" "$set_policy_value" 0644
 }
 
+set_log_enabled() {
+  set_log_value=$1
+  case "$set_log_value" in
+    enabled|on|true|1) set_log_value=enabled ;;
+    disabled|off|false|0) set_log_value=disabled ;;
+    *) return 2 ;;
+  esac
+  if ! acquire_config_lock 20; then
+    log "set log FAIL error=lock-timeout"
+    return 75
+  fi
+  set_log_rc=0
+  write_value_atomic "$CFG_LOG_ENABLED" "$set_log_value" 0644 || set_log_rc=$?
+  if ! release_config_lock; then
+    log "set log FAIL error=lock-release"
+    [ "$set_log_rc" -eq 0 ] && set_log_rc=1
+  fi
+  [ "$set_log_rc" -eq 0 ] && log "log recording set=$set_log_value"
+  return "$set_log_rc"
+}
+
 commit_config_abort() {
   [ "${commit_active:-0}" = "1" ] || return 0
   commit_restore_rc=0
@@ -1334,9 +1376,10 @@ release_apply_lock() {
 }
 
 log_slots() {
+  logging_enabled || return 0
   slot_ts=$(ts)
   exec 5>> "$ACTION_LOG"
-  exec 6>> "$MAIN_LOG"
+  exec 6>> "${A2H_LOG_TARGET:-$MAIN_LOG}"
   exec 3< "$CFG_PKGS"
   exec 4< "$CFG_STATES"
   slot_i=1
@@ -1375,7 +1418,11 @@ run_check() {
     check_rc=$?
     if [ "$check_rc" -ne 0 ]; then
       log "live check FAIL want=$check_want pid=$HAL_PID base=${HAL_BASE:-auto}"
-      cat "$check_tmp" >> "$MAIN_LOG" 2>/dev/null
+      if logging_enabled; then
+        cat "$check_tmp" >> "$MAIN_LOG" 2>/dev/null
+      else
+        cat "$check_tmp" >&2
+      fi
     fi
     rm -f "$check_tmp" 2>/dev/null
     return "$check_rc"
@@ -1460,16 +1507,16 @@ apply_current() {
   apply_rc=1
   if [ "$CURRENT_MODE" = "enabled" ]; then
     if [ -n "$HAL_BASE" ]; then
-      "$PATCHER" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
+      run_with_main_log "$PATCHER" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE"
     else
-      "$PATCHER" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" >> "$MAIN_LOG" 2>&1
+      run_with_main_log "$PATCHER" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE"
     fi
     apply_rc=$?
   else
     if [ -n "$HAL_BASE" ]; then
-      "$PATCHER" --disable "$HAL_PID" "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
+      run_with_main_log "$PATCHER" --disable "$HAL_PID" "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE"
     else
-      "$PATCHER" --disable "$HAL_PID" "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" >> "$MAIN_LOG" 2>&1
+      run_with_main_log "$PATCHER" --disable "$HAL_PID" "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE"
     fi
     apply_rc=$?
   fi
@@ -1480,14 +1527,14 @@ apply_current() {
   elif [ "$apply_rc" -eq 0 ]; then
     if [ "$apply_want" = "whitelist" ] && patcher_supports_packages; then
       if [ -n "$HAL_BASE" ]; then
-        "$PATCHER" --check "$apply_want" "$HAL_PID" --packages "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
+        run_with_main_log "$PATCHER" --check "$apply_want" "$HAL_PID" --packages "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE"
       else
-        "$PATCHER" --check "$apply_want" "$HAL_PID" --packages "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" >> "$MAIN_LOG" 2>&1
+        run_with_main_log "$PATCHER" --check "$apply_want" "$HAL_PID" --packages "$TMP_PKGS" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE"
       fi
     elif [ -n "$HAL_BASE" ]; then
-      "$PATCHER" --check "$apply_want" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE" >> "$MAIN_LOG" 2>&1
+      run_with_main_log "$PATCHER" --check "$apply_want" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" --base "$HAL_BASE"
     else
-      "$PATCHER" --check "$apply_want" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE" >> "$MAIN_LOG" 2>&1
+      run_with_main_log "$PATCHER" --check "$apply_want" "$HAL_PID" --game-auto-pause "$CURRENT_GAME_AUTO_PAUSE"
     fi
     check_rc=$?
   else
@@ -1514,7 +1561,7 @@ refresh_policy_state() {
     log "policy refresh FAIL error=missing-trigger old=$refresh_previous new=$CURRENT_GAME_AUTO_PAUSE"
     return 1
   fi
-  if ! "$TRIGGER" >> "$MAIN_LOG" 2>&1; then
+  if ! run_with_main_log "$TRIGGER"; then
     log "policy refresh FAIL error=trigger old=$refresh_previous new=$CURRENT_GAME_AUTO_PAUSE"
     return 1
   fi
@@ -1862,8 +1909,11 @@ snapshot_state_current() {
 
 chmod 755 "$PATCHER" "$SELF" 2>/dev/null
 mkdir -p "$CFG_DIR" /data/local/tmp 2>/dev/null
-[ -e "$ACTION_LOG" ] || : > "$ACTION_LOG"
-[ -e "$MAIN_LOG" ] || : > "$MAIN_LOG"
+[ -e "$CFG_LOG_ENABLED" ] || write_value_atomic "$CFG_LOG_ENABLED" enabled 0644
+if logging_enabled; then
+  [ -e "$ACTION_LOG" ] || : > "$ACTION_LOG"
+  [ -e "$MAIN_LOG" ] || : > "$MAIN_LOG"
+fi
 
 command_name=${1:-apply}
 case "$command_name" in
@@ -1899,6 +1949,10 @@ case "$command_name" in
   commit-queue)
     shift
     commit_config_and_queue "$@"
+    exit $?
+    ;;
+  set-log|set_log|logging)
+    set_log_enabled "${2:-}"
     exit $?
     ;;
   toggle)
@@ -1948,7 +2002,7 @@ case "$command_name" in
     exit $?
     ;;
   *)
-    printf '%s\n' 'usage: a2h_apply [commit-queue MODE POLICY GENERATION PACKAGE{10} STATE{10}|queue [enabled|disabled] [enabled|disabled]|toggle|toggle-fast|toggle-game-auto-pause|toggle-game-auto-pause-fast|apply|enable|disable|show|status|check [global|whitelist]|snapshot|snapshot-state|busy]' >&2
+    printf '%s\n' 'usage: a2h_apply [commit-queue MODE POLICY GENERATION PACKAGE{10} STATE{10}|set-log [enabled|disabled]|queue [enabled|disabled] [enabled|disabled]|toggle|toggle-fast|toggle-game-auto-pause|toggle-game-auto-pause-fast|apply|enable|disable|show|status|check [global|whitelist]|snapshot|snapshot-state|busy]' >&2
     exit 2
     ;;
 esac

@@ -1,4 +1,4 @@
-// a2h_patch v1.5.8 - universal signature/ELF scan + active audio lifecycle
+// a2h_patch v1.5.9 - HyperOS 4 inline path + active audio lifecycle
 #define _GNU_SOURCE
 #include <stdint.h>
 #include <stdio.h>
@@ -62,7 +62,7 @@
 #define PTRACE_POKETEXT 4
 #define PTRACE_POKEDATA 5
 #define MAX_SLOTS 10
-#define A2H_VERSION "1.5.8"
+#define A2H_VERSION "1.5.9"
 #define WHITELIST_CAVE_BYTES (MAX_SLOTS * 64 + 16 + MAX_SLOTS * 8 + 32)
 #define WHITELIST_STUB_WORDS 19
 #define WHITELIST_STUB_BYTES (WHITELIST_STUB_WORDS * sizeof(uint32_t))
@@ -211,18 +211,9 @@ static void pkg_default(int idx, char *dst, size_t cap) {
 }
 
 typedef struct { uint32_t off_x; int max_len; const char *label; } slot_t;
-typedef struct {
-    const char *name; const char *hint; uintptr_t func_off; size_t func_size;
-    uintptr_t slot_off[6]; int slot_len[6];
-} profile_t;
-static const profile_t PROFILES[] = {
-    {"os3_0_302_0x3e3fc0","HyperOS3.0.302 verified",0x3E3FC0,160,{0xADC9C,0xB19F4,0xB507E,0xBC5CC,0xBC5DB,0xFCFFA},{17,19,22,14,15,14}},
-    {"os3_0_305_0x3e4020","HyperOS3.0.305 static",0x3E4020,160,{0xADC8C,0xB19E4,0xB506E,0xBC5BC,0xBC5CB,0xFD028},{17,19,22,14,15,14}},
-    {"os2_0_218_0x3e4280","HyperOS2.0.218 static",0x3E4280,160,{0xADE45,0xB1BBB,0xB5280,0xBC7CE,0xBC7DD,0xFD0FF},{17,19,22,14,15,14}},
-    {"os2_0_208_0x3e3b90","HyperOS2.0.208 static",0x3E3B90,160,{0xADD72,0xB1ACA,0xB4FED,0xBC53B,0xBC54A,0xFCDFD},{17,19,22,14,15,14}},
-};
 static slot_t slots[MAX_SLOTS];
-static uintptr_t g_func_off=0x3E3FC0,g_ptr_off=0x437200,g_stub_mark=0x437100,g_rw_start=0,g_rw_end=0,g_rx_start=0,g_rx_end=0;
+/* All target offsets are discovered from the mapped HAL at runtime. */
+static uintptr_t g_func_off=0,g_ptr_off=0,g_stub_mark=0,g_rw_start=0,g_rw_end=0,g_rx_start=0,g_rx_end=0;
 static size_t g_func_capacity=0;
 static uintptr_t g_elf_tail_start=0,g_elf_tail_end=0,g_elf_tail_candidate=0;
 static char g_libname[64]={0}, g_libpath[512]={0}, g_profile[48]={0}, g_profile_hint[48]={0}, g_locate_method[32]={0}, g_scan_kind[24]={0};
@@ -265,6 +256,17 @@ static uintptr_t k_func_off(void){return g_func_off;}
 static int load_cave_hint(uintptr_t *out);
 static void save_cave_hint(uintptr_t off);
 static long now_ms(void);
+static int checked_uintptr_add(uintptr_t left, uintptr_t right,
+                               uintptr_t *out);
+static int checked_u64_add(uint64_t left, uint64_t right, uint64_t *out);
+static int checked_absolute_range(uintptr_t base, uintptr_t offset,
+                                  size_t length, uintptr_t *start,
+                                  uintptr_t *end);
+static int checked_offset_range(uintptr_t base, uintptr_t first,
+                                uintptr_t second, size_t length,
+                                uintptr_t *start);
+static int checked_span_from_offsets(size_t first, size_t last, size_t tail,
+                                     size_t *span);
 static int restore_trace_regs(pid_t tid, struct user_pt_regs_a64 *backup);
 static int restore_thread_affinity(pid_t tid, const cpu_set_t *original);
 static const unsigned char SIG8[8]={0xe0,0x04,0x00,0xb4,0xfd,0x7b,0xbe,0xa9};
@@ -649,8 +651,23 @@ static int trace_group_index(pid_t tid) {
     return -1;
 }
 
+static int checked_deadline_ms(long timeout_ms, long *deadline_out) {
+    if (!deadline_out || timeout_ms < 0) {
+        errno = EINVAL;
+        return 0;
+    }
+    long now = now_ms();
+    if (now < 0 || timeout_ms > LONG_MAX - now) {
+        errno = EOVERFLOW;
+        return 0;
+    }
+    *deadline_out = now + timeout_ms;
+    return 1;
+}
+
 static int trace_wait_stop(pid_t tid, long timeout_ms, int *status_out) {
-    long deadline = now_ms() + timeout_ms;
+    long deadline = 0;
+    if (!checked_deadline_ms(timeout_ms, &deadline)) return 0;
     for (;;) {
         int status = 0;
         errno = 0;
@@ -734,7 +751,23 @@ static int collect_task_tids(pid_t pid, pid_t **out, size_t *count_out) {
         long value = strtol(entry->d_name, &end, 10);
         if (errno || !end || *end || value <= 0 || value > INT_MAX) continue;
         if (count == capacity) {
-            size_t next = capacity ? capacity * 2 : 32;
+            size_t next = capacity;
+            if (next == 0) {
+                next = 32;
+            } else if (next > SIZE_MAX / 2) {
+                free(tids);
+                closedir(dir);
+                errno = EOVERFLOW;
+                return 0;
+            } else {
+                next *= 2;
+            }
+            if (next > SIZE_MAX / sizeof(*tids)) {
+                free(tids);
+                closedir(dir);
+                errno = EOVERFLOW;
+                return 0;
+            }
             pid_t *grown = (pid_t *)realloc(tids, next * sizeof(*tids));
             if (!grown) {
                 free(tids);
@@ -766,8 +799,26 @@ static int collect_task_tids(pid_t pid, pid_t **out, size_t *count_out) {
 
 static int trace_group_reserve(size_t need) {
     if (need <= g_trace_group.capacity) return 1;
-    size_t capacity = g_trace_group.capacity ? g_trace_group.capacity * 2 : 32;
-    while (capacity < need) capacity *= 2;
+    size_t capacity = g_trace_group.capacity;
+    if (capacity == 0) {
+        capacity = 32;
+    } else if (capacity > SIZE_MAX / 2) {
+        errno = EOVERFLOW;
+        return 0;
+    } else {
+        capacity *= 2;
+    }
+    while (capacity < need) {
+        if (capacity > SIZE_MAX / 2) {
+            errno = EOVERFLOW;
+            return 0;
+        }
+        capacity *= 2;
+    }
+    if (capacity > SIZE_MAX / sizeof(*g_trace_group.threads)) {
+        errno = EOVERFLOW;
+        return 0;
+    }
     trace_thread_t *grown = (trace_thread_t *)realloc(
         g_trace_group.threads, capacity * sizeof(*grown));
     if (!grown) return 0;
@@ -875,6 +926,10 @@ static int trace_group_detach_all(void) {
 }
 
 static int trace_seize_and_stop(pid_t tid, long deadline) {
+    if (g_trace_group.count == SIZE_MAX) {
+        errno = EOVERFLOW;
+        return -1;
+    }
     if (!trace_group_reserve(g_trace_group.count + 1)) return -1;
     trace_thread_t *thread = &g_trace_group.threads[g_trace_group.count++];
     memset(thread, 0, sizeof(*thread));
@@ -893,11 +948,12 @@ static int trace_seize_and_stop(pid_t tid, long deadline) {
         }
         return -1;
     }
-    long remaining = deadline - now_ms();
-    if (remaining <= 0) {
+    long now = now_ms();
+    if (now < 0 || now >= deadline) {
         errno = ETIMEDOUT;
         return -1;
     }
+    long remaining = deadline - now;
     int status = 0;
     if (!trace_wait_stop(tid, remaining, &status)) {
         if (errno == ESRCH) {
@@ -914,7 +970,8 @@ static int trace_seize_and_stop(pid_t tid, long deadline) {
 static int trace_attach(pid_t pid) {
     if (!trace_group_detach_all() || g_trace_compromised) return -1;
     g_trace_group.tgid = pid;
-    long deadline = now_ms() + 3000;
+    long deadline = 0;
+    if (!checked_deadline_ms(3000, &deadline)) goto fail;
     int stable_passes = 0;
     for (int pass = 0; pass < 16 && now_ms() < deadline; ++pass) {
         pid_t *tids = NULL;
@@ -986,6 +1043,10 @@ static void trace_detach(pid_t pid) {
     (void)trace_group_detach_all();
 }
 static int mem_w(pid_t pid,uintptr_t addr,const void *d,size_t len){
+    if ((uintmax_t)len > (uintmax_t)(UINTPTR_MAX - addr)) {
+        errno = EOVERFLOW;
+        return -1;
+    }
     if (g_trace_compromised) {
         errno = EIO;
         return -1;
@@ -994,11 +1055,15 @@ static int mem_w(pid_t pid,uintptr_t addr,const void *d,size_t len){
     char p[64]; snprintf(p,sizeof(p),"/proc/%d/mem",pid);
     int fd=open(p,O_RDWR); if(fd<0){
         const unsigned char *src=(const unsigned char*)d;
-        for(size_t off=0; off<len; off+=sizeof(long)){
+        for(size_t off=0; off<len; ){
             long word=0; size_t n=len-off; if(n>sizeof(word)) n=sizeof(word);
-            if(n<sizeof(word)){errno=0; long old=ptrace_call(PTRACE_PEEKDATA,pid,(void*)(addr+off),NULL); if(old==-1&&errno) return -1; word=old;}
+            uintptr_t current = 0;
+            if (!checked_uintptr_add(addr, (uintptr_t)off, &current)) return -1;
+            if(n<sizeof(word)){errno=0; long old=ptrace_call(PTRACE_PEEKDATA,pid,(void*)current,NULL); if(old==-1&&errno) return -1; word=old;}
             memcpy(&word,src+off,n);
-            if(ptrace_call(PTRACE_POKEDATA,pid,(void*)(addr+off),(void*)word)<0) return -1;
+            if(ptrace_call(PTRACE_POKEDATA,pid,(void*)current,(void*)word)<0) return -1;
+            if (n == len - off) break;
+            off += n;
         }
         return 0;
     }
@@ -1006,15 +1071,23 @@ static int mem_w(pid_t pid,uintptr_t addr,const void *d,size_t len){
     ssize_t n=write(fd,d,len); close(fd); return n==(ssize_t)len?0:-1;
 }
 static int mem_r(pid_t pid,uintptr_t addr,void *buf,size_t len){
+    if ((uintmax_t)len > (uintmax_t)(UINTPTR_MAX - addr)) {
+        errno = EOVERFLOW;
+        return -1;
+    }
     if(vm_read(pid,addr,buf,len)==(ssize_t)len) return 0;
     char p[64]; snprintf(p,sizeof(p),"/proc/%d/mem",pid);
     int fd=open(p,O_RDONLY); if(fd<0){
         unsigned char *dst=(unsigned char*)buf;
-        for(size_t off=0; off<len; off+=sizeof(long)){
-            errno=0; long word=ptrace_call(PTRACE_PEEKDATA,pid,(void*)(addr+off),NULL);
+        for(size_t off=0; off<len; ){
+            uintptr_t current = 0;
+            if (!checked_uintptr_add(addr, (uintptr_t)off, &current)) return -1;
+            errno=0; long word=ptrace_call(PTRACE_PEEKDATA,pid,(void*)current,NULL);
             if(word==-1&&errno) return -1;
             size_t n=len-off; if(n>sizeof(word)) n=sizeof(word);
             memcpy(dst+off,&word,n);
+            if (n == len - off) break;
+            off += n;
         }
         return 0;
     }
@@ -1057,6 +1130,25 @@ static int writable_map_contains(pid_t pid, uintptr_t start, uintptr_t end,
     return found;
 }
 
+static int checked_uintptr_add(uintptr_t left, uintptr_t right,
+                               uintptr_t *out) {
+    if (!out || left > UINTPTR_MAX - right) {
+        errno = EOVERFLOW;
+        return 0;
+    }
+    *out = left + right;
+    return 1;
+}
+
+static int checked_u64_add(uint64_t left, uint64_t right, uint64_t *out) {
+    if (!out || left > UINT64_MAX - right) {
+        errno = EOVERFLOW;
+        return 0;
+    }
+    *out = left + right;
+    return 1;
+}
+
 /* Derive storage only from bytes outside the final writable PT_LOAD's
  * declared p_memsz but inside its loader-rounded writable page.  Unlike a
  * zero scan inside .bss, this area is not owned by any ELF section/object. */
@@ -1082,7 +1174,10 @@ static int discover_elf_tail_region(pid_t pid, uintptr_t base, uintptr_t need) {
     size_t ph_bytes = (size_t)eh.e_phnum * sizeof(Elf64_Phdr);
     Elf64_Phdr *ph = (Elf64_Phdr *)malloc(ph_bytes);
     if (!ph) return 0;
-    if (mem_r(pid, base + (uintptr_t)eh.e_phoff, ph, ph_bytes) != 0) {
+    uintptr_t ph_start = 0;
+    if (!checked_uintptr_add(base, (uintptr_t)eh.e_phoff, &ph_start) ||
+        (uintmax_t)ph_bytes > (uintmax_t)(UINTPTR_MAX - ph_start) ||
+        mem_r(pid, ph_start, ph, ph_bytes) != 0) {
         free(ph);
         fprintf(stderr, "[a2h_patch] ELF tail unavailable: program headers unreadable\n");
         return 0;
@@ -1266,11 +1361,30 @@ typedef struct {
 static int checked_absolute_range(uintptr_t base, uintptr_t offset,
                                   size_t length, uintptr_t *start,
                                   uintptr_t *end) {
-    if (!start || !end || base > UINTPTR_MAX - offset) return 0;
-    uintptr_t absolute = base + offset;
-    if (length > (size_t)(UINTPTR_MAX - absolute)) return 0;
+    if (!start || !end) return 0;
+    uintptr_t absolute = 0;
+    if (!checked_uintptr_add(base, offset, &absolute) ||
+        (uintmax_t)length > (uintmax_t)(UINTPTR_MAX - absolute)) return 0;
     *start = absolute;
     *end = absolute + (uintptr_t)length;
+    return 1;
+}
+
+static int checked_offset_range(uintptr_t base, uintptr_t first,
+                                uintptr_t second, size_t length,
+                                uintptr_t *start) {
+    uintptr_t relative = 0;
+    uintptr_t end = 0;
+    return start && checked_uintptr_add(first, second, &relative) &&
+           checked_absolute_range(base, relative, length, start, &end);
+}
+
+static int checked_span_from_offsets(size_t first, size_t last, size_t tail,
+                                     size_t *span) {
+    if (!span || last < first || tail > SIZE_MAX - last) return 0;
+    size_t end = last + tail;
+    if (end < first) return 0;
+    *span = end - first;
     return 1;
 }
 
@@ -1430,22 +1544,31 @@ static int trace_write_code(pid_t tid, uintptr_t addr, const void *data, size_t 
         errno = EINVAL;
         return 0;
     }
+    if ((uintmax_t)len > (uintmax_t)(UINTPTR_MAX - addr)) {
+        errno = EOVERFLOW;
+        return 0;
+    }
     const unsigned char *source = (const unsigned char *)data;
-    for (size_t offset = 0; offset < len; offset += sizeof(long)) {
+    for (size_t offset = 0; offset < len; ) {
         long word = 0;
         size_t chunk = len - offset;
         if (chunk > sizeof(word)) chunk = sizeof(word);
         if (chunk < sizeof(word)) {
             errno = 0;
-            word = ptrace_call(PTRACE_PEEKDATA, tid,
-                               (void *)(addr + offset), NULL);
+            uintptr_t current = 0;
+            if (!checked_uintptr_add(addr, (uintptr_t)offset, &current)) return 0;
+            word = ptrace_call(PTRACE_PEEKDATA, tid, (void *)current, NULL);
             if (word == -1 && errno) return 0;
         }
         memcpy(&word, source + offset, chunk);
-        if (ptrace_call(PTRACE_POKETEXT, tid, (void *)(addr + offset),
+        uintptr_t current = 0;
+        if (!checked_uintptr_add(addr, (uintptr_t)offset, &current) ||
+            ptrace_call(PTRACE_POKETEXT, tid, (void *)current,
                         (void *)(uintptr_t)(unsigned long)word) < 0) {
             return 0;
         }
+        if (chunk == len - offset) break;
+        offset += chunk;
     }
     return 1;
 }
@@ -2143,12 +2266,6 @@ static char **read_pkgs(const char *path, pkg_stats_t *stats) {
     return p;
 }
 
-static void apply_profile(const profile_t *prof) {
-    snprintf(g_profile, sizeof(g_profile), "%s", prof->name);
-    snprintf(g_profile_hint, sizeof(g_profile_hint), "%s", prof->hint);
-    for (int i = 0; i < 6; ++i) { set_slot_off(i, prof->slot_off[i]); slots[i].max_len = prof->slot_len[i]; slots[i].label = "s"; }
-    for (int i = 6; i < MAX_SLOTS; ++i) { slots[i].max_len = 63; slots[i].label = "x"; }
-}
 typedef struct {
     int table_ok;
     int magic_ok;
@@ -2167,13 +2284,20 @@ static int decode_stub_table(uintptr_t func_abs, const unsigned char *head, uint
         ((add & 0xFFC003FFu) != 0x91000021u)) return 0;
     int64_t imm21 = (int64_t)((((adrp >> 5) & 0x7FFFFu) << 2) | ((adrp >> 29) & 0x3u));
     if (imm21 & (1LL << 20)) imm21 |= ~((1LL << 21) - 1);
-    int64_t page_signed = (int64_t)(func_abs & ~(uintptr_t)0xFFFu) + imm21 * 4096;
-    if (page_signed < 0) return 0;
-    uintptr_t page = (uintptr_t)page_signed;
+    uintptr_t page_base = func_abs & ~(uintptr_t)0xFFFu;
+    int64_t page_delta = imm21 * 4096;
+    uintptr_t page = 0;
+    if (page_delta < 0) {
+        uintptr_t magnitude = (uintptr_t)(-page_delta);
+        if (page_base < magnitude) return 0;
+        page = page_base - magnitude;
+    } else if (!checked_uintptr_add(page_base, (uintptr_t)page_delta,
+                                    &page)) {
+        return 0;
+    }
     uint32_t imm12 = (add >> 10) & 0xFFFu;
     if ((add >> 22) & 1u) imm12 <<= 12;
-    *table_abs = page + (uintptr_t)imm12;
-    return 1;
+    return checked_uintptr_add(page, (uintptr_t)imm12, table_abs);
 }
 
 static int inspect_stub_table(pid_t pid, uintptr_t base, uintptr_t func_off,
@@ -2182,18 +2306,23 @@ static int inspect_stub_table(pid_t pid, uintptr_t base, uintptr_t func_off,
     stub_info_t info;
     memset(&info, 0, sizeof(info));
     uintptr_t table = 0;
+    uintptr_t func_abs = 0;
     unsigned char code[WHITELIST_STUB_BYTES];
-    if (!head || mem_r(pid, base + func_off, code, sizeof(code)) != 0 ||
+    if (!head || !checked_offset_range(base, 0, func_off,
+                                       sizeof(code), &func_abs) ||
+        mem_r(pid, func_abs, code, sizeof(code)) != 0 ||
         memcmp(code, head, 16) != 0 ||
         !exact_whitelist_stub_shape(code, sizeof(code)) ||
-        !decode_stub_table(base + func_off, code, &table)) {
+        !decode_stub_table(func_abs, code, &table)) {
         if (verbose) fprintf(stderr, "[a2h_patch] complete whitelist stub verify FAIL\n");
         if (out) *out = info;
         return 0;
     }
     info.table_abs = table;
-    uintptr_t rw_lo = base + g_rw_start;
-    uintptr_t rw_hi = base + g_rw_end;
+    uintptr_t rw_lo = 0, rw_hi = 0;
+    if (!checked_absolute_range(base, g_rw_start, 0, &rw_lo, &rw_lo) ||
+        !checked_absolute_range(base, g_rw_end, 0, &rw_hi, &rw_hi) ||
+        rw_hi < rw_lo) return 0;
     uintptr_t table_bytes = MAX_SLOTS * sizeof(uint64_t);
     uintptr_t table_delta = MAX_SLOTS * 64 + 16;
     int tail_ok = (g_elf_tail_end > g_elf_tail_start &&
@@ -2332,13 +2461,15 @@ static int exact_stub_targets_cave(pid_t pid, uintptr_t base,
                                    uintptr_t func_off, uintptr_t cave) {
     unsigned char code[WHITELIST_STUB_BYTES];
     uintptr_t table_abs = 0;
+    uintptr_t func_abs = 0;
     uintptr_t expected_rel = cave + MAX_SLOTS * 64 + sizeof(WHITELIST_MARKER);
     expected_rel = (expected_rel + 7) & ~(uintptr_t)7;
     uintptr_t expected_table = base + expected_rel;
     if ((cave & 15u) != 0) return 0;
-    if (mem_r(pid, base + func_off, code, sizeof(code)) != 0 ||
+    if (!checked_offset_range(base, 0, func_off, sizeof(code), &func_abs) ||
+        mem_r(pid, func_abs, code, sizeof(code)) != 0 ||
         !exact_whitelist_stub_shape(code, sizeof(code)) ||
-        !decode_stub_table(base + func_off, code, &table_abs)) {
+        !decode_stub_table(func_abs, code, &table_abs)) {
         return 0;
     }
     return table_abs == expected_table;
@@ -2349,9 +2480,11 @@ static int exact_stub_cave_from_code(pid_t pid, uintptr_t base,
     if (out) *out = 0;
     unsigned char code[WHITELIST_STUB_BYTES];
     uintptr_t table_abs = 0;
-    if (mem_r(pid, base + func_off, code, sizeof(code)) != 0 ||
+    uintptr_t func_abs = 0;
+    if (!checked_offset_range(base, 0, func_off, sizeof(code), &func_abs) ||
+        mem_r(pid, func_abs, code, sizeof(code)) != 0 ||
         !exact_whitelist_stub_shape(code, sizeof(code)) ||
-        !decode_stub_table(base + func_off, code, &table_abs) ||
+        !decode_stub_table(func_abs, code, &table_abs) ||
         table_abs < base) {
         return 0;
     }
@@ -2422,47 +2555,6 @@ static int patched_global_candidate_ok(pid_t pid, uintptr_t base,
         (n >= WHITELIST_STUB_BYTES &&
          exact_whitelist_stub_suffix(head, n, 4))) {
         return owned_global_stub_suffix_ok(pid, base, head, n);
-    }
-    return 1;
-}
-
-static int score_profile(pid_t pid, uintptr_t base, const profile_t *prof) {
-    int score = 0; unsigned char head[16] = {0};
-    if (mem_r(pid, base + prof->func_off, head, sizeof(head)) != 0) return -1000;
-    if (memcmp(head, SIG8, 8) == 0) score += 50;
-    if (memcmp(head, PATCH, 8) == 0) {
-        score += patched_global_tail_ok(head, sizeof(head)) ? 40 : 10;
-    }
-    if (is_stub_head(head, sizeof(head))) score += 35;
-    for (int i = 0; i < 6; ++i) {
-        char got[64]={0}, exp[64]={0}; pkg_default(i, exp, sizeof(exp));
-        size_t slot_len = prof->slot_len[i] > 0 ? (size_t)prof->slot_len[i] : 0;
-        if (!slot_len || mem_r(pid, base + prof->slot_off[i], got, slot_len) != 0) {
-            score -= 5;
-            continue;
-        }
-        if (exp[0] && strncmp(got, exp, slot_len) == 0) score += 10;
-        else if (got[0] && strchr(got, '.')) score += 2;
-        else score -= 3;
-    }
-    fprintf(stderr, "[a2h_patch] profile %s (%s) score=%d head=%02x %02x %02x %02x\n",
-            prof->name, prof->hint, score, head[0], head[1], head[2], head[3]);
-    return score;
-}
-
-static int profile_official_strings_exact(pid_t pid, uintptr_t base,
-                                          const profile_t *prof) {
-    if (!prof) return 0;
-    for (int i = 0; i < 6; ++i) {
-        char got[64] = {0};
-        char exp[64] = {0};
-        pkg_default(i, exp, sizeof(exp));
-        size_t n = strlen(exp);
-        if (n != (size_t)prof->slot_len[i] ||
-            mem_r(pid, base + prof->slot_off[i], got, n + 1) != 0 ||
-            memcmp(got, exp, n + 1) != 0) {
-            return 0;
-        }
     }
     return 1;
 }
@@ -2565,7 +2657,14 @@ static int pread_exact(int fd, void *buf, size_t len, uint64_t off) {
     unsigned char *dst = (unsigned char *)buf;
     size_t done = 0;
     while (done < len) {
-        ssize_t n = pread(fd, dst + done, len - done, (off_t)(off + done));
+        if ((uint64_t)done > UINT64_MAX - off ||
+            off + (uint64_t)done > (uint64_t)INT64_MAX) {
+            errno = EOVERFLOW;
+            return 0;
+        }
+        uint64_t current_off = off + (uint64_t)done;
+        ssize_t n = pread(fd, dst + done, len - done,
+                          (off_t)current_off);
         if (n < 0 && errno == EINTR) continue;
         if (n <= 0) return 0;
         done += (size_t)n;
@@ -2735,11 +2834,18 @@ static int parse_unique_func_symbol(int fd, uint64_t file_size,
                 (expected_size && sym->st_size != expected_size) ||
                 sym->st_size > ELF_SYMBOL_MAX_BYTES ||
                 sym->st_value > UINTPTR_MAX || sym->st_size > UINTPTR_MAX - sym->st_value ||
-                sh[sym->st_shndx].sh_size >
-                    UINT64_MAX - sh[sym->st_shndx].sh_addr ||
                 sym->st_value < sh[sym->st_shndx].sh_addr ||
-                sym->st_value + sym->st_size >
-                    sh[sym->st_shndx].sh_addr + sh[sym->st_shndx].sh_size) {
+                sh[sym->st_shndx].sh_size >
+                    UINT64_MAX - sh[sym->st_shndx].sh_addr) {
+                invalid = 1;
+                continue;
+            }
+            uint64_t section_end = 0;
+            uint64_t symbol_end = 0;
+            if (!checked_u64_add(sh[sym->st_shndx].sh_addr,
+                                 sh[sym->st_shndx].sh_size, &section_end) ||
+                !checked_u64_add(sym->st_value, sym->st_size, &symbol_end) ||
+                symbol_end > section_end) {
                 invalid = 1;
                 continue;
             }
@@ -2747,23 +2853,30 @@ static int parse_unique_func_symbol(int fd, uint64_t file_size,
             uint64_t file_off = 0;
             for (size_t k = 0; k < eh.e_phnum; ++k) {
                 if (ph[k].p_type != PT_LOAD || !(ph[k].p_flags & PF_X) ||
-                    ph[k].p_filesz > UINT64_MAX - ph[k].p_vaddr ||
                     sym->st_value < ph[k].p_vaddr ||
-                    sym->st_value + sym->st_size > ph[k].p_vaddr + ph[k].p_filesz)
+                    ph[k].p_filesz > UINT64_MAX - ph[k].p_vaddr)
+                    continue;
+                uint64_t load_end = 0;
+                if (!checked_u64_add(ph[k].p_vaddr, ph[k].p_filesz,
+                                     &load_end) || symbol_end > load_end)
                     continue;
                 uint64_t delta = sym->st_value - ph[k].p_vaddr;
-                if (delta > UINT64_MAX - ph[k].p_offset ||
-                    !file_range_ok(ph[k].p_offset + delta, sym->st_size, file_size))
+                uint64_t candidate_file_off = 0;
+                if (!checked_u64_add(ph[k].p_offset, delta,
+                                     &candidate_file_off) ||
+                    !file_range_ok(candidate_file_off, sym->st_size,
+                                   file_size))
                     continue;
-                file_off = ph[k].p_offset + delta;
+                file_off = candidate_file_off;
                 load_hits++;
             }
             uint64_t section_delta = sym->st_value - sh[sym->st_shndx].sh_addr;
+            uint64_t section_file_off = 0;
             int section_file_ok =
-                section_delta <= UINT64_MAX - sh[sym->st_shndx].sh_offset &&
-                file_range_ok(sh[sym->st_shndx].sh_offset + section_delta,
-                              sym->st_size, file_size) &&
-                sh[sym->st_shndx].sh_offset + section_delta == file_off;
+                checked_u64_add(sh[sym->st_shndx].sh_offset,
+                                section_delta, &section_file_off) &&
+                file_range_ok(section_file_off, sym->st_size, file_size) &&
+                section_file_off == file_off;
             if (load_hits != 1 || file_off > UINTPTR_MAX || !section_file_ok) {
                 invalid = 1;
                 continue;
@@ -3310,6 +3423,9 @@ static int build_idle_clear_overlay(
 static int stream_event_stock_shape(
         const unsigned char stream_events[STREAM_EVENT_PATCH_COUNT]
                                          [STREAM_EVENT_PATCH_MAX_BYTES]) {
+    uint32_t event1_lstr = 0;
+    uint32_t event1_adrp = 0;
+    uint32_t event1_add = 0;
     if (!stream_events ||
         memcmp(stream_events[0], STREAM_EVENT_STOCK_TEMPLATE[0],
                sizeof(uint32_t) * 4u) != 0 ||
@@ -3318,16 +3434,25 @@ static int stream_event_stock_shape(
         memcmp(stream_events[0] + sizeof(uint32_t) * 5u,
                STREAM_EVENT_STOCK_TEMPLATE[0] + sizeof(uint32_t) * 5u,
                STREAM_EVENT_PATCH_SIZES[0] - sizeof(uint32_t) * 5u) != 0 ||
-        (load_u32le(stream_events[1]) & 0x9F00001Fu) != 0x90000018u ||
-        memcmp(stream_events[1] + sizeof(uint32_t),
-               STREAM_EVENT_STOCK_TEMPLATE[1] + sizeof(uint32_t),
-               sizeof(uint32_t) * 4u) != 0 ||
-        (load_u32le(stream_events[1] + sizeof(uint32_t) * 5u) &
-         0x9F00001Fu) != 0x90000003u ||
-        (load_u32le(stream_events[1] + sizeof(uint32_t) * 6u) &
-         0xFFC003FFu) != 0x91000063u ||
         memcmp(stream_events[2], STREAM_EVENT_STOCK_TEMPLATE[2],
                STREAM_EVENT_PATCH_SIZES[2]) != 0) {
+        return 0;
+    }
+    /* ADRP/LDR and ADRP/ADD immediates point at ROM-local globals/strings.
+     * HyperOS minor builds may move those objects without changing the
+     * event's register data flow, so compare opcodes/registers only. */
+    event1_lstr = load_u32le(stream_events[1] + sizeof(uint32_t));
+    event1_adrp = load_u32le(stream_events[1] + sizeof(uint32_t) * 5u);
+    event1_add = load_u32le(stream_events[1] + sizeof(uint32_t) * 6u);
+    if ((load_u32le(stream_events[1]) & 0x9F00001Fu) != 0x90000018u ||
+        (event1_lstr & 0xFFC003FFu) !=
+            (load_u32le(STREAM_EVENT_STOCK_TEMPLATE[1] +
+                        sizeof(uint32_t)) & 0xFFC003FFu) ||
+        memcmp(stream_events[1] + sizeof(uint32_t) * 2u,
+               STREAM_EVENT_STOCK_TEMPLATE[1] + sizeof(uint32_t) * 2u,
+               sizeof(uint32_t) * 3u) != 0 ||
+        (event1_adrp & 0x9F00001Fu) != 0x90000003u ||
+        (event1_add & 0xFFC003FFu) != 0x91000063u) {
         return 0;
     }
     return 1;
@@ -3645,9 +3770,13 @@ static int stream_ref_stock_shape(const unsigned char *stock) {
             offset == 0x8Cu) {
             if ((current & 0xFC000000u) != 0x94000000u) return 0;
         } else if (offset == 0x18u || offset == 0x44u ||
+                   offset == 0x64u || offset == 0x6Cu ||
                    offset == 0x74u) {
             if ((current & 0x9F00001Fu) !=
                 (expected & 0x9F00001Fu)) return 0;
+        } else if (offset == 0x1Cu || offset == 0x48u) {
+            if ((current & 0xFFC003FFu) !=
+                (expected & 0xFFC003FFu)) return 0;
         } else if (offset == 0x68u || offset == 0x70u ||
                    offset == 0x78u) {
             if ((current & 0xFFC003FFu) !=
@@ -4004,6 +4133,11 @@ static int locate_stream_layout(int fd, pid_t pid, uintptr_t base,
     }
     unsigned int hits = 0;
     intptr_t selected = 0;
+    unsigned int template_hits = 0;
+    unsigned int manager_hits = 0;
+    unsigned int update_plt_hits = 0;
+    unsigned int event_shape_hits = 0;
+    unsigned int strlen_plt_hits = 0;
     for (size_t update_call_off = 0;
          update_call_off + STREAM_UPDATE_CALL_BYTES <= sym->size;
          update_call_off += sizeof(uint32_t)) {
@@ -4014,6 +4148,7 @@ static int locate_stream_layout(int fd, pid_t pid, uintptr_t base,
                    sizeof(uint32_t)) != 0) {
             continue;
         }
+        template_hits++;
         intptr_t delta = (intptr_t)update_call_off -
                          (intptr_t)STREAM_UPDATE_CALL_OFF;
         size_t manager0_off = 0;
@@ -4038,6 +4173,10 @@ static int locate_stream_layout(int fd, pid_t pid, uintptr_t base,
                 load_u32le(bytes + update_call_off + sizeof(uint32_t)),
                 &update_target) &&
             exact_aarch64_plt_entry(pid, base, update_target);
+        if (valid) manager_hits++;
+        if (valid && exact_aarch64_plt_entry(pid, base, update_target)) {
+            update_plt_hits++;
+        }
         for (size_t i = 0; valid && i < STREAM_EVENT_PATCH_COUNT; ++i) {
             valid = shifted_local_offset(
                 STREAM_EVENT_PATCH_OFFSETS[i], delta, sym->size,
@@ -4047,12 +4186,15 @@ static int locate_stream_layout(int fd, pid_t pid, uintptr_t base,
                        STREAM_EVENT_PATCH_SIZES[i]);
             }
         }
-        valid = valid && stream_event_stock_shape(events) &&
+        valid = valid && stream_event_stock_shape(events);
+        if (valid) event_shape_hits++;
+        valid = valid &&
             decode_aarch64_bl(
                 sym->vaddr + event_offsets[0] + sizeof(uint32_t) * 4u,
                 load_u32le(events[0] + sizeof(uint32_t) * 4u),
                 &strlen_target) &&
             exact_aarch64_plt_entry(pid, base, strlen_target);
+        if (valid) strlen_plt_hits++;
         if (!valid) continue;
         selected = delta;
         hits++;
@@ -4060,8 +4202,9 @@ static int locate_stream_layout(int fd, pid_t pid, uintptr_t base,
     free(bytes);
     if (hits != 1u) {
         fprintf(stderr,
-                "[a2h_patch] stream layout rejected: semantic_hits=%u size=%lu\n",
-                hits, (unsigned long)sym->size);
+                "[a2h_patch] stream layout rejected: semantic_hits=%u size=%lu candidates=%u manager=%u update_plt=%u event_shape=%u strlen_plt=%u\n",
+                hits, (unsigned long)sym->size, template_hits, manager_hits,
+                update_plt_hits, event_shape_hits, strlen_plt_hits);
         return 0;
     }
     *out_delta = selected;
@@ -4291,13 +4434,13 @@ static int prepare_stream_ref_overlay(
             return 0;
         }
     }
-    if (!decode_aarch64_bl(
+    int event_strlen_ok = decode_aarch64_bl(
             sym.vaddr + stream_event_offsets[0] +
                 sizeof(uint32_t) * 4u,
             load_u32le(g_auxiliary.stream_event_stock[0] +
                        sizeof(uint32_t) * 4u),
-            &stream_event_strlen_target) ||
-         !build_stream_ref_overlay(
+            &stream_event_strlen_target);
+    int stream_ref_ok = event_strlen_ok && build_stream_ref_overlay(
             stream_semantic_vaddr, g_auxiliary.stream_ref_stock,
             g_auxiliary.allowed_call_target,
             g_auxiliary.stream_ref_update_target,
@@ -4309,8 +4452,8 @@ static int prepare_stream_ref_overlay(
             g_auxiliary.output_pool_tail_patched,
             g_auxiliary.output_pool_tail_persistent_legacy,
             &g_auxiliary.stream_ref_delete_target,
-            &g_auxiliary.output_pool_stack_fail_target) ||
-        !build_concurrent_helpers(
+            &g_auxiliary.output_pool_stack_fail_target);
+    int concurrent_ok = stream_ref_ok && build_concurrent_helpers(
             g_auxiliary.concurrent_helper_off, policy_semantic_vaddr,
             stream_semantic_vaddr,
             open_sym.vaddr, stream_open_patch_off,
@@ -4326,15 +4469,20 @@ static int prepare_stream_ref_overlay(
             g_auxiliary.stream_event_patched,
             g_auxiliary.stream_event_recompute_legacy,
             g_auxiliary.stream_event_handoff_legacy,
-            g_auxiliary.stream_open_patched) ||
-         !exact_aarch64_plt_entry(pid, base,
-                                  g_auxiliary.stream_ref_delete_target) ||
-         !exact_aarch64_plt_entry(pid, base,
-                                  g_auxiliary.stream_ref_update_target) ||
-        !exact_aarch64_plt_entry(pid, base,
-                                 stream_event_strlen_target)) {
+            g_auxiliary.stream_open_patched);
+    int delete_plt_ok = stream_ref_ok && exact_aarch64_plt_entry(
+        pid, base, g_auxiliary.stream_ref_delete_target);
+    int update_plt_ok = stream_ref_ok && exact_aarch64_plt_entry(
+        pid, base, g_auxiliary.stream_ref_update_target);
+    int strlen_plt_ok = event_strlen_ok && exact_aarch64_plt_entry(
+        pid, base, stream_event_strlen_target);
+    if (!event_strlen_ok || !stream_ref_ok || !concurrent_ok ||
+        !delete_plt_ok || !update_plt_ok || !strlen_plt_ok) {
         fprintf(stderr,
-                "[a2h_patch] stream handoff overlay rejected: stock shape/branch/event-BL/PLT mismatch\n");
+                "[a2h_patch] stream handoff overlay rejected: stock shape/branch/event-BL/PLT mismatch event_bl=%d ref=%d concurrent=%d delete_plt=%d update_plt=%d strlen_plt=%d strlen=0x%lx\n",
+                event_strlen_ok, stream_ref_ok, concurrent_ok, delete_plt_ok,
+                update_plt_ok, strlen_plt_ok,
+                (unsigned long)stream_event_strlen_target);
         return 0;
     }
     g_auxiliary.stream_event_strlen_target = stream_event_strlen_target;
@@ -4893,65 +5041,89 @@ static int verify_auxiliary_targets(pid_t pid, uintptr_t base,
     unsigned char output_pool_tail[OUTPUT_POOL_TAIL_PATCH_BYTES];
     unsigned char stream_event[STREAM_EVENT_PATCH_MAX_BYTES];
     unsigned char stream_open_event[STREAM_OPEN_EVENT_BYTES];
-    int update_ok = mem_r(pid, base + g_auxiliary.update_off +
-                          g_auxiliary.update_flags_patch_off,
+    uintptr_t update_addr = 0, app_policy_addr = 0, concurrent_helper_addr = 0;
+    uintptr_t idle_count_addr = 0, idle_clear_addr = 0, policy_addr = 0;
+    uintptr_t stream_ref_addr = 0, output_pool_addr = 0, stream_open_addr = 0;
+    int address_ok =
+        checked_offset_range(base, g_auxiliary.update_off,
+                             g_auxiliary.update_flags_patch_off,
+                             sizeof(update), &update_addr) &&
+        checked_offset_range(base, g_auxiliary.update_off,
+                             g_auxiliary.update_app_policy_patch_off,
+                             sizeof(app_policy), &app_policy_addr) &&
+        checked_offset_range(base, 0, g_auxiliary.concurrent_helper_off,
+                             sizeof(concurrent_helper), &concurrent_helper_addr) &&
+        checked_offset_range(base, g_auxiliary.policy_off,
+                             g_auxiliary.policy_idle_count_cbz_off,
+                             sizeof(idle_count_branch), &idle_count_addr) &&
+        checked_offset_range(base, g_auxiliary.policy_off,
+                             g_auxiliary.policy_idle_clear_off,
+                             sizeof(idle_clear_branch), &idle_clear_addr) &&
+        checked_offset_range(base, g_auxiliary.policy_off,
+                             g_auxiliary.policy_game_off,
+                             sizeof(policy), &policy_addr) &&
+        checked_offset_range(base, g_auxiliary.stream_event_off,
+                             g_auxiliary.stream_ref_patch_off,
+                             sizeof(stream_ref), &stream_ref_addr) &&
+        checked_offset_range(base, g_auxiliary.output_pool_off,
+                             g_auxiliary.output_pool_tail_patch_off,
+                             sizeof(output_pool_tail), &output_pool_addr) &&
+        checked_offset_range(base, g_auxiliary.stream_open_off,
+                             g_auxiliary.stream_open_patch_off,
+                             sizeof(stream_open_event), &stream_open_addr);
+    int update_ok = address_ok && mem_r(pid, update_addr,
                           update, sizeof(update)) == 0 &&
                     memcmp(update, g_auxiliary.update_flags_patched,
                            sizeof(update)) == 0;
     const unsigned char *wanted_app_policy = want_app_policy_relaxed ?
         g_auxiliary.app_policy_relaxed : g_auxiliary.app_policy_stock;
-    int app_policy_ok = mem_r(pid, base + g_auxiliary.update_off +
-                              g_auxiliary.update_app_policy_patch_off,
+    int app_policy_ok = address_ok && mem_r(pid, app_policy_addr,
                               app_policy, sizeof(app_policy)) == 0 &&
                         memcmp(app_policy, wanted_app_policy,
                                UPDATE_APP_POLICY_BYTES) == 0;
-    int concurrent_helper_ok = mem_r(
-        pid, base + g_auxiliary.concurrent_helper_off,
+    int concurrent_helper_ok = address_ok && mem_r(
+        pid, concurrent_helper_addr,
         concurrent_helper, sizeof(concurrent_helper)) == 0 &&
         memcmp(concurrent_helper, g_auxiliary.concurrent_helper_patched,
                sizeof(concurrent_helper)) == 0;
-    int idle_count_ok = mem_r(
-        pid, base + g_auxiliary.policy_off +
-             g_auxiliary.policy_idle_count_cbz_off,
+    int idle_count_ok = address_ok && mem_r(
+        pid, idle_count_addr,
         idle_count_branch, sizeof(idle_count_branch)) == 0 &&
         memcmp(idle_count_branch, g_auxiliary.idle_count_branch,
                sizeof(idle_count_branch)) == 0;
-    int idle_clear_ok = mem_r(
-        pid, base + g_auxiliary.policy_off +
-             g_auxiliary.policy_idle_clear_off,
+    int idle_clear_ok = address_ok && mem_r(
+        pid, idle_clear_addr,
         idle_clear_branch, sizeof(idle_clear_branch)) == 0 &&
         memcmp(idle_clear_branch, g_auxiliary.idle_clear_branch,
                sizeof(idle_clear_branch)) == 0;
     const unsigned char *wanted_policy = want_app_policy_relaxed ?
         GAME_POLICY_RELAXED : g_auxiliary.policy_concurrent;
-    int policy_ok = mem_r(pid, base + g_auxiliary.policy_off +
-                          g_auxiliary.policy_game_off,
+    int policy_ok = address_ok && mem_r(pid, policy_addr,
                           policy, sizeof(policy)) == 0 &&
                     memcmp(policy, wanted_policy, sizeof(policy)) == 0;
-    int stream_ref_ok = mem_r(
-        pid, base + g_auxiliary.stream_event_off +
-             g_auxiliary.stream_ref_patch_off,
+    int stream_ref_ok = address_ok && mem_r(
+        pid, stream_ref_addr,
         stream_ref, sizeof(stream_ref)) == 0 &&
         memcmp(stream_ref, g_auxiliary.stream_ref_patched,
                sizeof(stream_ref)) == 0;
-    int output_pool_ok = mem_r(
-        pid, base + g_auxiliary.output_pool_off +
-             g_auxiliary.output_pool_tail_patch_off,
+    int output_pool_ok = address_ok && mem_r(
+        pid, output_pool_addr,
         output_pool_tail, sizeof(output_pool_tail)) == 0 &&
         memcmp(output_pool_tail, g_auxiliary.output_pool_tail_patched,
                sizeof(output_pool_tail)) == 0;
-    int stream_open_ok = mem_r(
-        pid, base + g_auxiliary.stream_open_off +
-             g_auxiliary.stream_open_patch_off,
+    int stream_open_ok = address_ok && mem_r(
+        pid, stream_open_addr,
         stream_open_event, sizeof(stream_open_event)) == 0 &&
         memcmp(stream_open_event, g_auxiliary.stream_open_patched,
                sizeof(stream_open_event)) == 0;
     unsigned int stream_events_ok = 0;
     for (size_t i = 0; i < STREAM_EVENT_PATCH_COUNT; ++i) {
-        uintptr_t address = base + g_auxiliary.stream_event_off +
-                            g_auxiliary.stream_event_patch_offsets[i];
+        uintptr_t address = 0;
         size_t event_size = STREAM_EVENT_PATCH_SIZES[i];
-        if (mem_r(pid, address, stream_event, event_size) == 0 &&
+        if (address_ok && checked_offset_range(
+                base, g_auxiliary.stream_event_off,
+                g_auxiliary.stream_event_patch_offsets[i], event_size,
+                &address) && mem_r(pid, address, stream_event, event_size) == 0 &&
             memcmp(stream_event, g_auxiliary.stream_event_patched[i],
                    event_size) == 0) {
             stream_events_ok++;
@@ -5014,24 +5186,42 @@ static int auxiliary_transaction_begin(pid_t pid, uintptr_t base,
                                         auxiliary_transaction_t *tx) {
     if (!tx || !g_auxiliary.valid) return 0;
     memset(tx, 0, sizeof(*tx));
-    tx->update_addr = base + g_auxiliary.update_off +
-                      g_auxiliary.update_flags_patch_off;
-    tx->app_policy_addr = base + g_auxiliary.update_off +
-                          g_auxiliary.update_app_policy_patch_off;
-    tx->concurrent_helper_addr = base +
-                                 g_auxiliary.concurrent_helper_off;
-    tx->idle_count_addr = base + g_auxiliary.policy_off +
-                          g_auxiliary.policy_idle_count_cbz_off;
-    tx->idle_clear_addr = base + g_auxiliary.policy_off +
-                          g_auxiliary.policy_idle_clear_off;
-    tx->policy_addr = base + g_auxiliary.policy_off +
-                      g_auxiliary.policy_game_off;
-    tx->stream_ref_addr = base + g_auxiliary.stream_event_off +
-                          g_auxiliary.stream_ref_patch_off;
-    tx->output_pool_addr = base + g_auxiliary.output_pool_off +
-                           g_auxiliary.output_pool_tail_patch_off;
-    tx->stream_open_addr = base + g_auxiliary.stream_open_off +
-                           g_auxiliary.stream_open_patch_off;
+    if (!checked_offset_range(base, g_auxiliary.update_off,
+                              g_auxiliary.update_flags_patch_off,
+                              sizeof(tx->update_before), &tx->update_addr) ||
+        !checked_offset_range(base, g_auxiliary.update_off,
+                              g_auxiliary.update_app_policy_patch_off,
+                              sizeof(tx->app_policy_before),
+                              &tx->app_policy_addr) ||
+        !checked_offset_range(base, 0, g_auxiliary.concurrent_helper_off,
+                              sizeof(tx->concurrent_helper_before),
+                              &tx->concurrent_helper_addr) ||
+        !checked_offset_range(base, g_auxiliary.policy_off,
+                              g_auxiliary.policy_idle_count_cbz_off,
+                              sizeof(tx->idle_count_before),
+                              &tx->idle_count_addr) ||
+        !checked_offset_range(base, g_auxiliary.policy_off,
+                              g_auxiliary.policy_idle_clear_off,
+                              sizeof(tx->idle_clear_before),
+                              &tx->idle_clear_addr) ||
+        !checked_offset_range(base, g_auxiliary.policy_off,
+                              g_auxiliary.policy_game_off,
+                              sizeof(tx->policy_before), &tx->policy_addr) ||
+        !checked_offset_range(base, g_auxiliary.stream_event_off,
+                              g_auxiliary.stream_ref_patch_off,
+                              sizeof(tx->stream_ref_before),
+                              &tx->stream_ref_addr) ||
+        !checked_offset_range(base, g_auxiliary.output_pool_off,
+                              g_auxiliary.output_pool_tail_patch_off,
+                              sizeof(tx->output_pool_before),
+                              &tx->output_pool_addr) ||
+        !checked_offset_range(base, g_auxiliary.stream_open_off,
+                              g_auxiliary.stream_open_patch_off,
+                              sizeof(tx->stream_open_before),
+                              &tx->stream_open_addr)) {
+        fprintf(stderr, "[a2h_patch] auxiliary transaction address overflow\n");
+        return 0;
+    }
     if (mem_r(pid, tx->update_addr, tx->update_before,
               sizeof(tx->update_before)) != 0 ||
         mem_r(pid, tx->app_policy_addr, tx->app_policy_before,
@@ -5055,9 +5245,11 @@ static int auxiliary_transaction_begin(pid_t pid, uintptr_t base,
         return 0;
     }
     for (size_t i = 0; i < STREAM_EVENT_PATCH_COUNT; ++i) {
-        tx->stream_event_addr[i] = base + g_auxiliary.stream_event_off +
-                                   g_auxiliary.stream_event_patch_offsets[i];
-        if (mem_r(pid, tx->stream_event_addr[i],
+        if (!checked_offset_range(base, g_auxiliary.stream_event_off,
+                                  g_auxiliary.stream_event_patch_offsets[i],
+                                  STREAM_EVENT_PATCH_SIZES[i],
+                                  &tx->stream_event_addr[i]) ||
+            mem_r(pid, tx->stream_event_addr[i],
                   tx->stream_event_before[i],
                   STREAM_EVENT_PATCH_SIZES[i]) != 0) {
             fprintf(stderr,
@@ -5192,32 +5384,57 @@ static int auxiliary_transaction_restore(pid_t pid, uintptr_t base,
 
 static int auxiliary_cache_preflight(pid_t pid, uintptr_t base) {
     if (!g_auxiliary.valid) return 0;
+    uintptr_t update_addr = 0, helper_addr = 0, policy_addr = 0;
+    uintptr_t stream_addr = 0, output_addr = 0, open_addr = 0;
+    size_t update_span = 0, policy_span = 0, stream_span = 0;
+    int address_ok =
+        checked_span_from_offsets(
+            g_auxiliary.update_flags_patch_off,
+            g_auxiliary.update_app_policy_patch_off,
+            UPDATE_APP_POLICY_BYTES, &update_span) &&
+        checked_span_from_offsets(
+            g_auxiliary.policy_idle_count_cbz_off,
+            g_auxiliary.policy_game_off,
+            sizeof(GAME_POLICY_STOCK), &policy_span) &&
+        checked_span_from_offsets(
+            g_auxiliary.stream_event_patch_offsets[0],
+            g_auxiliary.stream_event_patch_offsets[
+                STREAM_EVENT_PATCH_COUNT - 1],
+            STREAM_EVENT_PATCH_SIZES[STREAM_EVENT_PATCH_COUNT - 1],
+            &stream_span) &&
+        checked_offset_range(base, g_auxiliary.update_off,
+                             g_auxiliary.update_flags_patch_off,
+                             update_span,
+                             &update_addr) &&
+        checked_offset_range(base, 0, g_auxiliary.concurrent_helper_off,
+                             UPDATE_CONCURRENT_HELPER_BYTES, &helper_addr) &&
+        checked_offset_range(base, g_auxiliary.policy_off,
+                             g_auxiliary.policy_idle_count_cbz_off,
+                             policy_span,
+                             &policy_addr) &&
+        checked_offset_range(base, g_auxiliary.stream_event_off,
+                             g_auxiliary.stream_event_patch_offsets[0],
+                             stream_span,
+                             &stream_addr) &&
+        checked_offset_range(base, g_auxiliary.output_pool_off,
+                             g_auxiliary.output_pool_tail_patch_off,
+                             OUTPUT_POOL_TAIL_PATCH_BYTES, &output_addr) &&
+        checked_offset_range(base, g_auxiliary.stream_open_off,
+                             g_auxiliary.stream_open_patch_off,
+                             STREAM_OPEN_EVENT_BYTES, &open_addr);
+    if (!address_ok) return 0;
     int update = remote_icache_flush(
-        pid, base, base + g_auxiliary.update_off +
-        g_auxiliary.update_flags_patch_off,
-        g_auxiliary.update_app_policy_patch_off + UPDATE_APP_POLICY_BYTES -
-        g_auxiliary.update_flags_patch_off);
+        pid, base, update_addr, update_span);
     int concurrent_helper = remote_icache_flush(
-        pid, base, base + g_auxiliary.concurrent_helper_off,
-        UPDATE_CONCURRENT_HELPER_BYTES);
+        pid, base, helper_addr, UPDATE_CONCURRENT_HELPER_BYTES);
     int policy = remote_icache_flush(
-        pid, base, base + g_auxiliary.policy_off +
-        g_auxiliary.policy_idle_count_cbz_off,
-        g_auxiliary.policy_game_off + sizeof(GAME_POLICY_STOCK) -
-        g_auxiliary.policy_idle_count_cbz_off);
+        pid, base, policy_addr, policy_span);
     int stream_events = remote_icache_flush(
-        pid, base, base + g_auxiliary.stream_event_off +
-        g_auxiliary.stream_event_patch_offsets[0],
-        g_auxiliary.stream_event_patch_offsets[STREAM_EVENT_PATCH_COUNT - 1] +
-        STREAM_EVENT_PATCH_SIZES[STREAM_EVENT_PATCH_COUNT - 1] -
-        g_auxiliary.stream_event_patch_offsets[0]);
+        pid, base, stream_addr, stream_span);
     int output_pool = remote_icache_flush(
-        pid, base, base + g_auxiliary.output_pool_off +
-        g_auxiliary.output_pool_tail_patch_off,
-        OUTPUT_POOL_TAIL_PATCH_BYTES);
+        pid, base, output_addr, OUTPUT_POOL_TAIL_PATCH_BYTES);
     int stream_open = remote_icache_flush(
-        pid, base, base + g_auxiliary.stream_open_off +
-        g_auxiliary.stream_open_patch_off, STREAM_OPEN_EVENT_BYTES);
+        pid, base, open_addr, STREAM_OPEN_EVENT_BYTES);
     int ok = (update & ICACHE_REMOTE_IVAU) != 0 &&
              (concurrent_helper & ICACHE_REMOTE_IVAU) != 0 &&
              (policy & ICACHE_REMOTE_IVAU) != 0 &&
@@ -5238,18 +5455,32 @@ static int auxiliary_cache_preflight(pid_t pid, uintptr_t base) {
 static int apply_auxiliary_targets(pid_t pid, uintptr_t base,
                                    int want_app_policy_relaxed) {
     if (!g_auxiliary.valid) return 0;
-    uintptr_t update_addr = base + g_auxiliary.update_off +
-                            g_auxiliary.update_flags_patch_off;
-    uintptr_t app_policy_addr = base + g_auxiliary.update_off +
-                                g_auxiliary.update_app_policy_patch_off;
-    uintptr_t concurrent_helper_addr = base +
-                                        g_auxiliary.concurrent_helper_off;
-    uintptr_t policy_addr = base + g_auxiliary.policy_off +
-                            g_auxiliary.policy_game_off;
-    uintptr_t idle_count_addr = base + g_auxiliary.policy_off +
-                                g_auxiliary.policy_idle_count_cbz_off;
-    uintptr_t idle_clear_addr = base + g_auxiliary.policy_off +
-                                g_auxiliary.policy_idle_clear_off;
+    uintptr_t update_addr = 0, app_policy_addr = 0;
+    uintptr_t concurrent_helper_addr = 0, policy_addr = 0;
+    uintptr_t idle_count_addr = 0, idle_clear_addr = 0;
+    if (!checked_offset_range(base, g_auxiliary.update_off,
+                              g_auxiliary.update_flags_patch_off,
+                              sizeof(g_auxiliary.update_flags_patched),
+                              &update_addr) ||
+        !checked_offset_range(base, g_auxiliary.update_off,
+                              g_auxiliary.update_app_policy_patch_off,
+                              UPDATE_APP_POLICY_BYTES, &app_policy_addr) ||
+        !checked_offset_range(base, 0, g_auxiliary.concurrent_helper_off,
+                              UPDATE_CONCURRENT_HELPER_BYTES,
+                              &concurrent_helper_addr) ||
+        !checked_offset_range(base, g_auxiliary.policy_off,
+                              g_auxiliary.policy_game_off,
+                              sizeof(GAME_POLICY_STOCK), &policy_addr) ||
+        !checked_offset_range(base, g_auxiliary.policy_off,
+                              g_auxiliary.policy_idle_count_cbz_off,
+                              sizeof(g_auxiliary.idle_count_branch),
+                              &idle_count_addr) ||
+        !checked_offset_range(base, g_auxiliary.policy_off,
+                              g_auxiliary.policy_idle_clear_off,
+                              IDLE_CLEAR_BRANCH_BYTES, &idle_clear_addr)) {
+        fprintf(stderr, "[a2h_patch] auxiliary apply address overflow\n");
+        return 0;
+    }
     unsigned char current[AUXILIARY_PATCH_MAX_BYTES];
     int concurrent_helper_ready =
         mem_r(pid, concurrent_helper_addr, current,
@@ -5325,8 +5556,13 @@ static int apply_auxiliary_targets(pid_t pid, uintptr_t base,
             pid, base, idle_clear_addr, g_auxiliary.idle_clear_branch,
             IDLE_CLEAR_BRANCH_BYTES, "isA2HAllowed.idle-clear");
     }
-    uintptr_t stream_ref_addr = base + g_auxiliary.stream_event_off +
-                                g_auxiliary.stream_ref_patch_off;
+    uintptr_t stream_ref_addr = 0;
+    if (!checked_offset_range(base, g_auxiliary.stream_event_off,
+                              g_auxiliary.stream_ref_patch_off,
+                              STREAM_REF_PATCH_BYTES, &stream_ref_addr)) {
+        fprintf(stderr, "[a2h_patch] stream reference address overflow\n");
+        return 0;
+    }
     int stream_ref_ready = concurrent_helper_ready && policy_ready &&
         idle_clear_ready &&
         mem_r(pid, stream_ref_addr, current, STREAM_REF_PATCH_BYTES) == 0 &&
@@ -5339,8 +5575,14 @@ static int apply_auxiliary_targets(pid_t pid, uintptr_t base,
             pid, base, stream_ref_addr, g_auxiliary.stream_ref_patched,
             STREAM_REF_PATCH_BYTES, "stream-handoff-helper");
     }
-    uintptr_t output_pool_addr = base + g_auxiliary.output_pool_off +
-                                 g_auxiliary.output_pool_tail_patch_off;
+    uintptr_t output_pool_addr = 0;
+    if (!checked_offset_range(base, g_auxiliary.output_pool_off,
+                              g_auxiliary.output_pool_tail_patch_off,
+                              OUTPUT_POOL_TAIL_PATCH_BYTES,
+                              &output_pool_addr)) {
+        fprintf(stderr, "[a2h_patch] output pool address overflow\n");
+        return 0;
+    }
     int output_pool_ready = stream_ref_ready &&
         mem_r(pid, output_pool_addr, current,
               OUTPUT_POOL_TAIL_PATCH_BYTES) == 0 &&
@@ -5356,10 +5598,13 @@ static int apply_auxiliary_targets(pid_t pid, uintptr_t base,
                        idle_clear_ready && stream_ref_ready &&
                        output_pool_ready;
     for (size_t i = 0; stream_ready && i < STREAM_EVENT_PATCH_COUNT; ++i) {
-        uintptr_t address = base + g_auxiliary.stream_event_off +
-                            g_auxiliary.stream_event_patch_offsets[i];
         size_t event_size = STREAM_EVENT_PATCH_SIZES[i];
-        int item_ready = mem_r(pid, address, current, event_size) == 0 &&
+        uintptr_t address = 0;
+        int item_ready = checked_offset_range(
+                             base, g_auxiliary.stream_event_off,
+                             g_auxiliary.stream_event_patch_offsets[i],
+                             event_size, &address) &&
+                         mem_r(pid, address, current, event_size) == 0 &&
                          memcmp(current, g_auxiliary.stream_event_patched[i],
                                 event_size) == 0;
         if (!item_ready) {
@@ -5372,8 +5617,13 @@ static int apply_auxiliary_targets(pid_t pid, uintptr_t base,
         }
         stream_ready = item_ready;
     }
-    uintptr_t stream_open_addr = base + g_auxiliary.stream_open_off +
-                                 g_auxiliary.stream_open_patch_off;
+    uintptr_t stream_open_addr = 0;
+    if (!checked_offset_range(base, g_auxiliary.stream_open_off,
+                              g_auxiliary.stream_open_patch_off,
+                              STREAM_OPEN_EVENT_BYTES, &stream_open_addr)) {
+        fprintf(stderr, "[a2h_patch] stream open address overflow\n");
+        return 0;
+    }
     int stream_open_ready = stream_ready &&
         mem_r(pid, stream_open_addr, current,
               STREAM_OPEN_EVENT_BYTES) == 0 &&
@@ -5622,6 +5872,10 @@ static int scan_official_strings(pid_t pid, uintptr_t base) {
 }
 static int memory_is_zero(pid_t pid, uintptr_t start, uintptr_t len) {
     unsigned char buf[256];
+    if (len > UINTPTR_MAX - start) {
+        errno = EOVERFLOW;
+        return 0;
+    }
     while (len) {
         size_t n = len < sizeof(buf) ? (size_t)len : sizeof(buf);
         if (mem_r(pid, start, buf, n) != 0) return 0;
@@ -5659,38 +5913,24 @@ static int locate_targets(pid_t pid, uintptr_t base) {
     }
     else snprintf(g_scan_kind, sizeof(g_scan_kind), "elf-symbol");
 
-    /* Profiles seed diagnostic string offsets only.  They never select the
-     * function target, so an OTA cannot become writable merely by reusing old
-     * offsets and package literals. */
-    int best=-1, best_score=-100000;
-    for (size_t i=0;i<sizeof(PROFILES)/sizeof(PROFILES[0]);++i) {
-        int sc=score_profile(pid, base, &PROFILES[i]);
-        if (profile_official_strings_exact(pid, base, &PROFILES[i]) &&
-            sc>best_score) { best_score=sc; best=(int)i; }
+    /* Slot addresses are discovered from the mapped HAL's own read-only
+     * package strings. No ROM-specific profile or fixed offset is embedded in
+     * the module. Whitelist mode later relocates all slots into its owned
+     * ELF-tail cave. */
+    for (int i = 0; i < MAX_SLOTS; ++i) {
+        set_slot_off(i, 0);
+        slots[i].max_len = 63;
+        slots[i].label = "x";
     }
-
-    if (best >= 0) apply_profile(&PROFILES[best]);
-    for (int i = 0; i < MAX_SLOTS; ++i) { slots[i].max_len = 63; slots[i].label = "x"; }
     int str_found = scan_official_strings(pid, base);
-    if (best >= 0) {
-        for (int i=0;i<6;i++) {
-            uintptr_t cur = slot_off(i);
-            int sc = score_string_rel(cur, g_rw_start, g_rw_end ? g_rw_end : 0x43A000);
-            if (sc < 40) {
-                set_slot_off(i, PROFILES[best].slot_off[i]);
-                fprintf(stderr, "[a2h_patch] slot%d prefer profile off=0x%lx (strscan weak)\n",
-                        i, (unsigned long)PROFILES[best].slot_off[i]);
-            }
-        }
-    }
 
     if (elf_result == ELF_RESOLVE_VERIFIED) {
         g_func_off = elf_off;
         snprintf(g_locate_method, sizeof(g_locate_method), "%s",
                  elf_state == ELF_A2H_OWNED_ABS_JUMP ?
                  "elf-symbol+owned-jump" : "elf-symbol");
-        snprintf(g_profile, sizeof(g_profile), "elf-symbol");
-        snprintf(g_profile_hint, sizeof(g_profile_hint), "%s",
+        snprintf(g_profile, sizeof(g_profile), "none");
+        snprintf(g_profile_hint, sizeof(g_profile_hint), "ELF/semantic-only:%s",
                  elf_a2h_state_name(elf_state));
         fprintf(stderr,
                 "[a2h_patch] selected method=%s func=0x%lx capacity=%lu state=%s str_found=%d\n",
@@ -5704,24 +5944,19 @@ static int locate_targets(pid_t pid, uintptr_t base) {
         g_func_off = sig_off;
         g_func_capacity = sig_capacity;
         snprintf(g_locate_method, sizeof(g_locate_method), "scan");
-        if (best >= 0) {
-            // Keep package profile offsets if useful, even when function offset differs (OS2.0.220).
-            snprintf(g_profile, sizeof(g_profile), "scan+%s", PROFILES[best].name);
-            snprintf(g_profile_hint, sizeof(g_profile_hint), "%s", PROFILES[best].hint);
-        } else {
-            snprintf(g_profile, sizeof(g_profile), "scan");
-            snprintf(g_profile_hint, sizeof(g_profile_hint), "universal");
-        }
+        snprintf(g_profile, sizeof(g_profile), "none");
+        snprintf(g_profile_hint, sizeof(g_profile_hint), "ELF/semantic-only:scan");
         fprintf(stderr,
                 "[a2h_patch] selected method=%s func=0x%lx capacity=%lu kind=%s str_found=%d profile=%s\n",
                 g_locate_method, (unsigned long)g_func_off,
-                (unsigned long)g_func_capacity, g_scan_kind, str_found, g_profile);
+                (unsigned long)g_func_capacity, g_scan_kind, str_found,
+                g_profile);
         return 1;
     }
 
     fprintf(stderr,
-            "[a2h_patch] ERROR: cannot locate is_A2H_app (elf=%d scan=%d best_score=%d)\n",
-            elf_result, sig_ok, best_score);
+            "[a2h_patch] ERROR: cannot locate is_A2H_app (elf=%d scan=%d)\n",
+            elf_result, sig_ok);
     return 0;
 }
 
@@ -5794,7 +6029,10 @@ static int setup_custom_cave(pid_t pid, uintptr_t base, uintptr_t rw_abs_s, uint
 static int apply_strings(pid_t pid, uintptr_t base, char **pkgs) {
     unsigned char saved[MAX_SLOTS][64];
     for (int i = 0; i < MAX_SLOTS; ++i) {
-        if (mem_r(pid, base + slot_off(i), saved[i], sizeof(saved[i])) != 0) {
+        uintptr_t slot_addr = 0;
+        if (!checked_offset_range(base, 0, slot_off(i),
+                                  sizeof(saved[i]), &slot_addr) ||
+            mem_r(pid, slot_addr, saved[i], sizeof(saved[i])) != 0) {
             fprintf(stderr, "[a2h_patch] slot%d snapshot FAIL\n", i);
             return 0;
         }
@@ -5803,7 +6041,12 @@ static int apply_strings(pid_t pid, uintptr_t base, char **pkgs) {
         char buf[64]; memset(buf,0,sizeof(buf));
         size_t maxlen=(size_t)slots[i].max_len; if(maxlen>=sizeof(buf)) maxlen=sizeof(buf)-1;
         if(pkgs[i]&&pkgs[i][0]){ strncpy(buf,pkgs[i],maxlen); buf[maxlen]=0; }
-        uintptr_t addr=base+slot_off(i);
+        uintptr_t addr = 0;
+        if (!checked_offset_range(base, 0, slot_off(i), maxlen + 1,
+                                  &addr)) {
+            fprintf(stderr, "[a2h_patch] slot%d address overflow\n", i);
+            return 0;
+        }
         // always clear then write, avoid stale garbage in custom cave
         char z[64]; memset(z,0,sizeof(z));
         int crc=mem_w(pid,addr,z,maxlen+1);
@@ -5818,8 +6061,10 @@ static int apply_strings(pid_t pid, uintptr_t base, char **pkgs) {
             int restore_ok = 1;
             for (int j = 0; j < MAX_SLOTS; ++j) {
                 unsigned char restored[64];
-                uintptr_t restore_addr = base + slot_off(j);
-                if (mem_w(pid, restore_addr, saved[j], sizeof(saved[j])) != 0 ||
+                uintptr_t restore_addr = 0;
+                if (!checked_offset_range(base, 0, slot_off(j),
+                                          sizeof(saved[j]), &restore_addr) ||
+                    mem_w(pid, restore_addr, saved[j], sizeof(saved[j])) != 0 ||
                     mem_r(pid, restore_addr, restored, sizeof(restored)) != 0 ||
                     memcmp(restored, saved[j], sizeof(saved[j])) != 0)
                     restore_ok = 0;
@@ -5845,19 +6090,32 @@ static int whitelist_transaction_begin(pid_t pid, uintptr_t base,
     if (!tx || !slot_off(0) || g_ptr_off < slot_off(0) ||
         g_stub_mark < slot_off(0)) return 0;
     memset(tx, 0, sizeof(*tx));
-    tx->func = base + k_func_off();
-    tx->cave = base + slot_off(0);
-    uintptr_t cave_end = slot_off(0) + WHITELIST_CAVE_BYTES;
+    uintptr_t cave_end = 0;
+    if (!checked_offset_range(base, 0, k_func_off(),
+                              sizeof(tx->func_before), &tx->func) ||
+        !checked_offset_range(base, 0, slot_off(0),
+                              sizeof(tx->cave_before), &tx->cave) ||
+        !checked_uintptr_add(slot_off(0), WHITELIST_CAVE_BYTES, &cave_end)) {
+        fprintf(stderr, "[a2h_patch] whitelist transaction address overflow\n");
+        return 0;
+    }
     for (int i = 0; i < MAX_SLOTS; ++i) {
-        if (slot_off(i) != slot_off(0) + (uintptr_t)i * 64) {
+        uintptr_t expected = 0;
+        if (!checked_uintptr_add(slot_off(0), (uintptr_t)i * 64u,
+                                 &expected) || slot_off(i) != expected) {
             fprintf(stderr,
                     "[a2h_patch] transaction layout rejected slot=%d off=0x%lx\n",
                     i, (unsigned long)slot_off(i));
             return 0;
         }
     }
-    if (g_stub_mark + sizeof(WHITELIST_MARKER) > cave_end ||
-        g_ptr_off + MAX_SLOTS * sizeof(uint64_t) > cave_end ||
+    uintptr_t marker_end = 0;
+    uintptr_t ptr_end = 0;
+    if (!checked_uintptr_add(g_stub_mark, sizeof(WHITELIST_MARKER),
+                             &marker_end) ||
+        !checked_uintptr_add(g_ptr_off,
+                             MAX_SLOTS * sizeof(uint64_t), &ptr_end) ||
+        marker_end > cave_end || ptr_end > cave_end ||
         mem_r(pid, tx->func, tx->func_before, sizeof(tx->func_before)) != 0 ||
         mem_r(pid, tx->cave, tx->cave_before, sizeof(tx->cave_before)) != 0) {
         fprintf(stderr, "[a2h_patch] whitelist outer transaction snapshot FAIL\n");
@@ -5924,16 +6182,25 @@ static int encode_adrp_add(uint32_t *adrp, uint32_t *add, int rd, uintptr_t pc, 
     return 0;
 }
 static int write_whitelist_stub_code(pid_t pid, uintptr_t base) {
-    uintptr_t func = base + k_func_off();
-    uintptr_t table = base + g_ptr_off;
-    uintptr_t marker_addr = base + g_stub_mark;
+    uintptr_t func = 0, table = 0, marker_addr = 0;
+    if (!checked_offset_range(base, 0, k_func_off(),
+                              WHITELIST_STUB_BYTES, &func) ||
+        !checked_offset_range(base, 0, g_ptr_off,
+                              MAX_SLOTS * sizeof(uint64_t), &table) ||
+        !checked_offset_range(base, 0, g_stub_mark,
+                              sizeof(WHITELIST_MARKER), &marker_addr)) {
+        fprintf(stderr, "[a2h_patch] stub address overflow\n");
+        return 0;
+    }
     uint64_t ptrs[MAX_SLOTS];
     for (int i=0;i<MAX_SLOTS;++i) {
         char first=0;
-        if (mem_r(pid, base + slot_off(i), &first, 1) != 0) {
+        uintptr_t slot_addr = 0;
+        if (!checked_offset_range(base, 0, slot_off(i), 1, &slot_addr) ||
+            mem_r(pid, slot_addr, &first, 1) != 0) {
             fprintf(stderr, "[a2h_patch] stub prep read slot%d FAIL\n", i); return 0;
         }
-        ptrs[i] = first ? (uint64_t)(base + slot_off(i)) : 0;
+        ptrs[i] = first ? (uint64_t)slot_addr : 0;
         fprintf(stderr, "[a2h_patch] ptr[%d]=%s\n", i, ptrs[i]?"set":"null");
     }
     uint32_t code[24]; int n=0; uint32_t adrp=0, add=0;
@@ -6034,7 +6301,12 @@ rollback:
     return 0;
 }
 static int install_whitelist_stub(pid_t pid, uintptr_t base) {
-    uintptr_t func = base + k_func_off();
+    uintptr_t func = 0;
+    if (!checked_offset_range(base, 0, k_func_off(),
+                              WHITELIST_STUB_BYTES, &func)) {
+        fprintf(stderr, "[a2h_patch] whitelist function address overflow\n");
+        return 0;
+    }
     if (!write_whitelist_stub_code(pid, base)) return 0;
     int flush_first = remote_icache_flush(pid, base, func,
                                           WHITELIST_STUB_BYTES);
@@ -6093,8 +6365,13 @@ static int show_strings(pid_t pid, uintptr_t base) {
     return rc;
 }
 static long now_ms(void) {
-    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (long)ts.tv_sec * 1000L + ts.tv_nsec / 1000000L;
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0 || ts.tv_sec < 0) {
+        return -1;
+    }
+    long subsecond = ts.tv_nsec / 1000000L;
+    if (ts.tv_sec > (LONG_MAX - subsecond) / 1000L) return LONG_MAX;
+    return (long)ts.tv_sec * 1000L + subsecond;
 }
 
 static void save_func_off_hint(uintptr_t off) {
@@ -6133,7 +6410,14 @@ int main(int argc,char **argv) {
     int mode=0,pid=-1; char *pkgfile=NULL; uintptr_t base_override=0;
     int check_want_global=-1, game_auto_pause=1;
     long t0=now_ms();
-    apply_profile(&PROFILES[0]);
+    for (int i = 0; i < MAX_SLOTS; ++i) {
+        set_slot_off(i, 0);
+        slots[i].max_len = 63;
+        slots[i].label = "x";
+    }
+    snprintf(g_profile, sizeof(g_profile), "none");
+    snprintf(g_profile_hint, sizeof(g_profile_hint),
+             "ELF/semantic-only");
     fprintf(stderr, "[a2h_patch] version=%s\n", A2H_VERSION);
     for(int i=1;i<argc;i++) {
         if(strcmp(argv[i],"--help")==0||strcmp(argv[i],"-h")==0){

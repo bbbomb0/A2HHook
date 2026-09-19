@@ -29,6 +29,7 @@ CFG_GAME_POLICY="$CFG_DIR/game_auto_pause"
 CFG_PKGS="$CFG_DIR/packages.txt"
 CFG_STATES="$CFG_DIR/package_states"
 CFG_GENERATION="$CFG_DIR/config_generation"
+CFG_LOG_ENABLED="$CFG_DIR/log_enabled"
 CFG_SNAPSHOT="$CFG_DIR/config_snapshot"
 CFG_REVISION="$CFG_DIR/revision"
 APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
@@ -41,7 +42,7 @@ TMP_PKGS=/data/local/tmp/a2h_packages.txt
 LOG="$MODDIR/a2h_patch.log"
 COMPANION_APK="$MODDIR/companion/a2h_companion.apk"
 COMPANION_PACKAGE=io.github.bbbomb0.a2hhook
-COMPANION_VERSION_CODE=1580
+COMPANION_VERSION_CODE=1590
 SERVICE_LOCK_DIR=/data/local/tmp/a2h_hook_service.lock
 SERVICE_LOCK_RECORD="$SERVICE_LOCK_DIR/owner"
 service_lock_owner=
@@ -54,7 +55,18 @@ rm -f \
   /data/adb/service.d/.a2h_hook_companion_cleanup.* 2>/dev/null
 
 ts() { date '+%F %T'; }
-log() { printf '[%s] %s\n' "$(ts)" "$*" >> "$LOG" 2>/dev/null; }
+logging_enabled() {
+  logging_value=enabled
+  if [ -r "$CFG_LOG_ENABLED" ]; then
+    IFS= read -r logging_value < "$CFG_LOG_ENABLED" || logging_value=enabled
+    logging_value=$(printf '%s' "$logging_value" | tr -d '\r')
+  fi
+  [ "$logging_value" != "disabled" ]
+}
+log() {
+  logging_enabled || return 0
+  printf '[%s] %s\n' "$(ts)" "$*" >> "$LOG" 2>/dev/null
+}
 
 process_starttime() {
   process_pid=$1
@@ -333,7 +345,11 @@ find_hal_pid() {
 
 apply_once() {
   service_reason=$1
-  A2H_REASON="$service_reason" A2H_APPLY_ATTEMPTS=1 sh "$APPLIER" apply >> "$LOG" 2>&1
+  if logging_enabled; then
+    A2H_REASON="$service_reason" A2H_APPLY_ATTEMPTS=1 sh "$APPLIER" apply >> "$LOG" 2>&1
+  else
+    A2H_REASON="$service_reason" A2H_APPLY_ATTEMPTS=1 sh "$APPLIER" apply
+  fi
 }
 
 ensure_companion_installed() {
@@ -566,9 +582,15 @@ trap service_cleanup EXIT
 
 module_version=$(sed -n 's/^version=//p' "$MODDIR/module.prop" 2>/dev/null | head -n 1)
 [ -n "$module_version" ] || module_version=unknown
-printf '[a2h_hook] %s %s\n' "$module_version" "$(date)" > "$LOG" 2>/dev/null
 
 mkdir -p "$CFG_DIR" /data/local/tmp 2>/dev/null
+[ -e "$CFG_LOG_ENABLED" ] || {
+  printf '%s\n' enabled > "$CFG_LOG_ENABLED" 2>/dev/null
+  chmod 0644 "$CFG_LOG_ENABLED" 2>/dev/null
+}
+if logging_enabled; then
+  printf '[a2h_hook] %s %s\n' "$module_version" "$(date)" > "$LOG" 2>/dev/null
+fi
 rm -f "$NOTIFICATION_STATE_FILE" "$NOTIFICATION_RETRY_FILE" 2>/dev/null
 rmdir "$NOTIFICATION_LOCK_DIR" 2>/dev/null
 chmod 755 "$APPLIER" "$PATCHER" 2>/dev/null
