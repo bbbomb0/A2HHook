@@ -49,7 +49,7 @@ compatibility_archive/
 ## 工具
 
 ```text
-python tools/new_compat_case.py compatibility_archive --model 25060RK16C --device dail --rom OS3.0.302.0.WONCNXM --evidence-level runtime-verified
+python tools/new_compat_case.py compatibility_archive --model 25060RK16C --device dali --rom OS3.0.302.0.WONCNXM --evidence-level runtime-verified
 python tools/hal_fingerprint.py path/to/audio.primary.mediatek.so --output derived/hal_fingerprint.json
 python tools/archive_catalog.py compatibility_archive
 python tools/archive_checksums.py write compatibility_archive

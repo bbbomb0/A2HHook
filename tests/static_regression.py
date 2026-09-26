@@ -33,7 +33,7 @@ EXPECTED_RELEASE = ("v1.5.9.5", "1595")
 
 HAL_CASES = {
     "OS2.0.208.0.VONCNXM": {
-        "relative": "devices/25060RK16C__dail/OS2.0.208.0.VONCNXM/originals/hal/audio.primary.mediatek(os2.0.208).so",
+        "relative": "devices/25060RK16C__dali/OS2.0.208.0.VONCNXM/originals/hal/audio.primary.mediatek(os2.0.208).so",
         "sha256": "ebd8b02f5508efc1ce253c5a809300489d93f367b8ef266e6a630d1a42e69733",
         "size": 4437728,
         "build_id": "349d72e91436b550d5a1e3da2a1cc02b",
@@ -50,7 +50,7 @@ HAL_CASES = {
         "strlen_call": 0x4166C0,
     },
     "OS2.0.218.0.VONCNXM": {
-        "relative": "devices/25060RK16C__dail/OS2.0.218.0.VONCNXM/originals/hal/audio.primary.mediatek(os2.0.218).so",
+        "relative": "devices/25060RK16C__dali/OS2.0.218.0.VONCNXM/originals/hal/audio.primary.mediatek(os2.0.218).so",
         "sha256": "ba543c1fd331d20ca149ae38c80600acc331d7a3d09bad6582ca485163cf9d13",
         "size": 4454128,
         "build_id": "b83078b3502a148fb846652aa3bf1f7d",
@@ -67,7 +67,7 @@ HAL_CASES = {
         "strlen_call": 0x416DB0,
     },
     "OS3.0.302.0.WONCNXM": {
-        "relative": "devices/25060RK16C__dail/OS3.0.302.0.WONCNXM/originals/hal/audio.primary.mediatek.so",
+        "relative": "devices/25060RK16C__dali/OS3.0.302.0.WONCNXM/originals/hal/audio.primary.mediatek.so",
         "sha256": "fe48c8d2070a318ef4ab1f6d05a37c213e0b2abc5a95d910885ab1decc468924",
         "size": 4454112,
         "build_id": "fb4737aed1aed36ca755604fad655461",
@@ -84,7 +84,7 @@ HAL_CASES = {
         "strlen_call": 0x416AF0,
     },
     "OS3.0.305.0.WONCNXM": {
-        "relative": "devices/25060RK16C__dail/OS3.0.305.0.WONCNXM/originals/hal/audio.primary.mediatek.so",
+        "relative": "devices/25060RK16C__dali/OS3.0.305.0.WONCNXM/originals/hal/audio.primary.mediatek.so",
         "sha256": "da028039d1a823189ed0c3df3ab80bfd5d52a9849038f32ef5ac5e229b2af6fa",
         "size": 4454072,
         "build_id": "ad3569054ba54d7178354e85fbad3ce6",

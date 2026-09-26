@@ -151,7 +151,7 @@ abort_test() {
 system=$(getprop ro.build.version.incremental)
 device=$(getprop ro.product.device)
 version=$(prop_value version)
-assert_eq "$device" dail device
+assert_eq "$device" dali device
 assert_eq "$system" OS3.0.302.0.WONCNXM system
 assert_eq "$version" "$EXPECTED_VERSION" module-version
 [ -x "$APPLIER" ] || fail "applier is not executable"
