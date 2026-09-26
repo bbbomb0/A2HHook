@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>让 HyperOS 的音乐触感按你的规则工作</b><br>
-  <span>面向 REDMI K80 Ultra / K80U 的全局、白名单与后台音乐触感模块</span>
+  <span>面向 REDMI K80 Ultra（代号 dail，K80U）的全局、白名单与后台音乐触感模块</span>
 </p>
 
 <p align="center">
@@ -43,7 +43,7 @@
 
 ## 简介
 
-A2HHook 是一个面向 **REDMI K80 Ultra（K80U）** 的 Root 音乐触感模块。它在系统音频 HAL 层识别音乐、视频、游戏和系统短音的生命周期，根据全局模式或 10 槽白名单决定何时启用 A2H 音乐触感。
+A2HHook 是一个面向 **REDMI K80 Ultra（代号 dail，K80U）** 的 Root 音乐触感模块。它在系统音频 HAL 层识别音乐、视频、游戏和系统短音的生命周期，根据全局模式或 10 槽白名单决定何时启用 A2H 音乐触感。
 
 模块提供 KernelSU、ReKernelSU、ReSukiSU 管理器使用的根目录安装流程，也在发布 ZIP 中提供 Magisk v20.4+ recovery 安装入口。模块 WebUI 与伴生 APK 共用同一套离线页面，不依赖网络服务、CDN 或额外后台守护进程。
 
@@ -53,7 +53,7 @@ A2HHook 是一个面向 **REDMI K80 Ultra（K80U）** 的 Root 音乐触感模�
 > A2HHook 会修改目标设备音频 HAL 的运行时行为。请只在自己能够恢复或救砖的设备上使用，并在刷入前保留模块禁用方式和重要数据备份。
 >
 > [!WARNING]
-> 本项目不是通用 Android 音频增强器。当前公开目标是 REDMI K80 Ultra / K80U；未列出的设备、深度修改过的 ROM、修改过的音频 HAL，以及与其他音频注入模块叠加的场景，都不能视为已验证兼容。
+> 本项目不是通用 Android 音频增强器。当前公开目标是 REDMI K80 Ultra（代号 dail，K80U）；未列出的设备、深度修改过的 ROM、修改过的音频 HAL，以及与其他音频注入模块叠加的场景，都不能视为已验证兼容。
 
 ## 功能
 
@@ -186,13 +186,13 @@ Root 文件管理器可以编辑模块目录中的 `config/packages.txt`。每�
 
 | 项目 | 说明 |
 | :--- | :--- |
-| 目标设备 | REDMI K80 Ultra / K80U |
-| 系统范围 | 运行时按 ELF/语义定位；公开验证覆盖 K80U / HyperOS 4.0.0.7 Beta 与 HyperOS 3.0.302 |
+| 目标设备 | REDMI K80 Ultra（代号 dail，K80U） |
+| 系统范围 | 运行时按 ELF/语义定位；公开验证覆盖 dail / K80U 的 HyperOS 4.0.0.7 Beta 与 HyperOS 3.0.302 |
 | 设计目标 | 兼容 HyperOS 2.x / 3.x / 4.x 的布局变化；每台设备仍需通过运行时门禁 |
 | Root | KernelSU、ReKernelSU、ReSukiSU；发布 ZIP 提供 Magisk v20.4+ recovery 入口 |
 | 架构 | ARM64（`arm64-v8a`） |
 | 音频实现 | 目标设备需使用可被运行时解析的 `audio.primary.*.so` |
-| 适配结论 | K80U / HyperOS 3.0.302 已完成公开回归；其他 ROM 需在目标设备上完成门禁验证 |
+| 适配结论 | dail / K80U 的 HyperOS 3.0.302 已完成公开回归；其他 ROM 需在目标设备上完成门禁验证 |
 
 模块不会把未验证的 ROM 宣称为通用兼容。运行时解析遇到符号缺失、锚点缺失、重复命中、函数边界异常或所有权校验失败时，会拒绝写入并保留诊断信息。
 
@@ -200,7 +200,7 @@ Root 文件管理器可以编辑模块目录中的 `config/packages.txt`。每�
 
 ### v1.5.9
 
-- 适配 K80U HyperOS 4.0.0.7 Beta 的运行时 inline path，使用 ELF 符号和语义布局定位，不依赖固定 ROM profile。
+- 适配 dail / K80U HyperOS 4.0.0.7 Beta 的运行时 inline path，使用 ELF 符号和语义布局定位，不依赖固定 ROM profile。
 - 修复 WebUI 配置读取边界，确保日志开关、10 槽包名和槽位状态可以正确回读。
 - 新增运行日志开关，关闭后不再持久写入 `a2h_patch.log` 和 `action.log`。
 - 模式切换后对正在播放的媒体流即时重算；保留 AudioPolicy 端口、session、PID/starttime 所有权和单例 watcher。
