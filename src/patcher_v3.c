@@ -1,4 +1,4 @@
-// a2h_patch v1.5.9 - HyperOS 4 inline path + active audio lifecycle
+// a2h_patch v1.5.9.5 - HyperOS 4 inline path + active audio lifecycle
 #define _GNU_SOURCE
 #include <stdint.h>
 #include <stdio.h>
@@ -62,7 +62,7 @@
 #define PTRACE_POKETEXT 4
 #define PTRACE_POKEDATA 5
 #define MAX_SLOTS 10
-#define A2H_VERSION "1.5.9"
+#define A2H_VERSION "1.5.9.5"
 #define WHITELIST_CAVE_BYTES (MAX_SLOTS * 64 + 16 + MAX_SLOTS * 8 + 32)
 #define WHITELIST_STUB_WORDS 19
 #define WHITELIST_STUB_BYTES (WHITELIST_STUB_WORDS * sizeof(uint32_t))
@@ -146,8 +146,12 @@
 #define STREAM_REF_LEGACY_IDLE_GUARD_CBNZ_OFF 0x64u
 #define STREAM_REF_LEGACY_IDLE_GUARD_CLEAR_OFF 0x68u
 #define STREAM_REF_UPDATE_B_OFF 0x8Cu
-#define STREAM_REF_HELPER_OFF 0x2088u
-#define STREAM_REF_LEGACY_HELPER_OFF 0x2084u
+#define STREAM_REF_REFRESH_MOV_OFF 0x68u
+#define STREAM_REF_REFRESH_BL_OFF 0x6Cu
+#define STREAM_REF_HELPER_OFF \
+    (STREAM_REF_PATCH_OFF + STREAM_REF_REFRESH_MOV_OFF)
+#define STREAM_REF_LEGACY_HELPER_OFF \
+    (STREAM_REF_PATCH_OFF + STREAM_REF_REFRESH_MOV_OFF)
 #define STREAM_APP_MAP_MANAGER_OFF 0x1F58u
 #define STREAM_NEW_NODE_MANAGER_OFF 0x2144u
 #define STREAM_UPDATE_CALL_OFF 0x23F8u
@@ -351,7 +355,9 @@ static const unsigned char UPDATE_APP_POLICY_DISK_TEMPLATE[UPDATE_APP_POLICY_BYT
 static const unsigned char UPDATE_APP_POLICY_STOCK_TEMPLATE[UPDATE_APP_POLICY_BYTES]={
     0x68,0x9E,0x42,0xF9,0x1F,0x05,0x00,0xF1,
     0xA0,0x00,0x00,0x54,0xA8,0x01,0x00,0xB5,
-    0x68,0x66,0x54,0x39,0x17,0x01,0x00,0x52,
+    /* Zero app-map entries are not a proof of the previous whitelisted
+     * stream.  In stock policy, pause until a real app entry commits. */
+    0x37,0x00,0x80,0x52,0x1F,0x20,0x03,0xD5,
     0x1B,0x00,0x00,0x14,0x68,0x9A,0x42,0xF9,
     0x09,0x41,0x40,0x39,0x0A,0x45,0x00,0x91,
     0x08,0x11,0x40,0xF9,0x3F,0x01,0x00,0x72,
@@ -3804,7 +3810,9 @@ static int build_stream_ref_overlay(
         !output_persistent_legacy || !delete_target || !stack_fail_target ||
         !allowed_target || !update_target ||
         stream_vaddr > UINTPTR_MAX - STREAM_REF_PATCH_OFF -
-                       STREAM_REF_DELETE_BL_OFF ||
+                       STREAM_REF_PATCH_BYTES ||
+        stream_vaddr > UINTPTR_MAX - STREAM_REF_HELPER_OFF -
+                       sizeof(uint32_t) ||
         output_vaddr > UINTPTR_MAX - OUTPUT_POOL_TAIL_PATCH_OFF -
                        sizeof(OUTPUT_POOL_TAIL_STOCK_TEMPLATE) ||
         memcmp(output_tail, OUTPUT_POOL_TAIL_STOCK_TEMPLATE,
@@ -3824,6 +3832,8 @@ static int build_stream_ref_overlay(
                                   STREAM_REF_LEGACY_STACK_COND_OFF;
     uintptr_t update_site = stream_vaddr + STREAM_REF_PATCH_OFF +
                             STREAM_REF_UPDATE_B_OFF;
+    uintptr_t refresh_site = stream_vaddr + STREAM_REF_PATCH_OFF +
+                             STREAM_REF_REFRESH_BL_OFF;
     uintptr_t output_site = output_vaddr + OUTPUT_POOL_TAIL_PATCH_OFF;
     uintptr_t stack_target = 0;
     uintptr_t target = 0;
@@ -3834,8 +3844,10 @@ static int build_stream_ref_overlay(
     uint32_t stack_replacement = 0;
     uint32_t legacy_stack_replacement = 0;
     uint32_t update_replacement = 0;
+    uint32_t refresh_replacement = 0;
     uint32_t output_replacement = 0;
     uint32_t output_persistent_replacement = 0;
+    uint32_t helper_resume_replacement = 0;
     if (!decode_aarch64_bl(
             delete_site,
             load_u32le(stock + STREAM_REF_DELETE_BL_OFF), &target) ||
@@ -3859,6 +3871,12 @@ static int build_stream_ref_overlay(
             &legacy_stack_replacement) ||
         !encode_aarch64_b(update_site, update_target,
                           &update_replacement) ||
+        !encode_aarch64_bl(refresh_site, update_target,
+                           &refresh_replacement) ||
+        !encode_aarch64_b(
+            stream_vaddr + STREAM_REF_PATCH_OFF +
+                STREAM_REF_REFRESH_BL_OFF + sizeof(uint32_t),
+            output_site + sizeof(uint32_t), &helper_resume_replacement) ||
         !encode_aarch64_b(output_site,
                           stream_vaddr + STREAM_REF_HELPER_OFF,
                           &output_replacement) ||
@@ -3872,6 +3890,10 @@ static int build_stream_ref_overlay(
     store_u32le(patched + STREAM_REF_ALLOWED_BL_OFF, allowed_replacement);
     store_u32le(patched + STREAM_REF_COUNT_CBNZ_OFF, count_replacement);
     store_u32le(patched + STREAM_REF_STACK_COND_OFF, stack_replacement);
+    store_u32le(patched + STREAM_REF_REFRESH_MOV_OFF, 0xAA1603E0u);
+    store_u32le(patched + STREAM_REF_REFRESH_BL_OFF, refresh_replacement);
+    store_u32le(patched + STREAM_REF_REFRESH_BL_OFF + sizeof(uint32_t),
+                helper_resume_replacement);
     store_u32le(patched + STREAM_REF_UPDATE_B_OFF, update_replacement);
     store_u32le(output_patched, output_replacement);
     store_u32le(output_persistent_legacy, output_persistent_replacement);
@@ -3886,6 +3908,9 @@ static int build_stream_ref_overlay(
                 legacy_stack_replacement);
     store_u32le(failed_idle_guard + STREAM_REF_UPDATE_B_OFF,
                 update_replacement);
+    store_u32le(failed_idle_guard + STREAM_REF_REFRESH_BL_OFF +
+                    sizeof(uint32_t),
+                helper_resume_replacement);
     memcpy(persistent_legacy, failed_idle_guard, STREAM_REF_PATCH_BYTES);
     store_u32le(persistent_legacy +
                 STREAM_REF_LEGACY_IDLE_GUARD_CBNZ_OFF,
@@ -5135,7 +5160,7 @@ static int verify_auxiliary_targets(pid_t pid, uintptr_t base,
                    stream_events_ok == STREAM_EVENT_PATCH_COUNT;
     if (verbose || !final_ok) {
         fprintf(stderr,
-                "[a2h_patch] auxiliary live output_flags=%s idle_init=%s idle_clear=%s concurrent_latch=%s stream_handoff=%s output_pool=%s stream_events=%u/%u stream_open=%s game_auto_pause=%s app_policy=%s output_policy=%s final=%s\n",
+                "[a2h_patch] auxiliary live output_flags=%s idle_init=%s idle_clear=%s concurrent_latch=%s stream_handoff=%s output_pool=%s stream_events=%u/%u stream_open=%s background_music=%s game_auto_pause=%s app_policy=%s output_policy=%s final=%s\n",
                 update_ok ? "game+spatial+idle-helper" : "mismatch",
                 idle_count_ok ? "manager-x20" : "mismatch",
                 idle_clear_ok ? "zero-output" : "mismatch",
@@ -5144,6 +5169,7 @@ static int verify_auxiliary_targets(pid_t pid, uintptr_t base,
                 output_pool_ok ? "event-tail" : "mismatch",
                 stream_events_ok, STREAM_EVENT_PATCH_COUNT,
                 stream_open_ok ? "post-commit" : "mismatch",
+                want_app_policy_relaxed ? "enabled" : "disabled",
                 want_app_policy_relaxed ? "disabled" : "enabled",
                 app_policy_ok ? (want_app_policy_relaxed ?
                                  "relaxed" : "stock") :
@@ -6428,6 +6454,7 @@ int main(int argc,char **argv) {
             printf("       %s --status [PID]\n",argv[0]);
             printf("       %s --check global|whitelist [PID]\n",argv[0]);
             printf("       %s --packages FILE\n",argv[0]);
+            printf("       %s --background-music enabled|disabled\n",argv[0]);
             printf("       %s --game-auto-pause enabled|disabled\n",argv[0]);
             printf("       %s --base 0x...\n",argv[0]);
             printf("       capabilities: apply-final-verified\n");
@@ -6444,6 +6471,17 @@ int main(int argc,char **argv) {
             check_want_global = (strcmp(argv[++i], "global")==0) ? 1 : 0;
         }
         else if(strcmp(argv[i],"--packages")==0 && i+1<argc) pkgfile=argv[++i];
+        else if(strcmp(argv[i],"--background-music")==0 && i+1<argc) {
+            const char *policy=argv[++i];
+            if(strcmp(policy,"enabled")==0) game_auto_pause=0;
+            else if(strcmp(policy,"disabled")==0) game_auto_pause=1;
+            else {
+                fprintf(stderr,
+                        "[a2h_patch] ERROR: invalid --background-music value=%s\n",
+                        policy);
+                return 2;
+            }
+        }
         else if(strcmp(argv[i],"--game-auto-pause")==0 && i+1<argc) {
             const char *policy=argv[++i];
             if(strcmp(policy,"enabled")==0) game_auto_pause=1;
@@ -6467,8 +6505,9 @@ int main(int argc,char **argv) {
     if(mode==0 || mode==1) log_system_identity();
     if(pid<=0){ for(int i=0;i<30;i++){ pid=find_pid(); if(pid>0)break; sleep(1);} }
     if(pid<=0){fprintf(stderr,"[a2h_patch] ERROR: service not found\n");return 2;}
-    fprintf(stderr,"[a2h_patch] pid=%d mode=%s game_auto_pause=%s\n", pid,
+    fprintf(stderr,"[a2h_patch] pid=%d mode=%s background_music=%s game_auto_pause=%s\n", pid,
             mode==1?"whitelist":(mode==2?"show":(mode==3?"status":(mode==4?"check":"global"))),
+            game_auto_pause?"disabled":"enabled",
             game_auto_pause?"enabled":"disabled");
     char n1[48], n2[48]; name_hal_primary(n1); name_hal_mt(n2);
     uintptr_t base=base_override, rw_s=0, rw_e=0, rx_s=0, rx_e=0;

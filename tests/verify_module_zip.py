@@ -13,6 +13,8 @@ from pathlib import Path, PurePosixPath
 
 
 FILES = (
+    "META-INF/com/google/android/update-binary",
+    "META-INF/com/google/android/updater-script",
     "module.prop",
     "LICENSE",
     "customize.sh",
@@ -42,11 +44,13 @@ FILES = (
 )
 
 EXECUTABLE = {
+    "META-INF/com/google/android/update-binary",
     "customize.sh", "service.sh", "bin/a2h_apply", "bin/a2h_patch",
     "bin/a2h_trigger", "bin/a2h_audio_watch", "post-fs-data.sh", "wrapper.sh", "uninstall.sh",
 }
 
 TEXT = {
+    "META-INF/com/google/android/update-binary", "META-INF/com/google/android/updater-script",
     "module.prop", "LICENSE", "customize.sh", "service.sh", "bin/a2h_apply",
     "config/packages.txt", "config/package_states", "config/state",
     "config/game_auto_pause", "config/log_enabled", "bin/a2h_audio_watch",
@@ -156,6 +160,22 @@ def validate(path: Path, expected_version: str | None = None, expected_code: str
                 if data.startswith(b"\xef\xbb\xbf") or b"\r" in data:
                     raise ValueError(f"BOM or CR line ending in {name}")
 
+        updater_script = archive.read("META-INF/com/google/android/updater-script")
+        if updater_script != b"#MAGISK\n":
+            raise ValueError("invalid Magisk recovery updater-script marker")
+        update_binary = archive.read("META-INF/com/google/android/update-binary").decode("utf-8")
+        recovery_contract = (
+            "#!/sbin/sh",
+            "OUTFD=$2",
+            "ZIPFILE=$3",
+            "mount /data 2>/dev/null",
+            ". /data/adb/magisk/util_functions.sh",
+            "[ $MAGISK_VER_CODE -lt 20400 ] && require_new_magisk",
+            "install_module",
+        )
+        if any(marker not in update_binary for marker in recovery_contract):
+            raise ValueError("incomplete Magisk recovery update-binary")
+
         prop = properties(archive.read("module.prop"))
         required = {"id", "name", "version", "versionCode", "author", "description", "webui", "webuiIcon"}
         if not required <= prop.keys() or prop.get("id") != "a2h_hook":
@@ -202,10 +222,20 @@ def validate(path: Path, expected_version: str | None = None, expected_code: str
             "*'stopOutput()'*|*'stoptOutput()'*",
             'policy_port_file="$PORT_DIR/$policy_port"',
             'lease_worker_start=$(process_starttime "$lease_worker")',
-            'FALLBACK_LEASE_SECONDS:-70',
+            'FALLBACK_LEASE_SECONDS=${A2H_FALLBACK_LEASE_SECONDS:-70}',
+            'lease_session_dir="$SESSION_DIR/$lease_package"',
+            'chown 0:"$lease_uid" "$lease_session_dir"',
+            'chmod 1730 "$lease_session_dir"',
         )
         if not all(marker in audio_watcher for marker in watcher_markers):
             raise ValueError("audio UID watcher lifecycle contract is incomplete")
+        forbidden_watcher = (
+            "a2h_playback_bridge.dex", "A2H_PLAYBACK", "A2H_IMPORTANCE",
+            "policy-deny", "UID_IMPORTANCE_DIR", "UID_PLAYBACK_DIR",
+            "UID_PACKAGE_DIR", "getActivePlaybackConfigurations",
+        )
+        if any(marker in audio_watcher for marker in forbidden_watcher):
+            raise ValueError("removed PlaybackBridge/UID deny arbitration leaked into watcher")
         if any(package in audio_watcher for package in (
             "com.tencent.tmgp.sgame", "com.tencent.game.rhythmmaster",
         )):

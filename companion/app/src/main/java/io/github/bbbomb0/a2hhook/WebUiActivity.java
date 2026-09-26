@@ -66,7 +66,9 @@ public final class WebUiActivity extends Activity {
             settings.setAlgorithmicDarkeningAllowed(false);
         }
         WebView.setWebContentsDebuggingEnabled(false);
-        webView.addJavascriptInterface(new A2HBridge(this, webView, executor), "ksu");
+        A2HBridge bridge = new A2HBridge(this, webView, executor);
+        webView.addJavascriptInterface(bridge, "ksu");
+        webView.addJavascriptInterface(bridge, "a2hNative");
         webView.setWebViewClient(new LocalOnlyClient());
         rootView = new FrameLayout(this);
         rootView.setBackgroundColor(backgroundColor);
@@ -285,6 +287,7 @@ public final class WebUiActivity extends Activity {
         if (webView != null) {
             webView.stopLoading();
             webView.removeJavascriptInterface("ksu");
+            webView.removeJavascriptInterface("a2hNative");
             if (webView.getParent() instanceof ViewGroup) {
                 ((ViewGroup) webView.getParent()).removeView(webView);
             }

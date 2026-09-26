@@ -2,14 +2,29 @@
 
 COMPANION_PACKAGE=io.github.bbbomb0.a2hhook
 COMPANION_CLEANUP=/data/adb/service.d/a2h_hook_companion_cleanup.sh
+COMPANION_UNINSTALL_LOG=/data/adb/a2h_hook_uninstall.log
+
+uninstall_log() {
+  printf '[%s] %s\n' "$(date '+%F %T' 2>/dev/null)" "$*" >> "$COMPANION_UNINSTALL_LOG" 2>/dev/null || true
+}
 
 uninstall_companion_now() {
-  command -v pm >/dev/null 2>&1 || return 1
-  pm uninstall "$COMPANION_PACKAGE" >/dev/null 2>&1 || true
+  command -v pm >/dev/null 2>&1 || {
+    uninstall_log "companion uninstall deferred reason=pm-missing"
+    return 1
+  }
+  uninstall_output=$(pm uninstall "$COMPANION_PACKAGE" 2>&1)
+  uninstall_log "companion uninstall all-users output=$uninstall_output"
   if pm path "$COMPANION_PACKAGE" >/dev/null 2>&1; then
-    pm uninstall --user 0 "$COMPANION_PACKAGE" >/dev/null 2>&1 || true
+    uninstall_output=$(pm uninstall --user 0 "$COMPANION_PACKAGE" 2>&1)
+    uninstall_log "companion uninstall user0 output=$uninstall_output"
   fi
-  ! pm path "$COMPANION_PACKAGE" >/dev/null 2>&1
+  if pm path "$COMPANION_PACKAGE" >/dev/null 2>&1; then
+    uninstall_log "companion uninstall failed package=$COMPANION_PACKAGE"
+    return 1
+  fi
+  uninstall_log "companion uninstall complete package=$COMPANION_PACKAGE"
+  return 0
 }
 
 schedule_companion_cleanup() {
@@ -21,6 +36,11 @@ schedule_companion_cleanup() {
 
 PACKAGE=io.github.bbbomb0.a2hhook
 SELF=/data/adb/service.d/a2h_hook_companion_cleanup.sh
+LOG=/data/adb/a2h_hook_uninstall.log
+
+cleanup_log() {
+  printf '[%s] %s\n' "$(date '+%F %T' 2>/dev/null)" "$*" >> "$LOG" 2>/dev/null || true
+}
 
 # A reinstall supersedes this one-shot task. Both locations are checked because
 # KernelSU can stage a replacement module before the next reboot.
@@ -34,11 +54,14 @@ attempt=0
 while [ "$attempt" -lt 90 ]; do
   if [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ] &&
      command -v pm >/dev/null 2>&1; then
-    pm uninstall "$PACKAGE" >/dev/null 2>&1 || true
+    output=$(pm uninstall "$PACKAGE" 2>&1)
+    cleanup_log "deferred uninstall all-users output=$output"
     if pm path "$PACKAGE" >/dev/null 2>&1; then
-      pm uninstall --user 0 "$PACKAGE" >/dev/null 2>&1 || true
+      output=$(pm uninstall --user 0 "$PACKAGE" 2>&1)
+      cleanup_log "deferred uninstall user0 output=$output"
     fi
     if ! pm path "$PACKAGE" >/dev/null 2>&1; then
+      cleanup_log "deferred uninstall complete package=$PACKAGE"
       rm -f "$SELF" 2>/dev/null
       exit 0
     fi
@@ -48,6 +71,7 @@ while [ "$attempt" -lt 90 ]; do
 done
 
 # Keep the task for one more boot if the package service stayed unavailable.
+cleanup_log "deferred uninstall exhausted package=$PACKAGE"
 exit 0
 EOF
   chmod 0700 "$cleanup_tmp" 2>/dev/null || {
@@ -58,6 +82,7 @@ EOF
     rm -f "$cleanup_tmp" 2>/dev/null
     return 1
   }
+  uninstall_log "scheduled deferred companion cleanup path=$COMPANION_CLEANUP"
 }
 
 if [ "$(getprop sys.boot_completed 2>/dev/null)" = "1" ] &&

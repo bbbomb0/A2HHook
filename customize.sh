@@ -284,22 +284,54 @@ chmod 600 "$MODDIR/config/.package_baseline" 2>/dev/null
 
 companion_apk="$MODDIR/companion/a2h_companion.apk"
 if [ -f "$companion_apk" ] && command -v pm >/dev/null 2>&1; then
-  # A module upgrade must not retain an old companion APK or its package data.
-  # Remove the exact package first; the user-0 fallback covers Android builds
-  # that reject an all-user uninstall while still leaving no upgrade path.
-  companion_uninstall_result=$(pm uninstall io.github.bbbomb0.a2hhook 2>&1)
-  if pm path io.github.bbbomb0.a2hhook >/dev/null 2>&1; then
-    companion_uninstall_result=$(pm uninstall --user 0 io.github.bbbomb0.a2hhook 2>&1)
+  companion_package=io.github.bbbomb0.a2hhook
+  companion_expected_code=1595
+  companion_expected_hash=
+  companion_installed_hash=
+  companion_installed_code=$(dumpsys package "$companion_package" 2>/dev/null |
+    sed -n 's/^[[:space:]]*versionCode=\([0-9][0-9]*\).*/\1/p' | head -n 1)
+  companion_installed_apk=$(pm path "$companion_package" 2>/dev/null |
+    sed -n 's/^package://p' | head -n 1)
+  if command -v sha256sum >/dev/null 2>&1; then
+    companion_expected_hash=$(sha256sum "$companion_apk" 2>/dev/null | awk '{print $1}')
+    [ -z "$companion_installed_apk" ] ||
+      companion_installed_hash=$(sha256sum "$companion_installed_apk" 2>/dev/null | awk '{print $1}')
   fi
-  if pm path io.github.bbbomb0.a2hhook >/dev/null 2>&1; then
-    ui_print "! 旧磁贴组件卸载失败，已停止安装新组件"
-    ui_print "! $companion_uninstall_result"
+  if [ -n "$companion_installed_apk" ]; then
+    case "$companion_installed_code" in
+      ''|*[!0-9]*) companion_action=replace ;;
+      *)
+        if [ "$companion_installed_code" -gt "$companion_expected_code" ]; then
+          companion_action=keep
+        elif [ "$companion_installed_code" -eq "$companion_expected_code" ] &&
+             [ -n "$companion_expected_hash" ] &&
+             [ "$companion_installed_hash" = "$companion_expected_hash" ]; then
+          companion_action=keep
+        else
+          companion_action=replace
+        fi
+        ;;
+    esac
   else
-    companion_result=$(pm install --user 0 "$companion_apk" 2>&1)
+    companion_action=install
+  fi
+  if [ "$companion_action" = keep ]; then
+    ui_print "- 控制中心组件已是相同内容或更新版本，保留现有数据与 Root 授权"
+  else
+    if [ "$companion_action" = replace ]; then
+      companion_result=$(pm install --user 0 -r "$companion_apk" 2>&1)
+    else
+      companion_result=$(pm install --user 0 "$companion_apk" 2>&1)
+    fi
     if [ "$?" -eq 0 ]; then
-      ui_print "- 控制中心磁贴组件已干净安装"
+      if [ "$companion_action" = replace ]; then
+        ui_print "- 控制中心组件已保留数据覆盖升级"
+      else
+        ui_print "- 控制中心组件已首次安装"
+      fi
     else
       ui_print "! 磁贴组件安装失败，核心音乐触感模块不受影响"
+      ui_print "! 已安全保留原 APK；若签名不一致，请安装同签名版本"
       ui_print "! $companion_result"
     fi
   fi

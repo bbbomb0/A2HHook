@@ -1,13 +1,17 @@
 // a2h_trigger - Synchronized silent AAudio registration stream.
+#ifndef A2H_TRIGGER_LEASE_WATCH_TEST
 #include <aaudio/AAudio.h>
+#endif
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <stdint.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/inotify.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -19,6 +23,48 @@ enum {
     FALLBACK_LEASE_MS = 70000,
 };
 
+static int write_session_contents(const char *path, int session, int ready) {
+    if (path == NULL || session <= 0) return -1;
+
+    size_t path_length = strlen(path);
+    if (path_length > SIZE_MAX - sizeof(".tmp")) return -1;
+    char *temporary_path = malloc(path_length + sizeof(".tmp"));
+    if (temporary_path == NULL) return -1;
+    memcpy(temporary_path, path, path_length);
+    memcpy(temporary_path + path_length, ".tmp", sizeof(".tmp"));
+
+    int descriptor = open(temporary_path,
+                          O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (descriptor < 0) {
+        free(temporary_path);
+        return -1;
+    }
+    char contents[32];
+    int content_length = snprintf(contents, sizeof(contents),
+                                  ready ? "%d ready\n" : "%d\n", session);
+    int ok = content_length > 0 && (size_t)content_length < sizeof(contents);
+    size_t written = 0;
+    while (ok && written < (size_t)content_length) {
+        ssize_t count = write(descriptor, contents + written,
+                              (size_t)content_length - written);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) {
+            ok = 0;
+            break;
+        }
+        written += (size_t)count;
+    }
+    if (close(descriptor) != 0) ok = 0;
+    if (ok && rename(temporary_path, path) == 0) {
+        free(temporary_path);
+        return 0;
+    }
+    (void)unlink(temporary_path);
+    free(temporary_path);
+    return -1;
+}
+
+#ifndef A2H_TRIGGER_LEASE_WATCH_TEST
 typedef struct {
     atomic_int callback_count;
     atomic_int error_code;
@@ -91,78 +137,210 @@ static int wait_for_first_callback(AAudioStream *stream,
 static int write_session_file(const char *path, AAudioStream *stream,
                               int ready) {
     if (path == NULL) return 0;
-    FILE *file = fopen(path, "w");
-    if (file == NULL) return -1;
-    int session = AAudioStream_getSessionId(stream);
-    int ok = session > 0 &&
-             fprintf(file, ready ? "%d ready\n" : "%d\n", session) > 0 &&
-             fflush(file) == 0;
-    if (fclose(file) != 0) ok = 0;
-    return ok ? 0 : -1;
+    return write_session_contents(path, AAudioStream_getSessionId(stream), ready);
 }
+#endif
 
-static int fallback_timeout_ms(const char *path) {
-    char value[32] = {0};
-    FILE *file = fopen(path, "r");
-    if (file == NULL) return -1;
-    size_t length = fread(value, 1, sizeof(value) - 1, file);
-    fclose(file);
-    value[length] = '\0';
+typedef struct {
+    struct stat metadata;
+    int present;
+    int timeout_ms;
+} lease_snapshot_t;
+
+#ifdef A2H_TRIGGER_LEASE_WATCH_TEST
+static int lease_test_force_poll;
+static const char *lease_test_ready_path;
+#endif
+
+static int fallback_timeout_ms(const char *value) {
     if (strncmp(value, "fallback:", 9) != 0) return -1;
     char *end = NULL;
     long seconds = strtol(value + 9, &end, 10);
     if (end == value + 9 || (*end != '\0' && *end != '\n') ||
-        seconds < 5 || seconds > 300) {
+        seconds < 1 || seconds > 300) {
         seconds = FALLBACK_LEASE_MS / 1000;
     }
     return (int)(seconds * 1000);
 }
 
-static int wait_for_lease_fallback(const char *token) {
-    int timeout_ms = fallback_timeout_ms(token);
-    int remaining = timeout_ms < 0 ? -1 : (timeout_ms + 999) / 1000;
-    while (access(token, F_OK) == 0) {
-        if (remaining == 0) return 0;
-        struct timespec pause = {.tv_sec = 1, .tv_nsec = 0};
-        while (nanosleep(&pause, &pause) != 0 && errno == EINTR) {}
-        if (remaining > 0) --remaining;
-        timeout_ms = fallback_timeout_ms(token);
-        if (timeout_ms < 0) remaining = -1;
+static int read_lease_snapshot(const char *path, lease_snapshot_t *snapshot) {
+    memset(snapshot, 0, sizeof(*snapshot));
+    int fd;
+    do {
+        fd = open(path, O_RDONLY | O_CLOEXEC);
+    } while (fd < 0 && errno == EINTR);
+    if (fd < 0) {
+        if (errno == ENOENT) return 0;
+        if (access(path, F_OK) == 0) {
+            snapshot->present = 1;
+            snapshot->timeout_ms = -1;
+        }
+        return 0;
     }
+    if (fstat(fd, &snapshot->metadata) != 0) {
+        close(fd);
+        snapshot->present = 1;
+        snapshot->timeout_ms = -1;
+        return 0;
+    }
+
+    char value[32] = {0};
+    ssize_t length;
+    do {
+        length = read(fd, value, sizeof(value) - 1);
+    } while (length < 0 && errno == EINTR);
+    int close_result = close(fd);
+    if (length < 0 || close_result != 0) {
+        snapshot->present = 1;
+        snapshot->timeout_ms = -1;
+        return 0;
+    }
+    value[(size_t)length] = '\0';
+    snapshot->present = 1;
+    snapshot->timeout_ms = fallback_timeout_ms(value);
     return 0;
 }
 
-static int wait_for_lease(const char *token) {
-    int notify = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
-    if (notify < 0) return wait_for_lease_fallback(token);
-    int watch = inotify_add_watch(notify, token,
-        IN_ATTRIB | IN_CLOSE_WRITE | IN_DELETE_SELF | IN_MOVE_SELF);
-    if (watch < 0) {
-        close(notify);
-        return wait_for_lease_fallback(token);
+static int same_lease_snapshot(const lease_snapshot_t *left,
+                               const lease_snapshot_t *right) {
+    if (left->present != right->present) return 0;
+    if (!left->present) return 1;
+    return left->metadata.st_dev == right->metadata.st_dev &&
+           left->metadata.st_ino == right->metadata.st_ino &&
+           left->metadata.st_size == right->metadata.st_size &&
+           left->metadata.st_mtime == right->metadata.st_mtime &&
+           left->metadata.st_ctime == right->metadata.st_ctime;
+}
+
+static int add_lease_directory_watch(int notify, const char *token) {
+    const char *slash = strrchr(token, '/');
+    size_t directory_length = slash == NULL ? 1u :
+        (slash == token ? 1u : (size_t)(slash - token));
+    char *directory = malloc(directory_length + 1u);
+    if (directory == NULL) return -1;
+    if (slash == NULL) {
+        directory[0] = '.';
+    } else if (slash == token) {
+        directory[0] = '/';
+    } else {
+        memcpy(directory, token, directory_length);
     }
+    directory[directory_length] = '\0';
+    int watch = inotify_add_watch(notify, directory,
+        IN_ATTRIB | IN_CLOSE_WRITE | IN_CREATE | IN_DELETE | IN_MOVED_FROM |
+        IN_MOVED_TO | IN_DELETE_SELF | IN_MOVE_SELF);
+    free(directory);
+    return watch;
+}
+
+static int64_t monotonic_time_ms(void) {
+    struct timespec now;
+    if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) return 0;
+    return (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+}
+
+static int lease_remaining_ms(int64_t deadline_ms) {
+    if (deadline_ms < 0) return -1;
+    int64_t remaining = deadline_ms - monotonic_time_ms();
+    if (remaining <= 0) return 0;
+    return remaining > INT32_MAX ? INT32_MAX : (int)remaining;
+}
+
+static int64_t lease_deadline_ms(const lease_snapshot_t *snapshot) {
+    return snapshot->timeout_ms < 0 ? -1 :
+        monotonic_time_ms() + snapshot->timeout_ms;
+}
+
+static void signal_lease_test_ready(char mode) {
+#ifdef A2H_TRIGGER_LEASE_WATCH_TEST
+    if (lease_test_ready_path != NULL) {
+        int fd = open(lease_test_ready_path,
+                      O_WRONLY | O_TRUNC | O_CLOEXEC);
+        if (fd >= 0) {
+            (void)write(fd, &mode, sizeof(mode));
+            close(fd);
+        }
+    }
+#else
+    (void)mode;
+#endif
+}
+
+static int wait_for_lease(const char *token) {
+    lease_snapshot_t current;
+    if (read_lease_snapshot(token, &current) != 0 || !current.present) {
+        signal_lease_test_ready('E');
+        return 0;
+    }
+    int64_t deadline_ms = lease_deadline_ms(&current);
+
+    int notify = -1;
+    int watch = -1;
+#ifdef A2H_TRIGGER_LEASE_WATCH_TEST
+    if (!lease_test_force_poll)
+#endif
+    {
+        notify = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
+        if (notify >= 0) {
+            watch = add_lease_directory_watch(notify, token);
+            if (watch < 0) {
+                close(notify);
+                notify = -1;
+            }
+        }
+    }
+    signal_lease_test_ready(notify >= 0 ? 'I' : 'P');
 
     char events[512];
-    while (access(token, F_OK) == 0) {
-        int timeout_ms = fallback_timeout_ms(token);
+    for (;;) {
+        lease_snapshot_t latest;
+        int snapshot_result = read_lease_snapshot(token, &latest);
+        if (snapshot_result == 0 && !latest.present) break;
+        if (snapshot_result == 0 && !same_lease_snapshot(&current, &latest)) {
+            current = latest;
+            deadline_ms = lease_deadline_ms(&current);
+        }
+
+        int timeout_ms = lease_remaining_ms(deadline_ms);
+        if (timeout_ms == 0) break;
+        if (notify < 0) {
+            int pause_ms = timeout_ms < 0 || timeout_ms > 1000 ? 1000 : timeout_ms;
+            struct timespec pause = {
+                .tv_sec = pause_ms / 1000,
+                .tv_nsec = (long)(pause_ms % 1000) * 1000000L,
+            };
+            while (nanosleep(&pause, &pause) != 0 && errno == EINTR) {}
+            continue;
+        }
+
         struct pollfd descriptor = {.fd = notify, .events = POLLIN};
         int result;
         do {
             result = poll(&descriptor, 1, timeout_ms);
         } while (result < 0 && errno == EINTR);
-        if (result == 0) break;
+        if (result == 0) continue;
         if (result < 0) {
             inotify_rm_watch(notify, watch);
             close(notify);
-            return wait_for_lease_fallback(token);
+            notify = -1;
+            watch = -1;
+            continue;
+        }
+        if ((descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+            inotify_rm_watch(notify, watch);
+            close(notify);
+            notify = -1;
+            watch = -1;
+            continue;
         }
         while (read(notify, events, sizeof(events)) > 0) {}
     }
-    inotify_rm_watch(notify, watch);
-    close(notify);
+    if (watch >= 0) inotify_rm_watch(notify, watch);
+    if (notify >= 0) close(notify);
     return 0;
 }
 
+#ifndef A2H_TRIGGER_LEASE_WATCH_TEST
 static void abort_stream(AAudioStream *stream) {
     if (stream == NULL) return;
     (void)AAudioStream_close(stream);
@@ -295,3 +473,4 @@ int main(int argc, char **argv) {
     fprintf(stderr, "TRIGGER: OK\n");
     return 0;
 }
+#endif

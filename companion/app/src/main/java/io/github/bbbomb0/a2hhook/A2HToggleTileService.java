@@ -1,6 +1,7 @@
 package io.github.bbbomb0.a2hhook;
 
 import android.graphics.drawable.Icon;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.service.quicksettings.Tile;
@@ -87,7 +88,7 @@ abstract class A2HToggleTileService extends TileService {
                     updateTile(applied, null);
                 } else {
                     knownState = previous;
-                    updateTile(previous, "应用失败");
+                    updateTile(previous, failureSubtitle(result, "应用失败"));
                 }
             });
         });
@@ -112,7 +113,7 @@ abstract class A2HToggleTileService extends TileService {
                     knownState = state;
                     updateTile(state, null);
                 } else {
-                    updateTile(knownState, "未读取");
+                    updateTile(knownState, failureSubtitle(result, "未读取"));
                 }
             });
         });
@@ -122,8 +123,13 @@ abstract class A2HToggleTileService extends TileService {
         Tile tile = getQsTile();
         if (tile == null) return;
         boolean enabled = isActiveState(state);
+        String subtitle = error != null ? error : (enabled ? activeSubtitle() : inactiveSubtitle());
         tile.setLabel(tileLabel());
-        tile.setSubtitle(error != null ? error : (enabled ? activeSubtitle() : inactiveSubtitle()));
+        tile.setSubtitle(subtitle);
+        tile.setContentDescription(tileLabel() + "，" + subtitle);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            tile.setStateDescription(subtitle);
+        }
         tile.setState(enabled ? Tile.STATE_ACTIVE : Tile.STATE_INACTIVE);
         tile.setIcon(Icon.createWithResource(this, enabled ? activeIcon() : inactiveIcon()));
         tile.updateTile();
@@ -146,5 +152,21 @@ abstract class A2HToggleTileService extends TileService {
         if (value == null) return "";
         String singleLine = value.replace('\r', ' ').replace('\n', ' ').trim();
         return singleLine.length() <= 160 ? singleLine : singleLine.substring(0, 160);
+    }
+
+    private static String failureSubtitle(RootShell.Result result, String fallback) {
+        if (result == null) return fallback;
+        switch (result.status) {
+            case NOT_AUTHORIZED:
+                return "等待 Root 授权";
+            case DENIED:
+                return "Root 已拒绝";
+            case UNAVAILABLE:
+                return "Root 不可用";
+            case TIMEOUT:
+                return "Root 超时";
+            default:
+                return fallback;
+        }
     }
 }

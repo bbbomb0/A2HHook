@@ -1,5 +1,22 @@
 # 更新日志
 
+## v1.5.9.5
+
+- 修复游戏/媒体 UID 无法原子发布 AAudio session：每个包的 session 目录使用 `root:<实际 UID>` 和 sticky `1730` 权限，允许所属 UID 创建同目录临时文件并原子 rename，同时阻止其他 UID 写入。保留 v1.5.9 的官方 appname/APM/vendor 音频事件链路，不引入额外的 UID 仲裁流。
+- 模块 ZIP 增加 Magisk 官方 v20.4+ recovery 安装入口（`META-INF/com/google/android/update-binary` 与 `#MAGISK` updater 标记）；KernelSU / ReSukiSU 管理器仍走根目录模块脚本，安装流程不变。
+- 将“游戏时启动后台音乐触感”统一为“后台音乐触感”。现有 relaxed native 判定本就不依赖前台游戏包名：开启后遍历完整活动应用链，任一全局/已启用白名单命中即可继续 A2H；视频、浏览器、设置、桌面、普通应用和短暂通知/提示音继续由既有 `+0x519` handoff 与 `+0x51a` concurrent latch 承接。为避免回退，native overlay 字节和官方 `manager+0x518` 所有权保持不变。
+- 保留旧持久化键 `config/game_auto_pause` 及其反向映射，v1.5.9 用户升级不会丢失开关状态、10 槽白名单或 `com.kugou.android.lite` 自定义项；新增 `toggle-background-music[-fast]` 与 native `--background-music` 正向别名，旧命令继续兼容。
+- 伴生 APK 新增有界 `id -u` Root 探测、类型化授权状态和显式“重新授权/重新读取”。修复探测回调 `__a2h_root_probe_*` 被旧 Java 正则拒绝而必然超时的问题；Root 命令统一经 quoted nested `sh -c`，兼容 ReSukiSU/KernelSU 的 SELinux 域与 Magisk 标准 `su -c` 请求路径。
+- 模块安装和开机兜底不再卸载伴生 APK：首次缺失时普通安装，已安装版本更高时保留；versionCode 相同且 APK SHA-256 相同才保留；相同 versionCode 但内容不同或版本更低时使用 `pm install --user 0 -r` 覆盖升级。签名不匹配时保留旧 APK 并记录失败；只有真实模块卸载的 `uninstall.sh` 执行带诊断日志的即时/延迟卸载。
+- 修复白名单/官方策略下的暂停后误触感：stock 零 app-map 路径不再把私有 `+0x519` handoff 当成新的锁屏声或无 `appname` 游戏流授权；后台音乐触感 relaxed 路径仍保留已验证的瞬态 handoff/concurrent-latch 恢复。
+- 修复策略拒绝音轨的陈旧 AAudio 租约：停止时先撤销 token 并等待 worker 优雅关闭，reconcile 会回收 token/port 已消失但 PID/session 仍残留的孤儿触发器，避免其 stale app-map 节点压制 `com.kugou.android.lite` 等白名单音乐触感；覆盖无 appname 游戏和重复进出场景。
+- 保留官方 appname、AudioPolicy port/session 和厂商 `audio_track_message` fallback 的生命周期控制；拒绝的音轨只按官方策略停止，不为普通短音轨创建额外 `policy-deny` 身份流，避免快速切换时出现振感交替。
+- 发布包使用确定性构建脚本和 META-INF recovery 安装入口；本版继续保留 C native patcher，Rust 迁移留待后续大版本分阶段进行。
+- “后台音乐触感”QS 磁贴改为 24dp 单色“后台层级 + 音符 + 触感波纹”图标，关闭态叠加斜线；同步更新标签、副标题、TalkBack 与 `stateDescription`，保留旧 TileService 类名维持现有磁贴身份。
+- 全局模式白名单使用 grid row、横向 clip、位移和透明度协调收放；真实配置回读前关闭初始化动画，隐藏态同步 `aria-hidden`、`inert`、pointer-events 与控件禁用。页脚独立于动画容器并由纵向 flex 布局定位。
+- 所有同类底部弹层共用单指下拉关闭：遮罩随位移衰减，支持距离/速度阈值、回弹、滚动顶部门禁、交互控件与选择文本保护、pointer cancel、多指拒绝和 reduced-motion 清理。
+- 版本统一为 `v1.5.9.5 / versionCode=1595`，伴生 APK 继续使用同一签名。最终真机、ZIP、哈希和可复现构建结果在发布前验证完成后补充。
+
 ## v1.5.9
 
 - 修复 HyperOS 4.0.0.7 Beta inline path：stream event/ref 的 ROM-local ADRP/LDR/ADD 地址立即数改为寄存器与指令类别语义校验，保留控制流、关键数据流和 PLT 目标校验，避免全局变量移动导致 `semantic_hits=0`。

@@ -429,9 +429,9 @@ start_lease_owned() {
     rm -f "$stale_session" 2>/dev/null
   done
   if [ "${A2H_SKIP_CHOWN:-0}" != "1" ]; then
-    chown 0:0 "$lease_session_dir" 2>/dev/null || return 1
+    chown 0:"$lease_uid" "$lease_session_dir" 2>/dev/null || return 1
   fi
-  chmod 0711 "$lease_session_dir" 2>/dev/null || return 1
+  chmod 1730 "$lease_session_dir" 2>/dev/null || return 1
   lease_session="$lease_session_dir/$lease_owner"
   : > "$lease_session" 2>/dev/null || return 1
   if [ "${A2H_SKIP_CHOWN:-0}" != "1" ]; then

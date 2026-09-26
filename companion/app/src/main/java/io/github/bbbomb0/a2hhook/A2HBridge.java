@@ -13,12 +13,14 @@ import org.json.JSONObject;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.regex.Pattern;
 
 final class A2HBridge {
     private static final Pattern HAPTIC_KIND = Pattern.compile("toggle|button|tick|confirm|error");
-    private static final Pattern CALLBACK_NAME = Pattern.compile("__a2h_exec_[0-9]+_[0-9]+");
+    private static final Pattern CALLBACK_NAME = Pattern.compile(
+            "__(?:a2h_exec|a2h_root_probe)_[0-9]+_[0-9]+");
 
     private final WebUiActivity activity;
     private final WebView webView;
@@ -39,6 +41,20 @@ final class A2HBridge {
             RootShell.Result result = RootShell.run(command, 15000);
             String script = "window[" + JSONObject.quote(callbackName) + "](" +
                     result.code + "," + JSONObject.quote(result.stdout) + "," +
+                    JSONObject.quote(result.stderr) + ");";
+            webView.post(() -> webView.evaluateJavascript(script, null));
+        });
+    }
+
+    @JavascriptInterface
+    public void probeRoot(String callbackName) {
+        if (callbackName == null || !CALLBACK_NAME.matcher(callbackName).matches()) return;
+        executor.execute(() -> {
+            RootShell.Result result = RootShell.probe(15000);
+            String status = result.status.name().toLowerCase(Locale.ROOT);
+            String script = "window[" + JSONObject.quote(callbackName) + "](" +
+                    JSONObject.quote(status) + "," + result.code + "," +
+                    JSONObject.quote(result.stdout) + "," +
                     JSONObject.quote(result.stderr) + ");";
             webView.post(() -> webView.evaluateJavascript(script, null));
         });

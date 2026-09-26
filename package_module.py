@@ -12,6 +12,8 @@ from pathlib import Path
 
 
 FILES = (
+    "META-INF/com/google/android/update-binary",
+    "META-INF/com/google/android/updater-script",
     "module.prop",
     "LICENSE",
     "customize.sh",
@@ -41,6 +43,7 @@ FILES = (
 )
 
 EXECUTABLE = {
+    "META-INF/com/google/android/update-binary",
     "customize.sh",
     "service.sh",
     "bin/a2h_apply",
@@ -53,6 +56,8 @@ EXECUTABLE = {
 }
 
 TEXT_FILES = {
+    "META-INF/com/google/android/update-binary",
+    "META-INF/com/google/android/updater-script",
     "module.prop",
     "LICENSE",
     "customize.sh",
@@ -125,6 +130,22 @@ def verify_archive(path: Path) -> None:
                 )
             if info.compress_size > info.file_size:
                 raise ValueError(f"Inefficient ZIP compression for {info.filename}")
+
+        updater_script = archive.read("META-INF/com/google/android/updater-script")
+        if updater_script != b"#MAGISK\n":
+            raise ValueError("Magisk recovery updater-script marker is invalid")
+        update_binary = archive.read("META-INF/com/google/android/update-binary").decode("utf-8")
+        required = (
+            "#!/sbin/sh",
+            "OUTFD=$2",
+            "ZIPFILE=$3",
+            "mount /data 2>/dev/null",
+            ". /data/adb/magisk/util_functions.sh",
+            "[ $MAGISK_VER_CODE -lt 20400 ] && require_new_magisk",
+            "install_module",
+        )
+        if any(marker not in update_binary for marker in required):
+            raise ValueError("Magisk recovery update-binary contract is incomplete")
 
 
 def package(root: Path) -> Path:

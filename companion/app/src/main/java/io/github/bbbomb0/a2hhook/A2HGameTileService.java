@@ -10,22 +10,22 @@ public final class A2HGameTileService extends A2HToggleTileService {
 
     @Override
     protected String toggleCommand() {
-        return "/data/adb/modules/a2h_hook/bin/a2h_apply toggle-game-auto-pause-fast";
+        return "/data/adb/modules/a2h_hook/bin/a2h_apply toggle-background-music-fast";
     }
 
     @Override
     protected String tileLabel() {
-        return "游戏时启动后台音乐触感";
+        return "后台音乐触感";
     }
 
     @Override
     protected String activeSubtitle() {
-        return "已开启";
+        return "切换应用时保持";
     }
 
     @Override
     protected String inactiveSubtitle() {
-        return "遵循官方策略";
+        return "按官方策略";
     }
 
     @Override
@@ -45,11 +45,11 @@ public final class A2HGameTileService extends A2HToggleTileService {
 
     @Override
     protected int activeIcon() {
-        return drawableId("ic_a2h_tile_game_off");
+        return drawableId("ic_a2h_tile_background_on");
     }
 
     @Override
     protected int inactiveIcon() {
-        return drawableId("ic_a2h_tile_game_on");
+        return drawableId("ic_a2h_tile_background_off");
     }
 }

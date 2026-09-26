@@ -29,7 +29,7 @@ OFFICIAL = (
     "com.luna.music",
 )
 
-EXPECTED_RELEASE = ("v1.5.9", "1590")
+EXPECTED_RELEASE = ("v1.5.9.5", "1595")
 
 HAL_CASES = {
     "OS2.0.208.0.VONCNXM": {
@@ -155,6 +155,8 @@ STREAM_EVENT_HANDOFF_LEGACY = bytes.fromhex("1901001440070091")
 STREAM_REF_PATCH_OFF = 0x2030
 STREAM_REF_PATCH_BYTES = 148
 STREAM_REF_DELETE_BL_OFF = 0x10
+STREAM_REF_REFRESH_MOV_OFF = 0x68
+STREAM_REF_REFRESH_BL_OFF = 0x6C
 STREAM_UPDATE_CALL_TEMPLATE = bytes.fromhex(
     "600a40f90000000085fdff17"
 )
@@ -720,7 +722,7 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     game_policy = (root / "config/game_auto_pause").read_text(encoding="utf-8")
     report.check(
         game_policy == "enabled\n",
-        "default game auto-pause policy",
+        "default legacy background-music policy",
         "enabled (Xiaomi stock behavior)",
         f"unexpected value: {game_policy!r}",
     )
@@ -809,7 +811,8 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and "navigator.vibrate" in webui
         and "cmd vibrator_manager synced -f" in webui
         and "cmd vibrator vibrate -f" in webui
-        and "游戏时启动后台音乐触感" in webui
+        and "后台音乐触感" in webui
+        and "游戏时启动后台音乐触感" not in webui
         and "data-app-package=\"com.tencent.mobileqq\"" in webui
         and "data-no-browser-fallback" in webui
         and "mqqapi://card/show_pslcard?src_type=internal&amp;version=1&amp;uin=778505328" in webui
@@ -834,7 +837,7 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and "background-clip:padding-box" in webui
         and "box-shadow:none;isolation:isolate" in webui
         and "@media(max-height:900px)" in webui
-        and ".slot{height:44px}" in webui
+        and ".slot{height:auto;min-height:0" in webui
         and webui.count('class="sheet-handle-area"') == 3
         and "window.visualViewport" in webui
         and "--ime-inset" in webui
@@ -890,6 +893,80 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "Miuix WebUI interaction contract",
         "compact grouped layout, animated sheets, outside-tap back, transparent music-haptic marks, solid QQ and optimized payment icons present",
         "Miuix layout, support assets or haptic fallback is incomplete",
+    )
+    whitelist_motion_contract = (
+        ".whitelist-reveal{min-height:0;flex:1 1 0;display:grid;grid-template-rows:minmax(0,1fr)" in webui
+        and ".whitelist-reveal.collapsed{min-height:0;flex-grow:0;grid-template-rows:0fr" in webui
+        and "clip-path:inset(0 0 0 100%" in webui
+        and ".whitelist-reveal.initializing{transition:none!important}" in webui
+        and "requestAnimationFrame(()=>requestAnimationFrame(()=>$('whitelistReveal').classList.remove('initializing')))" in webui
+        and "reveal.setAttribute('aria-hidden',global?'true':'false')" in webui
+        and "if('inert' in reveal) reveal.inert=global" in webui
+        and "input.disabled=!deviceConfigReady||interactionLocked||global" in webui
+        and "body{height:100vh;height:100dvh;min-height:0" in webui
+        and "overflow:hidden;font-size:14px" in webui
+        and ".shell{width:min(100%,640px);height:100%;min-height:0;flex:1;display:flex;flex-direction:column}" in webui
+        and ".main-content{min-height:0;flex:1 1 auto;display:flex;flex-direction:column}" in webui
+        and ".whitelist{min-height:0;flex:1;display:flex;flex-direction:column" in webui
+        and ".slots{min-height:0;flex:1;display:grid;grid-template-rows:repeat(10,minmax(34px,1fr))}" in webui
+        and ".author{height:52px" in webui
+        and '</div>\n  <footer class="author">' in webui
+        and "@media(prefers-reduced-motion:reduce){.sheet-handle,.toast,.whitelist-reveal,.route-page,.route-shell{transition:none!important}}" in webui
+    )
+    report.check(
+        whitelist_motion_contract,
+        "WebUI whitelist motion/footer contract",
+        "horizontal grid/clip reveal initializes without animation, disables hidden controls and keeps an independent flex footer",
+        "whitelist reveal, accessibility lockout, reduced motion, or footer separation is incomplete",
+    )
+    sheet_drag_contract = (
+        "function bindSheetDrag(" in webui
+        and "event.isPrimary===false" in webui
+        and "event.pointerType==='touch'" in webui
+        and "typeof event.target.closest==='function'" in webui
+        and "shell.scrollTop>0" in webui
+        and "selection&&!selection.isCollapsed" in webui
+        and "distance>Math.max(72,shell.clientHeight*.16)" in webui
+        and "distance/elapsed>.65" in webui
+        and "--sheet-scrim-alpha" in webui
+        and ".sheet-chrome{position:sticky" in webui
+        and "touch-action:none" in webui
+        and "shell.addEventListener('touchstart'" in webui
+        and "page.addEventListener('touchmove'" in webui
+        and "},{passive:false});" in webui
+        and "page.addEventListener('touchend'" in webui
+        and "page.addEventListener('touchcancel'" in webui
+        and "page.addEventListener('pointercancel',finishPointer)" in webui
+        and "page.classList.add('settling')" in webui
+        and "reducedMotion()?20:240" in webui
+    )
+    report.check(
+        sheet_drag_contract,
+        "WebUI bottom-sheet drag contract",
+        "all route sheets share guarded single-pointer drag, scroll/selection protection, scrim tracking, threshold close and rebound cleanup",
+        "bottom-sheet drag handling is missing cancellation, conflict protection, or cleanup",
+    )
+    root_ui_contract = (
+        "window.a2hNative&&typeof window.a2hNative.probeRoot==='function'" in webui
+        and "not_authorized:['Root 尚未授权'" in webui
+        and "denied:['Root 授权已拒绝'" in webui
+        and "unavailable:['Root 管理器不可用'" in webui
+        and "timeout:['Root 请求超时'" in webui
+        and "module_missing:['模块未安装'" in webui
+        and "config_missing:['模块配置缺失'" in webui
+        and "command_failed:['Root 命令失败'" in webui
+        and "setTimeout(()=>finish({status:'timeout'" in webui
+        and "forceRootPrompt:true" in webui
+        and "|| exit 23" in webui
+        and "error.code===22||error.code===23" in webui
+        and "const wrapped='sh -c '+shellQuote(payload)" in webui
+        and "row.hidden=rootAccessStatus==='granted'||(!nativeProbe&&rootAccessStatus==='unknown')" in webui
+    )
+    report.check(
+        root_ui_contract,
+        "WebUI typed Root/config status contract",
+        "bounded native probing, explicit retry, nested-shell execution and missing-file classification are present",
+        "Root authorization or module/config error states are still collapsed into a generic failure",
     )
     request_apply = extract_function(
         webui, "function requestApply(reason,writePackages){", "async function drainApply(){"
@@ -1064,7 +1141,8 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and "queue worker preserved newer config" in applier
         and 'renice -n -10 -p "$$"' in applier
         and "toggle-fast)" in applier
-        and "toggle-game-auto-pause-fast|" in applier,
+        and "toggle-game-auto-pause-fast|" in applier
+        and "toggle-background-music-fast|" in applier,
         "quick settings direct worker queue contract",
         "both tiles commit under the config lock, start one worker, and coalesce only signature-proven stale requests",
         "tile commands bypass the production worker or stale-request coalescing can lose newer configuration",
@@ -1098,6 +1176,48 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
 
     audio_watcher = (root / "bin/a2h_audio_watch").read_text(encoding="utf-8")
     trigger_source = (root / "src/trigger.c").read_text(encoding="utf-8")
+    playback_bridge_absent = not (
+        (root / "tools/A2HPlaybackBridge.java").exists()
+        or (root / "tools/build_playback_bridge.ps1").exists()
+        or (root / "bin/a2h_playback_bridge.dex").exists()
+    )
+    report.check(
+        playback_bridge_absent,
+        "official appname lifecycle ownership",
+        "production watcher uses the official appname/APM/vendor event chain without a PlaybackCallback/UID deny arbiter",
+        "PlaybackBridge or its production DEX remains in the release tree",
+    )
+    official_audio_contract = (
+        "policy_start() {" in audio_watcher
+        and 'stop_lease_for_reconcile "$policy_package"' in audio_watcher
+        and 'start_lease "$policy_package" "$policy_uid" policy-deny' not in audio_watcher
+        and "A2H_PLAYBACK" not in audio_watcher
+        and "A2H_IMPORTANCE" not in audio_watcher
+        and "DENY_IDLE_GRACE_SECONDS" not in audio_watcher
+        and "UID_IMPORTANCE_DIR" not in audio_watcher
+        and "UID_PLAYBACK_DIR" not in audio_watcher
+        and "UID_PACKAGE_DIR" not in audio_watcher
+    )
+    report.check(
+        official_audio_contract,
+        "official audio event arbitration",
+        "denied outputs follow the v1.5.9 appname/APM/vendor lifecycle without extra per-UID deny leases",
+        "the removed PlaybackCallback/UID deny arbitration is still active in production",
+    )
+    trigger_lease_contract = (
+        "add_lease_directory_watch(notify, token)" in trigger_source
+        and "IN_MOVED_TO" in trigger_source
+        and "same_lease_snapshot(&current, &latest)" in trigger_source
+        and "lease_deadline_ms(&current)" in trigger_source
+        and "A2H_TRIGGER_LEASE_WATCH_TEST" in trigger_source
+        and (root / "tests/trigger_lease_watch_harness.c").is_file()
+    )
+    report.check(
+        trigger_lease_contract,
+        "trigger lease token replacement contract",
+        "parent-directory inotify and token-identity deadline refresh are covered by a C harness",
+        "trigger still watches a replaceable token inode or has no direct waiter harness",
+    )
     service = (root / "service.sh").read_text(encoding="utf-8")
     uninstall = (root / "uninstall.sh").read_text(encoding="utf-8")
     audio_watcher_contract = (
@@ -1114,12 +1234,18 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and "AAudioStreamBuilder_setDataCallback" in trigger_source
         and "wait_for_first_callback(stream, &trigger_state)" in trigger_source
         and "write_session_file(session_file, stream, 1)" in trigger_source
+        and 'O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC' in trigger_source
+        and 'rename(temporary_path, path)' in trigger_source
+        and "write_session_contents(path, AAudioStream_getSessionId(stream), ready)" in trigger_source
+        and "run_session_file_atomicity(argv[1]) == 0" in (root / "tests/trigger_lease_watch_harness.c").read_text(encoding="utf-8")
         and "AAudioStream_requestStop(stream)" in trigger_source
         and "FALLBACK_LEASE_MS = 70000" in trigger_source
         and 'cooldown_accept "$trigger_package"' in audio_watcher
         and "read -r cooldown_now cooldown_unused < /proc/uptime" in audio_watcher
         and 'printf \'%s\\n\' "$cooldown_now" > "$cooldown_file"' in audio_watcher
         and 'chmod 0711 "$RUNTIME_DIR"' in audio_watcher
+        and 'chown 0:"$lease_uid" "$lease_session_dir"' in audio_watcher
+        and 'chmod 1730 "$lease_session_dir"' in audio_watcher
         and 'chmod 0555 "$trigger_tmp"' in audio_watcher
         and 'CORE_UID_DIR="$RUNTIME_DIR/core_uid"' in audio_watcher
         and '[ ! -f "$CORE_UID_DIR/$trigger_package" ] || return 0' in audio_watcher
@@ -1136,12 +1262,16 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         and "*'stopOutput()'*|*'stoptOutput()'*" in audio_watcher
         and 'policy_port_file="$PORT_DIR/$policy_port"' in audio_watcher
         and 'trigger_session_matches "$policy_package" "$policy_session"' in audio_watcher
+        and 'CFG_GAME_POLICY="$CFG_DIR/game_auto_pause"' not in audio_watcher
+        and 'policy-deny' not in audio_watcher
+        and 'A2H_PLAYBACK' not in audio_watcher
+        and 'A2H_IMPORTANCE' not in audio_watcher
+        and 'a2h_playback_bridge.dex' not in audio_watcher
+        and 'UID_IMPORTANCE_DIR' not in audio_watcher
+        and 'UID_PLAYBACK_DIR' not in audio_watcher
+        and 'UID_PACKAGE_DIR' not in audio_watcher
+        and 'getActivePlaybackConfigurations' not in audio_watcher
         and 'lease_worker_start=$(process_starttime "$lease_worker")' in audio_watcher
-        and 'RECONCILE_MARKER="$RUNTIME_DIR/reconcile"' in audio_watcher
-        and 'reconcile_active_leases()' in audio_watcher
-        and 'stop_lease_for_reconcile()' in audio_watcher
-        and '"__A2H_RECONCILE__"' in audio_watcher
-        and '"$RECONCILE_LOG_TAG:I"' in audio_watcher
         and 'SERVICE_LOCK_DIR=/data/local/tmp/a2h_hook_service.lock' in service
         and "acquire_service_lock" in service
         and "service_lock_root_owned" in service
@@ -1179,6 +1309,20 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "arbitrary audio UID watcher contract",
         "vendor playback and AudioPolicy ports use exact global/slot policy, real UID/session, singleton ownership, atomic per-package claims and PID/starttime cleanup",
         "audio watcher metadata, UID, lifecycle, or no-hardcoded-package contract is incomplete",
+    )
+    session_directory_contract = (
+        'lease_session_dir="$SESSION_DIR/$lease_package"' in audio_watcher
+        and 'chown 0:"$lease_uid" "$lease_session_dir"' in audio_watcher
+        and 'chmod 1730 "$lease_session_dir"' in audio_watcher
+        and 'O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC' in trigger_source
+        and 'rename(temporary_path, path)' in trigger_source
+        and "trigger-session-dir-mode" in (root / "tests/audio_policy_lease_harness.sh").read_text(encoding="utf-8")
+    )
+    report.check(
+        session_directory_contract,
+        "trigger session UID directory permissions",
+        "session temp-file atomic rename is enabled only for the owning app UID group via sticky root-owned mode 1730; Android lease harness checks the mode",
+        "session directory ownership/mode no longer supports atomic trigger publication safely",
     )
 
     applier_reconcile_contract = (
@@ -1225,6 +1369,37 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
     manifest_area = extract_function(packager, "FILES = (", "EXECUTABLE =")
     leaked = [item for item in forbidden if item in manifest_area]
     report.check(not leaked, "release manifest isolation", "tests and legacy injection excluded", f"forbidden manifest entries: {leaked}")
+    recovery_update_binary = root / "META-INF/com/google/android/update-binary"
+    recovery_updater_script = root / "META-INF/com/google/android/updater-script"
+    try:
+        recovery_binary_text = recovery_update_binary.read_text(encoding="utf-8")
+        recovery_script_bytes = recovery_updater_script.read_bytes()
+    except OSError as exc:
+        recovery_binary_text = ""
+        recovery_script_bytes = b""
+        recovery_read_error = str(exc)
+    else:
+        recovery_read_error = ""
+    recovery_markers = (
+        "#!/sbin/sh", "OUTFD=$2", "ZIPFILE=$3", "mount /data 2>/dev/null",
+        ". /data/adb/magisk/util_functions.sh",
+        "[ $MAGISK_VER_CODE -lt 20400 ] && require_new_magisk", "install_module",
+    )
+    recovery_entry_contract = (
+        not recovery_read_error
+        and all(marker in recovery_binary_text for marker in recovery_markers)
+        and recovery_script_bytes == b"#MAGISK\n"
+        and '"META-INF/com/google/android/update-binary"' in manifest_area
+        and '"META-INF/com/google/android/updater-script"' in manifest_area
+        and '"META-INF/com/google/android/update-binary"' in extract_function(packager, "EXECUTABLE = {", "TEXT_FILES =")
+        and '"META-INF/com/google/android/updater-script"' in extract_function(packager, "TEXT_FILES = {", "ZIP_TIMESTAMP")
+    )
+    report.check(
+        recovery_entry_contract,
+        "Magisk recovery install compatibility",
+        "official v20.4+ recovery helper and marker are in the deterministic ZIP manifest while manager installs remain root-script based",
+        recovery_read_error or "META-INF recovery entries or manifest permissions/text classification are incomplete",
+    )
     report.check(
         "ZIP_TIMESTAMP = (1980, 1, 1, 0, 0, 0)" in packager
         and "ZipInfo(filename=relative, date_time=ZIP_TIMESTAMP)" in packager
@@ -1266,10 +1441,11 @@ def check_release_tree(root: Path, report: Report, use_adb: bool) -> None:
         "for name in state game_auto_pause log_enabled packages.txt package_states config_generation .package_baseline" in installer
         and re.search(r'repair_backslash_entry\s+"\$MODDIR/config\\\\game_auto_pause"', installer) is not None
         and 'pm install --user 0 "$companion_apk"' in installer
-        and 'pm uninstall io.github.bbbomb0.a2hhook' in installer,
+        and 'pm install --user 0 -r "$companion_apk"' in installer
+        and 'pm uninstall io.github.bbbomb0.a2hhook' not in installer,
         "installer policy/companion migration",
-        "game policy survives upgrades; installer clean-installs and service has a boot-time fallback",
-        "installer does not preserve game policy or companion install command drifted",
+        "legacy policy survives upgrades and the companion uses data-preserving replace semantics",
+        "installer does not preserve the compatibility policy or companion replace semantics drifted",
     )
 
     scripts = [
@@ -1354,13 +1530,13 @@ def check_companion(root: Path, report: Report) -> None:
 
     build_script = (root / "companion/build.ps1").read_text(encoding="utf-8")
     report.check(
-        "$VersionName = '1.5.9'" in build_script
-        and "$VersionCode = '1590'" in build_script
+        "$VersionName = '1.5.9.5'" in build_script
+        and "$VersionCode = '1595'" in build_script
         and "--min-sdk-version', '29'" in build_script
         and "--target-sdk-version', '35'" in build_script
         and "signing.properties" in build_script,
         "companion build metadata",
-        "version 1.5.9/1590, API 29-35, external stable signing config",
+        "version 1.5.9.5/1595, API 29-35, external stable signing config",
         "companion build version/API/signing metadata mismatch",
     )
 
@@ -1414,7 +1590,14 @@ def check_companion(root: Path, report: Report) -> None:
         and "finishAfterTransition()" in web_activity
         and "window.A2HWebUIBack" in web_activity
         and "evaluateJavascript" in web_activity
+        and 'addJavascriptInterface(bridge, "ksu")' in web_activity
+        and 'addJavascriptInterface(bridge, "a2hNative")' in web_activity
+        and 'removeJavascriptInterface("ksu")' in web_activity
+        and 'removeJavascriptInterface("a2hNative")' in web_activity
         and "CALLBACK_NAME.matcher(callbackName).matches()" in bridge
+        and "a2h_root_probe" in bridge
+        and "public void probeRoot(String callbackName)" in bridge
+        and "RootShell.probe(15000)" in bridge
         and "HAPTIC_KIND" in bridge
         and "public void setSystemBarsDark(boolean dark)" in bridge
         and "miui.util.HapticFeedbackUtil" in bridge
@@ -1422,18 +1605,30 @@ def check_companion(root: Path, report: Report) -> None:
         and "VibrationEffect.createPredefined" in bridge
         and "process.getOutputStream().close()" in root_shell
         and root_shell.count("setDaemon(true)") == 2
+        and "enum AccessStatus" in root_shell
+        and all(status in root_shell for status in (
+            "GRANTED", "NOT_AUTHORIZED", "DENIED", "UNAVAILABLE", "TIMEOUT", "COMMAND_FAILED"
+        ))
+        and 'new ProcessBuilder("su", "-c"' in root_shell
+        and '"sh -c " + shellQuote(command)' in root_shell
+        and 'run("id -u", timeoutMs)' in root_shell
         and "a2h_apply toggle" in tile
         and "A2H 全局音乐触感" in tile
         and "ic_a2h_tile_off" in tile
         and "onStartListening" in tile_base
-        and "toggle-game-auto-pause" in game_tile
-        and "游戏时启动后台音乐触感" in game_tile
+        and "toggle-background-music-fast" in game_tile
+        and "toggle-game-auto-pause" not in game_tile
+        and 'return "后台音乐触感";' in game_tile
+        and 'return "切换应用时保持";' in game_tile
+        and 'return "按官方策略";' in game_tile
         and 'return "disabled".equals(state);' in game_tile
-        and 'return drawableId("ic_a2h_tile_game_off");' in game_tile
-        and 'return drawableId("ic_a2h_tile_game_on");' in game_tile
+        and 'return drawableId("ic_a2h_tile_background_off");' in game_tile
+        and 'return drawableId("ic_a2h_tile_background_on");' in game_tile
         and "isActiveState(state)" in tile_base
         and "setIcon(Icon.createWithResource" in tile_base
         and 'RootShell.run("sh " + toggleCommand(), 10000)' in tile_base
+        and "tile.setContentDescription(tileLabel() + \"，\" + subtitle)" in tile_base
+        and "tile.setStateDescription(subtitle)" in tile_base
         and "STATE_MARKER" not in tile_base
     )
     report.check(
@@ -1443,36 +1638,32 @@ def check_companion(root: Path, report: Report) -> None:
         "companion WebView or tile bridge security contract is incomplete",
     )
 
-    android_attr = "{http://schemas.android.com/apk/res/android}pathData"
-    game_icon_paths = {}
+    android_ns = "{http://schemas.android.com/apk/res/android}"
+    android_attr = android_ns + "pathData"
+    background_icon_paths = {}
+    background_icon_roots = {}
     for state in ("on", "off"):
         icon_root = ET.parse(
-            root / f"companion/app/src/main/res/drawable/ic_a2h_tile_game_{state}.xml"
+            root / f"companion/app/src/main/res/drawable/ic_a2h_tile_background_{state}.xml"
         ).getroot()
-        game_icon_paths[state] = [
+        background_icon_roots[state] = icon_root
+        background_icon_paths[state] = [
             node.attrib[android_attr]
             for node in icon_root.findall("path")
             if android_attr in node.attrib
         ]
-    vibration_path = next(
-        (path for path in game_icon_paths["on"] if "M0.4,13.7L2,15.3" in path),
-        "",
+    background_layer = "M5.5,4.5h11"
+    music_note = "M11,7.2v7.2"
+    haptic_waves = "M6.2,10.1c-1.15,1"
+    pause_slash = "M3.1,3.1L20.9,20.9"
+    global_pause_slash = "M2.6,5.8L21.4,21.2"
+    background_viewport_ok = all(
+        icon.attrib.get(android_ns + "width") == "24dp"
+        and icon.attrib.get(android_ns + "height") == "24dp"
+        and icon.attrib.get(android_ns + "viewportWidth") == "24"
+        and icon.attrib.get(android_ns + "viewportHeight") == "24"
+        for icon in background_icon_roots.values()
     )
-    vibration_segments = [
-        tuple(float(value) for value in values)
-        for values in re.findall(
-            r"M([0-9.]+),([0-9.]+)L([0-9.]+),([0-9.]+)", vibration_path
-        )
-    ]
-    vibration_geometry_ok = (
-        len(vibration_segments) == 4
-        and all(abs((x2 - x1) - (y2 - y1)) < 1e-6 for x1, y1, x2, y2 in vibration_segments)
-        and sum((x1 + x2) / 2 < 4 for x1, _, x2, _ in vibration_segments) == 2
-        and sum((x1 + x2) / 2 > 20 for x1, _, x2, _ in vibration_segments) == 2
-    )
-    controller_body = "M4,10C4.5,7.6 6.2,6.5 8,7"
-    note = "M14.1,0.8v3"
-    pause_slash = "M2.6,5.8L21.4,21.2"
     global_icon_paths = {}
     for state, resource in (("on", "ic_a2h_tile.xml"), ("off", "ic_a2h_tile_off.xml")):
         icon_root = ET.parse(
@@ -1484,18 +1675,20 @@ def check_companion(root: Path, report: Report) -> None:
             if android_attr in node.attrib
         ]
     report.check(
-        vibration_geometry_ok
-        and any(controller_body in path for path in game_icon_paths["on"])
-        and any(note in path for path in game_icon_paths["on"])
-        and any(pause_slash in path for path in game_icon_paths["on"])
-        and not any(pause_slash in path for path in game_icon_paths["off"]),
-        "game tile reference icon geometry",
-        "simple dual-grip controller, disjoint note/buttons/haptics, stock-policy slash and background-haptic no-slash state",
-        f"on={game_icon_paths['on']!r} off={game_icon_paths['off']!r}",
+        background_viewport_ok
+        and all(len(paths) == 3 for paths in background_icon_paths.values())
+        and all(any(background_layer in path for path in paths) for paths in background_icon_paths.values())
+        and all(any(music_note in path for path in paths) for paths in background_icon_paths.values())
+        and all(any(haptic_waves in path for path in paths) for paths in background_icon_paths.values())
+        and not any(pause_slash in path for path in background_icon_paths["on"])
+        and any(pause_slash in path for path in background_icon_paths["off"]),
+        "background-music tile reference icon geometry",
+        "24dp monochrome layered background, music note and haptic waves use a disabled-only slash without game imagery",
+        f"on={background_icon_paths['on']!r} off={background_icon_paths['off']!r}",
     )
     report.check(
-        not any(pause_slash in path for path in global_icon_paths["on"])
-        and any(pause_slash in path for path in global_icon_paths["off"]),
+        not any(global_pause_slash in path for path in global_icon_paths["on"])
+        and any(global_pause_slash in path for path in global_icon_paths["off"]),
         "global tile disabled icon geometry",
         "global mode uses the base icon; custom mode uses the same long pause slash",
         f"on={global_icon_paths['on']!r} off={global_icon_paths['off']!r}",
@@ -1505,14 +1698,21 @@ def check_companion(root: Path, report: Report) -> None:
     uninstall_script = (root / "uninstall.sh").read_text(encoding="utf-8")
     installer_script = (root / "customize.sh").read_text(encoding="utf-8")
     lifecycle_ok = (
-        "COMPANION_VERSION_CODE=1590" in service_script
+        "COMPANION_VERSION_CODE=1595" in service_script
         and "ensure_companion_installed()" in service_script
         and "ensure_companion_installed &" in service_script
         and 'pm install --user 0 "$COMPANION_APK"' in service_script
-        and 'pm uninstall "$COMPANION_PACKAGE"' in service_script
+        and 'pm install --user 0 -r "$COMPANION_APK"' in service_script
+        and 'pm uninstall "$COMPANION_PACKAGE"' not in service_script
         and "companion_expected_hash" in service_script
+        and "companion_keep_reason=version-newer" in service_script
+        and "companion_keep_reason=identical" in service_script
+        and 'companion_installed_code" -gt "$COMPANION_VERSION_CODE"' in service_script
+        and 'companion_installed_code" -eq "$COMPANION_VERSION_CODE"' in service_script
         and "COMPANION_PACKAGE=io.github.bbbomb0.a2hhook" in uninstall_script
         and 'pm uninstall "$COMPANION_PACKAGE"' in uninstall_script
+        and "COMPANION_UNINSTALL_LOG=/data/adb/a2h_hook_uninstall.log" in uninstall_script
+        and "uninstall_log" in uninstall_script
         and "COMPANION_CLEANUP=/data/adb/service.d/a2h_hook_companion_cleanup.sh" in uninstall_script
         and "schedule_companion_cleanup()" in uninstall_script
         and 'getprop sys.boot_completed' in uninstall_script
@@ -1522,14 +1722,156 @@ def check_companion(root: Path, report: Report) -> None:
         and "/data/adb/service.d/a2h_hook_companion_cleanup.sh" in installer_script
         and "a2h_apply.pending" in uninstall_script
         and 'pm install --user 0 "$companion_apk"' in installer_script
-        and 'pm uninstall io.github.bbbomb0.a2hhook' in installer_script
+        and 'pm install --user 0 -r "$companion_apk"' in installer_script
+        and "companion_expected_hash" in installer_script
+        and 'companion_installed_code" -gt "$companion_expected_code"' in installer_script
+        and 'companion_installed_code" -eq "$companion_expected_code"' in installer_script
+        and 'pm uninstall io.github.bbbomb0.a2hhook' not in installer_script
     )
     report.check(
         lifecycle_ok,
         "companion install/uninstall lifecycle",
-        "version-aware boot fallback, early-boot deferred cleanup and complete fixed-package uninstall are present",
-        "companion boot repair, version synchronization, or uninstall cleanup is incomplete",
+        "version-aware data-preserving install/replace paths avoid update-time uninstall; formal removal retains logged immediate/deferred cleanup",
+        "companion replace preservation, version synchronization, or formal uninstall cleanup is incomplete",
     )
+
+    service_script = (root / "service.sh").read_text(encoding="utf-8")
+    service_install_fn = extract_function(
+        service_script, "ensure_companion_installed() {", "\napplier_busy() {"
+    )
+    shell = locate_posix_shell()
+    if not shell:
+        report.gap(
+            "companion same-version hash-aware upgrade regression",
+            "POSIX sh is required for the extracted service install function",
+        )
+    elif not service_install_fn.startswith("ensure_companion_installed() {"):
+        report.check(
+            False,
+            "companion same-version hash-aware upgrade regression",
+            "fake PackageManager scenarios exercise the production decision function",
+            "could not extract ensure_companion_installed() from service.sh",
+        )
+    else:
+        scenarios = (
+            ("same-version-same-hash", "1595", True, False),
+            ("same-version-different-hash", "1595", False, True),
+            ("newer-version", "1596", False, False),
+            ("older-version", "1590", False, True),
+        )
+        scenario_results: list[str] = []
+
+        def harness_shell_path(path: Path) -> str:
+            resolved = path.resolve()
+            if os.name == "nt":
+                value = resolved.as_posix()
+                if re.match(r"^[A-Za-z]:/", value):
+                    return f"/{value[0].lower()}{value[2:]}"
+            return resolved.as_posix()
+
+        with tempfile.TemporaryDirectory(prefix="a2h_companion_decision_") as temp_name:
+            temp = Path(temp_name)
+            fake_bin = temp / "fake-bin"
+            fake_bin.mkdir()
+            (fake_bin / "getprop").write_text(
+                "#!/bin/sh\nprintf '%s\\n' 1\n", encoding="utf-8", newline="\n"
+            )
+            (fake_bin / "dumpsys").write_text(
+                "#!/bin/sh\n"
+                "if [ \"$1\" = package ]; then\n"
+                "  printf '  versionCode=%s minSdk=29\\n' \"$A2H_FAKE_VERSION\"\n"
+                "fi\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            (fake_bin / "pm").write_text(
+                "#!/bin/sh\n"
+                "case \"$1\" in\n"
+                "  path)\n"
+                "    [ -n \"$A2H_FAKE_APK\" ] && printf 'package:%s\\n' \"$A2H_FAKE_APK\"\n"
+                "    ;;\n"
+                "  install)\n"
+                "    printf '%s\\n' \"$*\" >> \"$A2H_ACTION_LOG\"\n"
+                "    exit 0\n"
+                "    ;;\n"
+                "esac\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            (fake_bin / "sha256sum").write_text(
+                "#!/bin/sh\nexec /usr/bin/sha256sum \"$@\"\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            for executable in fake_bin.iterdir():
+                executable.chmod(0o755)
+
+            for name, version, same_hash, expect_replace in scenarios:
+                expected_apk = temp / f"{name}.bundled.apk"
+                installed_apk = temp / f"{name}.installed.apk"
+                action_log = temp / f"{name}.actions.log"
+                expected_apk.write_bytes(b"bundled-companion-1595")
+                installed_apk.write_bytes(
+                    expected_apk.read_bytes() if same_hash else b"different-installed-companion"
+                )
+                action_log.write_text("", encoding="utf-8", newline="\n")
+                expected_posix = harness_shell_path(expected_apk)
+                installed_posix = harness_shell_path(installed_apk)
+                action_posix = harness_shell_path(action_log)
+                bin_posix = harness_shell_path(fake_bin)
+                wrapper = temp / f"{name}.sh"
+                wrapper_contents = "".join((
+                    "#!/bin/sh\n",
+                    "set -u\n",
+                    f"PATH={shlex.quote(bin_posix)}:/usr/bin:/bin:$PATH; export PATH\n",
+                    f"COMPANION_APK={shlex.quote(expected_posix)}\n",
+                    "COMPANION_PACKAGE=io.github.bbbomb0.a2hhook\n",
+                    "COMPANION_VERSION_CODE=1595\n",
+                    f"LOG={shlex.quote(action_posix)}\n",
+                    "A2H_FAKE_VERSION=" + shlex.quote(version) + "\n",
+                    "A2H_FAKE_APK=" + shlex.quote(installed_posix) + "\n",
+                    "A2H_ACTION_LOG=" + shlex.quote(action_posix) + "\n",
+                    "export A2H_FAKE_VERSION A2H_FAKE_APK A2H_ACTION_LOG\n",
+                    "logging_enabled() { return 0; }\n",
+                    "log() { printf '%s\\n' \"$*\" >> \"$LOG\"; }\n",
+                    service_install_fn,
+                    "ensure_companion_installed\n",
+                    "printf 'RESULT=%s\\n' \"$?\"\n",
+                ))
+                wrapper.write_text(
+                    wrapper_contents,
+                    encoding="utf-8",
+                    newline="\n",
+                )
+                wrapper.chmod(0o755)
+                rc, output = run_command(
+                    posix_shell_command(shell, harness_shell_path(wrapper)), root
+                )
+                actions = [
+                    line.strip()
+                    for line in action_log.read_text(encoding="utf-8").splitlines()
+                    if line.strip().startswith("install ")
+                ]
+                expected_ok = (
+                    rc == 0
+                    and "RESULT=0" in output
+                    and ((not expect_replace and not actions) or
+                         (expect_replace and len(actions) == 1 and
+                          actions[0] == "install --user 0 -r " + expected_posix))
+                )
+                scenario_results.append(
+                    f"{name}={'PASS' if expected_ok else 'FAIL'}"
+                )
+                if not expected_ok:
+                    scenario_results.append(
+                        f"{name}: rc={rc} output={output.strip()!r} actions={actions!r}"
+                    )
+        report.check(
+            all(value.endswith("=PASS") for value in scenario_results[::2]),
+            "companion same-version hash-aware upgrade regression",
+            "same-version same-hash/newer version keep; same-version different-hash/older version use pm install --user 0 -r",
+            "; ".join(scenario_results),
+        )
 
     try:
         apk_data = apk_path.read_bytes()
@@ -1992,7 +2334,7 @@ def check_policy_refresh_transaction(root: Path, report: Report, use_adb: bool) 
     atomic_block = extract_function(applier, "commit_tmp() {", "write_default_packages() {")
     refresh_block = extract_function(applier, "refresh_policy_state() {", "mark_pending() {")
     if not logging_block or not atomic_block or not refresh_block:
-        report.add("FAIL", "game policy immediate refresh regression", "production refresh functions not found")
+        report.add("FAIL", "background-music policy refresh regression", "production refresh functions not found")
         return
 
     harness = logging_block + atomic_block + refresh_block + r'''
@@ -2012,6 +2354,7 @@ TRIGGER_COUNT="$base/trigger.count"
 TRIGGER_FAIL="$base/trigger.fail"
 CURRENT_MODE=disabled
 CURRENT_GAME_AUTO_PAUSE=enabled
+CURRENT_BACKGROUND_MUSIC=disabled
 CURRENT_SNAPSHOT=snapshot-1
 CURRENT_RAW_SIGNATURE=raw-1
 CURRENT_REVISION=1
@@ -2058,6 +2401,7 @@ apply_stable same-policy >/dev/null || fail same-policy-apply
 
 # Both policy directions trigger exactly once after a successful apply.
 CURRENT_GAME_AUTO_PAUSE=disabled
+CURRENT_BACKGROUND_MUSIC=enabled
 CURRENT_SNAPSHOT=snapshot-3
 CURRENT_REVISION=3
 apply_stable disable-policy >/dev/null || fail disable-policy-apply
@@ -2065,6 +2409,7 @@ apply_stable disable-policy >/dev/null || fail disable-policy-apply
 [ "$(cat "$APPLIED_GAME_POLICY")" = disabled ] || fail disable-policy-marker
 
 CURRENT_GAME_AUTO_PAUSE=enabled
+CURRENT_BACKGROUND_MUSIC=disabled
 CURRENT_SNAPSHOT=snapshot-4
 CURRENT_REVISION=4
 apply_stable enable-policy >/dev/null || fail enable-policy-apply
@@ -2074,6 +2419,7 @@ apply_stable enable-policy >/dev/null || fail enable-policy-apply
 # A failed trigger retries but cannot commit applied metadata.
 : > "$TRIGGER_FAIL"
 CURRENT_GAME_AUTO_PAUSE=disabled
+CURRENT_BACKGROUND_MUSIC=enabled
 CURRENT_SNAPSHOT=snapshot-5
 CURRENT_REVISION=5
 if apply_stable failing-trigger >/dev/null; then fail failing-trigger-accepted; fi
@@ -2089,20 +2435,20 @@ apply_stable recovered-trigger >/dev/null || fail recovered-trigger-apply
 [ "$(cat "$APPLIED_REVISION")" = 5 ] || fail recovered-revision
 [ "$(cat "$APPLIED_SNAPSHOT")" = snapshot-5 ] || fail recovered-snapshot
 [ "$release_calls" = 6 ] || fail apply-lock-release-count-$release_calls
-printf 'PASS game policy immediate refresh regression\n'
+printf 'PASS background-music policy refresh regression\n'
 '''
 
     if use_adb:
         adb = shutil.which("adb")
         if not adb:
-            report.add("FAIL", "game policy immediate refresh regression", "adb requested but not found")
+            report.add("FAIL", "background-music policy refresh regression", "adb requested but not found")
             return
         command = [adb, "shell", "sh", "-s"]
         test_base = "/data/local/tmp"
     else:
         shell = locate_posix_shell()
         if not shell:
-            report.gap("game policy immediate refresh regression", "POSIX sh is required")
+            report.gap("background-music policy refresh regression", "POSIX sh is required")
             return
         command = [shell, "-s"]
         test_base = "${TMPDIR:-/tmp}"
@@ -2110,8 +2456,8 @@ printf 'PASS game policy immediate refresh regression\n'
     payload = harness.replace("__POLICY_REFRESH_TEST_BASE__", test_base).encode("utf-8")
     rc, output = run_command(command, root, payload)
     report.check(
-        rc == 0 and "PASS game policy immediate refresh regression" in output,
-        "game policy immediate refresh regression",
+        rc == 0 and "PASS background-music policy refresh regression" in output,
+        "background-music policy refresh regression",
         "initial/same-policy skip, bidirectional one-shot refresh, failure retry, and metadata commit ordering passed",
         output.strip() or f"harness exited {rc}",
     )
@@ -2137,6 +2483,7 @@ CURRENT_REVISION=0
 ACTIVE_COUNT=6
 CURRENT_MODE=disabled
 CURRENT_GAME_AUTO_PAUSE=enabled
+CURRENT_BACKGROUND_MUSIC=disabled
 metadata_mv_calls=0
 metadata_fail_snapshot=0
 METADATA_MV_LOG="$base/mv.log"
@@ -2299,6 +2646,7 @@ APPLIED_SNAPSHOT="$CFG_DIR/applied_snapshot"
 CURRENT_RAW_SIGNATURE=raw-1
 CURRENT_MODE=enabled
 CURRENT_GAME_AUTO_PAUSE=enabled
+CURRENT_BACKGROUND_MUSIC=disabled
 CURRENT_REVISION=17
 CURRENT_SNAPSHOT=271828:18
 ACTIVE_COUNT=10
@@ -2890,7 +3238,9 @@ def check_audio_uid_watcher(root: Path, report: Report, use_adb: bool) -> None:
         report.add("FAIL", "audio UID watcher semantics", str(exc))
 
 
-def check_audio_policy_lease(root: Path, report: Report, use_adb: bool) -> None:
+def check_audio_policy_lease(
+    root: Path, report: Report, use_adb: bool, ndk: Path | None
+) -> None:
     watcher_source = (root / "bin/a2h_audio_watch").read_text(encoding="utf-8")
     cleanup_block = extract_function(watcher_source, "cleanup() {", "watch_events() {")
     cleanup_contract = (
@@ -2955,6 +3305,81 @@ def check_audio_policy_lease(root: Path, report: Report, use_adb: bool) -> None:
         "audio policy lease lifecycle",
         "duplicate watcher rejection, same-package event storm coalescing, fallback promotion, self-session suppression, multi-port release and cleanup passed",
         output.strip() or f"harness exited {rc}",
+    )
+
+    resolved_ndk = locate_ndk(ndk)
+    if not resolved_ndk:
+        report.gap("trigger lease waiter runtime", "Android NDK not found; pass --ndk")
+        return
+    suffix = ".cmd" if os.name == "nt" else ""
+    host = "windows-x86_64" if os.name == "nt" else "linux-x86_64"
+    clang = resolved_ndk / f"toolchains/llvm/prebuilt/{host}/bin/aarch64-linux-android31-clang{suffix}"
+    if not clang.is_file():
+        report.add("FAIL", "trigger lease waiter runtime", f"compiler missing: {clang}")
+        return
+
+    remote_test = "/data/local/tmp/a2h_stage25_trigger_lease_test"
+    compile_output = ""
+    compile_rc = 1
+    runtime_output = ""
+    runtime_rc = 1
+    app_uid = None
+    uid_probe = subprocess.run(
+        [adb, "shell", "pm", "list", "packages", "-U"], cwd=root,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+    )
+    uid_text = uid_probe.stdout.decode("utf-8", errors="replace")
+    for uid_match in re.finditer(r"\buid:(\d+)\b", uid_text):
+        candidate_uid = int(uid_match.group(1))
+        if candidate_uid >= 10000:
+            app_uid = candidate_uid
+            break
+    if app_uid is None:
+        runtime_output = f"could not resolve installed app UID through PackageManager: {uid_text.strip()}"
+    try:
+        with tempfile.TemporaryDirectory(prefix="a2h-trigger-watch-") as temporary:
+            test_binary = Path(temporary) / "trigger_lease_watch_test"
+            compile_rc, compile_output = run_command(
+                [
+                    str(clang), "-std=c11", "-O2", "-Wall", "-Wextra", "-Werror",
+                    str(root / "tests/trigger_lease_watch_harness.c"), "-o", str(test_binary),
+                ],
+                root,
+            )
+            if compile_rc == 0 and app_uid is not None:
+                pushed = subprocess.run(
+                    [adb, "push", str(test_binary), remote_test], cwd=root,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+                )
+                runtime_output += pushed.stdout.decode("utf-8", errors="replace")
+                if pushed.returncode == 0:
+                    command = f"chmod 0755 {remote_test} && {remote_test} {remote_base} {app_uid}"
+                    completed = subprocess.run(
+                        [adb, "shell", "su", "-c", command], cwd=root,
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=False,
+                    )
+                    runtime_rc = completed.returncode
+                    runtime_output += completed.stdout.decode("utf-8", errors="replace")
+    except OSError as exc:
+        runtime_output += str(exc)
+    finally:
+        subprocess.run(
+            [adb, "shell", "su", "-c", f"rm -f {remote_test}"], cwd=root,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
+
+    report.check(
+        compile_rc == 0,
+        "trigger lease waiter test compile",
+        f"Android NDK {resolved_ndk.name} compiled the production waiter harness with -Werror",
+        compile_output.strip(),
+    )
+    report.check(
+        compile_rc == 0 and runtime_rc == 0 and
+        "PASS trigger lease atomic replacement and polling renewal" in runtime_output,
+        "trigger lease waiter runtime",
+        "app-UID inotify survives atomic token replacement; polling fallback renews and handles policy transitions",
+        runtime_output.strip() or f"compile={compile_rc} runtime={runtime_rc}",
     )
 
 
@@ -3259,6 +3684,7 @@ MAIN_LOG="$base/main.log"
 HAL_PID=123
 HAL_BASE=
 CURRENT_GAME_AUTO_PAUSE=enabled
+CURRENT_BACKGROUND_MUSIC=disabled
 CURRENT_REVISION=7
 CURRENT_SNAPSHOT=fixture
 ACTIVE_COUNT=6
@@ -4016,6 +4442,8 @@ def check_hal_fixtures(root: Path, report: Report, archive: Path) -> None:
         and "exact_aarch64_plt_entry" in source
         and "g_auxiliary.app_policy_stock" in source
         and "g_auxiliary.app_policy_relaxed" in source
+        and "Zero app-map entries are not a proof" in source
+        and "0x37,0x00,0x80,0x52,0x1F,0x20,0x03,0xD5" in source
         and "#define STREAM_REF_PATCH_BYTES 148u" in source
         and "build_stream_ref_overlay" in source
         and "g_auxiliary.stream_ref_patched" in source
@@ -4079,12 +4507,16 @@ def check_hal_fixtures(root: Path, report: Report, archive: Path) -> None:
         and "g_auxiliary.idle_clear_branch" in source
         and "STREAM_REF_FLAGS_LOAD_OFF 0x44u" in source
         and "STREAM_REF_STORE_OFF 0x90u" in source
+        and "STREAM_REF_REFRESH_MOV_OFF 0x68u" in source
+        and "STREAM_REF_REFRESH_BL_OFF 0x6Cu" in source
+        and "store_u32le(patched + STREAM_REF_REFRESH_MOV_OFF, 0xAA1603E0u)" in source
+        and "encode_aarch64_bl(refresh_site, update_target" in source
         and "output_pool_tail_persistent_legacy" in source
         and "#define ELF_SYMBOL_MAX_BYTES 16384u" in source
     )
     report.check(
         lifecycle_contracts,
-        "cross-ROM game lifecycle ownership",
+        "cross-ROM background-music lifecycle ownership",
         "72-byte app policy, guarded idle clear, unique runtime semantic layouts, dynamic RX-tail 208-byte open-plus-pending/committed real-stream helper with exact previous-176/160 and 64/56-byte migration, full 40-byte policy, two 28-byte app events, one recompute event and open post-commit event present",
         "required lifecycle ownership markers are missing",
     )
@@ -4126,7 +4558,7 @@ def main() -> int:
     check_config_wake_fifo(root, report, args.adb)
     check_postfs_runtime_cleanup(root, report, args.adb)
     check_audio_uid_watcher(root, report, args.adb)
-    check_audio_policy_lease(root, report, args.adb)
+    check_audio_policy_lease(root, report, args.adb, args.ndk)
     check_webui_device_config_parser(root, report)
     check_webui_writer_transaction(root, report, args.adb)
     check_apply_capability_runtime(root, report, args.adb)

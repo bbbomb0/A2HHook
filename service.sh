@@ -42,7 +42,7 @@ TMP_PKGS=/data/local/tmp/a2h_packages.txt
 LOG="$MODDIR/a2h_patch.log"
 COMPANION_APK="$MODDIR/companion/a2h_companion.apk"
 COMPANION_PACKAGE=io.github.bbbomb0.a2hhook
-COMPANION_VERSION_CODE=1590
+COMPANION_VERSION_CODE=1595
 SERVICE_LOCK_DIR=/data/local/tmp/a2h_hook_service.lock
 SERVICE_LOCK_RECORD="$SERVICE_LOCK_DIR/owner"
 service_lock_owner=
@@ -381,27 +381,42 @@ ensure_companion_installed() {
     [ -z "$companion_installed_apk" ] ||
       companion_installed_hash=$(sha256sum "$companion_installed_apk" 2>/dev/null | awk '{print $1}')
   fi
-  if [ "$companion_installed_code" = "$COMPANION_VERSION_CODE" ] &&
-     [ -n "$companion_expected_hash" ] &&
-     [ "$companion_installed_hash" = "$companion_expected_hash" ]; then
-    log "companion ready package=$COMPANION_PACKAGE versionCode=$COMPANION_VERSION_CODE sha256=$companion_expected_hash"
+  companion_present=0
+  [ -n "$companion_installed_apk" ] && companion_present=1
+  companion_keep=0
+  case "$companion_installed_code" in
+    ''|*[!0-9]*) ;;
+    *)
+      if [ "$companion_installed_code" -gt "$COMPANION_VERSION_CODE" ]; then
+        companion_keep=1
+        companion_keep_reason=version-newer
+      elif [ "$companion_installed_code" -eq "$COMPANION_VERSION_CODE" ] &&
+           [ -n "$companion_expected_hash" ] &&
+           [ "$companion_installed_hash" = "$companion_expected_hash" ]; then
+        companion_keep=1
+        companion_keep_reason=identical
+      else
+        companion_keep_reason=equal-code-different-hash
+      fi
+      ;;
+  esac
+  if [ "$companion_present" = 1 ] && [ "$companion_keep" = 1 ]; then
+    log "companion ready package=$COMPANION_PACKAGE versionCode=$companion_installed_code sha256=${companion_installed_hash:-unknown} reason=${companion_keep_reason:-version-newer}"
     return 0
   fi
-  companion_uninstall_result=$(pm uninstall "$COMPANION_PACKAGE" 2>&1)
-  if pm path "$COMPANION_PACKAGE" >/dev/null 2>&1; then
-    companion_uninstall_result=$(pm uninstall --user 0 "$COMPANION_PACKAGE" 2>&1)
+  if [ "$companion_present" = 1 ]; then
+    companion_result=$(pm install --user 0 -r "$COMPANION_APK" 2>&1)
+    companion_action=replaced
+  else
+    companion_result=$(pm install --user 0 "$COMPANION_APK" 2>&1)
+    companion_action=installed
   fi
-  if pm path "$COMPANION_PACKAGE" >/dev/null 2>&1; then
-    log "companion uninstall FAIL previous=${companion_installed_code:-none} output=$companion_uninstall_result"
-    return 1
-  fi
-  companion_result=$(pm install --user 0 "$COMPANION_APK" 2>&1)
   companion_rc=$?
   if [ "$companion_rc" -eq 0 ]; then
-    log "companion clean-installed package=$COMPANION_PACKAGE versionCode=$COMPANION_VERSION_CODE previous=${companion_installed_code:-none}"
+    log "companion $companion_action package=$COMPANION_PACKAGE versionCode=$COMPANION_VERSION_CODE previous=${companion_installed_code:-none} data=preserved"
     return 0
   fi
-  log "companion install FAIL rc=$companion_rc previous=${companion_installed_code:-none} output=$companion_result"
+  log "companion install FAIL rc=$companion_rc previous=${companion_installed_code:-none} action=$companion_action original=preserved output=$companion_result"
   return "$companion_rc"
 }
 

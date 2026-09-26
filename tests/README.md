@@ -41,13 +41,31 @@ whitespace-formatted events, long valid
 harness executes the production FIFO functions (under root on Android) and verifies
 immediate config wakeup, 30-second-equivalent health timeout bookkeeping, FIFO type
 and cleanup. Companion checks cover both protected
-`TileService` declarations, the positive game-background-haptic toggle, immediate
-visual feedback contract, and clean APK install/uninstall lifecycle. The native
+`TileService` declarations, the positive background-music-haptic toggle, immediate
+visual feedback contract, data-preserving APK upgrade and formal-uninstall lifecycle. The native
 harness also covers controlled
 `+0x40` layout drift and duplicate-anchor rejection. With `--adb`, it
 also runs the PID/starttime lock harness against Android `/proc`, including PID
 reuse, legacy PID-only owners, strict release ownership, and an interrupted
 lock-creation state.
+
+## Trigger session UID permissions
+
+The session file is atomically published by the application UID after the
+AAudio stream becomes ready. On an Android device with Root, run the focused
+DAC contract using two installed application UIDs:
+
+```sh
+adb push tests/session_uid_permission_harness.sh /data/local/tmp/a2h_session_uid_permission_harness.sh
+adb shell su 0 chmod 0755 /data/local/tmp/a2h_session_uid_permission_harness.sh
+adb shell su 0 /data/local/tmp/a2h_session_uid_permission_harness.sh 10293 10374
+adb shell su 0 rm -f /data/local/tmp/a2h_session_uid_permission_harness.sh
+```
+
+It requires the session directory to be owned by `root:<app UID>` with mode
+`1730`, verifies same-UID temp-file/rename publication, and verifies that a
+different UID cannot create entries. It removes only its unique generated
+`/data/local/tmp/a2h_session_uid_*` directory.
 
 ## Isolated native transaction faults
 
@@ -74,12 +92,12 @@ does not attach to or modify the phone audio process.
 ## ZIP verification
 
 ```powershell
-python tests/verify_module_zip.py .\a2h_hook_v1.5.9.zip `
-  --expected-version v1.5.9 --expected-code 1590
+python tests/verify_module_zip.py .\a2h_hook_v1.5.9.5.zip `
+  --expected-version v1.5.9.5 --expected-code 1595
 ```
 
-This independently checks the exact member list, duplicates, path portability,
-fixed reproducible member timestamps,
+This independently checks the exact member list including the Magisk recovery
+entry, its v20.4+ helper/marker contract, duplicates, path portability, fixed reproducible member timestamps,
 Unix file modes, CRC, BOM/CRLF, configuration shape, module metadata, AArch64
 ELF identity, static patcher linkage, and embedded patcher version.
 
@@ -89,7 +107,7 @@ Preflight only:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.9
+  -ExpectedVersion v1.5.9.5
 ```
 
 Full two-round test after the candidate module is installed and the phone has
@@ -97,7 +115,7 @@ rebooted:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests/os302_device_regression.ps1 `
-  -ExpectedVersion v1.5.9 -Execute -AllowAudioRestart
+  -ExpectedVersion v1.5.9.5 -Execute -AllowAudioRestart
 ```
 
 The device case waits for the apply queue to become idle, backs up persistent

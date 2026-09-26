@@ -1636,7 +1636,8 @@ static int test_app_policy_overlay_generation(void) {
                 load_u32le(stock + UPDATE_APP_POLICY_STOCK_BL_OFF),
                 &stock_target) || stock_target != targets[i] ||
             load_u32le(stock + 0x0Cu) != 0xB50001A8u ||
-            load_u32le(stock + 0x10u) != 0x39546668u ||
+            load_u32le(stock + 0x10u) != 0x52800037u ||
+            load_u32le(stock + 0x14u) != 0xD503201Fu ||
             load_u32le(relaxed) != 0xF9429A77u ||
             load_u32le(relaxed + 0x08u) != 0x39546668u ||
             load_u32le(relaxed + 0x30u) != 0xF94002F7u ||
@@ -1730,6 +1731,8 @@ static int test_stream_ref_overlay_generation(void) {
         uint32_t expected_stack = 0;
         uint32_t expected_legacy_stack = 0;
         uint32_t expected_update = 0;
+        uint32_t expected_refresh = 0;
+        uint32_t expected_helper_resume = 0;
         uint32_t expected_output = 0;
         uint32_t expected_output_persistent = 0;
         if (!encode_aarch64_bl(
@@ -1755,6 +1758,15 @@ static int test_stream_ref_overlay_generation(void) {
                 streams[i] + STREAM_REF_PATCH_OFF +
                 STREAM_REF_UPDATE_B_OFF,
                 update_target, &expected_update) ||
+            !encode_aarch64_bl(
+                streams[i] + STREAM_REF_PATCH_OFF +
+                STREAM_REF_REFRESH_BL_OFF,
+                update_target, &expected_refresh) ||
+            !encode_aarch64_b(
+                streams[i] + STREAM_REF_PATCH_OFF +
+                    STREAM_REF_REFRESH_BL_OFF + sizeof(uint32_t),
+                outputs[i] + OUTPUT_POOL_TAIL_PATCH_OFF + sizeof(uint32_t),
+                &expected_helper_resume) ||
             !encode_aarch64_b(
                 outputs[i] + OUTPUT_POOL_TAIL_PATCH_OFF,
                 streams[i] + STREAM_REF_HELPER_OFF,
@@ -1778,7 +1790,12 @@ static int test_stream_ref_overlay_generation(void) {
             load_u32le(patched + 0x58u) != 0xF9401728u ||
             load_u32le(patched + STREAM_REF_STACK_COND_OFF) !=
                 expected_stack ||
-            load_u32le(patched + 0x68u) != 0xD503201Fu ||
+            load_u32le(patched + STREAM_REF_REFRESH_MOV_OFF) !=
+                0xAA1603E0u ||
+            load_u32le(patched + STREAM_REF_REFRESH_BL_OFF) !=
+                expected_refresh ||
+            load_u32le(patched + STREAM_REF_REFRESH_BL_OFF +
+                       sizeof(uint32_t)) != expected_helper_resume ||
             load_u32le(patched + STREAM_REF_STORE_OFF) !=
                 0x391466C0u ||
             load_u32le(persistent_legacy +
@@ -1903,7 +1920,10 @@ static int model_policy_decision(size_t app_count, int handoff,
         if (relaxed) return any_match;
         return app_count == 1 && any_match;
     }
-    return handoff != 0;
+    /* Stock policy must not let a stale private handoff authorize an
+     * unidentified output (lock sound / low-latency game).  Relaxed policy
+     * retains the transient handoff until a committed app entry arrives. */
+    return relaxed ? (handoff != 0) : 0;
 }
 
 static int model_app_latch_commit(int app_count, int state) {
@@ -1911,14 +1931,14 @@ static int model_app_latch_commit(int app_count, int state) {
 }
 
 static int model_concurrent_policy(size_t active, size_t app_count,
-                                   int *state, int game_auto_pause,
+                                   int *state, int stock_pause_policy,
                                    int speaker) {
     if (!state) return -1;
     if (active == 0) {
         *state = 0;
         return 2;
     }
-    if (!game_auto_pause) {
+    if (!stock_pause_policy) {
         *state = 0;
     } else if (*state != 0) {
         *state = active > 1 ? 2 : (app_count > 1 ? 1 : 0);
@@ -1960,7 +1980,7 @@ static int test_concurrent_latch_semantics(void) {
     state = 2;
     if (model_concurrent_policy(2, 1, &state, 1, 1) != 0 ||
         model_concurrent_policy(1, 1, &state, 1, 1) != 1 || state != 0) {
-        fprintf(stderr, "FAIL game exit resume semantics\n");
+        fprintf(stderr, "FAIL transient foreground-audio resume semantics\n");
         return 0;
     }
     return 1;
@@ -1968,6 +1988,78 @@ static int test_concurrent_latch_semantics(void) {
 
 static int model_idle_clear(size_t active_outputs, int handoff) {
     return active_outputs == 0 ? 0 : handoff;
+}
+
+typedef struct {
+    size_t app_count;
+    int any_match;
+    int handoff;
+    int latch;
+    int published;
+    unsigned int recomputes;
+} model_lifecycle_t;
+
+static void model_recompute(model_lifecycle_t *model, int relaxed) {
+    if (!model) return;
+    model->published = model_policy_decision(
+        model->app_count, model->handoff, relaxed, model->any_match);
+    model->recomputes++;
+}
+
+static void model_app_event(model_lifecycle_t *model, size_t app_count,
+                            int any_match, int relaxed) {
+    if (!model) return;
+    model->app_count = app_count;
+    model->any_match = any_match;
+    model->latch = model_app_latch_commit((int)app_count, model->latch);
+    model_recompute(model, relaxed);
+}
+
+static void model_output_activate(model_lifecycle_t *model, int relaxed) {
+    /* updateOutputPoolActive must refresh policy even when no appname event
+     * was emitted, including reactivation of an already existing node. */
+    model_recompute(model, relaxed);
+}
+
+static int test_lifecycle_recompute_semantics(void) {
+    model_lifecycle_t stock = {0};
+    model_app_event(&stock, 1, 1, 0); /* Kugou is the sole allowed app. */
+    if (stock.published != 1 || stock.recomputes != 1) {
+        fprintf(stderr, "FAIL lifecycle Kugou allow\n");
+        return 0;
+    }
+    model_app_event(&stock, 1, 0, 0); /* 王者首次 appname event. */
+    if (stock.published != 0) {
+        fprintf(stderr, "FAIL lifecycle first game deny\n");
+        return 0;
+    }
+    model_app_event(&stock, 0, 0, 0); /* leave the game. */
+    unsigned int before_reactivate = stock.recomputes;
+    model_output_activate(&stock, 0); /* same node is activated again. */
+    if (stock.published != 0 || stock.recomputes != before_reactivate + 1u) {
+        fprintf(stderr, "FAIL lifecycle same-node reactivation refresh\n");
+        return 0;
+    }
+
+    model_lifecycle_t dead_cells = {0};
+    model_output_activate(&dead_cells, 0); /* no appname event at all. */
+    if (dead_cells.published != 0 || dead_cells.recomputes != 1u) {
+        fprintf(stderr, "FAIL lifecycle no-appname output refresh\n");
+        return 0;
+    }
+
+    model_lifecycle_t relaxed = {0, 0, 1, 0, 0, 0};
+    model_output_activate(&relaxed, 1);
+    if (relaxed.published != 1 || relaxed.recomputes != 1u) {
+        fprintf(stderr, "FAIL lifecycle relaxed transient handoff\n");
+        return 0;
+    }
+    model_app_event(&relaxed, 1, 0, 1);
+    if (relaxed.published != 0 || relaxed.handoff != 1) {
+        fprintf(stderr, "FAIL lifecycle relaxed app supersession\n");
+        return 0;
+    }
+    return 1;
 }
 
 static int test_stream_ref_handoff_semantics(void) {
@@ -2004,7 +2096,7 @@ static int test_stream_ref_handoff_semantics(void) {
             return 0;
         }
     }
-    if (!model_policy_decision(0, 1, 0, 0) ||
+    if (model_policy_decision(0, 1, 0, 0) ||
         model_policy_decision(1, 1, 0, 0) ||
         model_policy_decision(2, 1, 0, 1) ||
         !model_policy_decision(2, 0, 1, 1) ||
@@ -2013,9 +2105,13 @@ static int test_stream_ref_handoff_semantics(void) {
         return 0;
     }
     int handoff = model_idle_clear(1, 1);
-    /* Output activation precedes +appname on observed game transitions. */
-    if (!model_policy_decision(0, handoff, 0, 0)) {
-        fprintf(stderr, "FAIL active output cleared handoff before app commit\n");
+    /* Output activation can precede +appname during any foreground handoff. */
+    if (model_policy_decision(0, handoff, 0, 0)) {
+        fprintf(stderr, "FAIL stock zero-app path trusted stale handoff\n");
+        return 0;
+    }
+    if (!model_policy_decision(0, handoff, 1, 0)) {
+        fprintf(stderr, "FAIL relaxed zero-app path lost transient handoff\n");
         return 0;
     }
     /* The committed +appname map supersedes and clears the transient flag. */
@@ -2337,6 +2433,7 @@ int main(void) {
              test_stream_ref_overlay_generation() &&
              test_hyperos4_inline_layout_shape() &&
              test_concurrent_latch_semantics() &&
+             test_lifecycle_recompute_semantics() &&
               test_stream_ref_handoff_semantics() &&
              test_auxiliary_transactions() &&
              test_coordinated_whitelist_rollback() &&

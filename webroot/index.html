@@ -67,26 +67,28 @@
 </style>
 <style>
 /* Native Web mapping of the Miuix 0.9.3 settings primitives. */
-:root{--primary:#3482ff;--on-primary:#fff;--bg:#f7f7f7;--surface:#fff;--surface-2:#f0f0f0;--surface-3:#e8e8e8;--text:#000;--text-2:rgba(0,0,0,.6);--text-3:rgba(0,0,0,.4);--line:#e0e0e0;--inverse:#303030;--on-inverse:#f7f7f7;--danger:#e94634;--warn:#a05a00;--scrim:rgba(0,0,0,.3);--focus:rgba(52,130,255,.28);--shadow:0 10px 28px rgba(0,0,0,.1);--viewport-height:100vh;--viewport-offset:0px;--ime-inset:0px;--a2h-safe-top:var(--a2h-native-safe-top,var(--safe-area-inset-top,env(safe-area-inset-top,0px)));--a2h-safe-right:var(--a2h-native-safe-right,var(--safe-area-inset-right,env(safe-area-inset-right,0px)));--a2h-safe-bottom:var(--a2h-native-safe-bottom,var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px)));--a2h-safe-left:var(--a2h-native-safe-left,var(--safe-area-inset-left,env(safe-area-inset-left,0px)));--ease:cubic-bezier(.2,1,.2,1)}
-[data-theme=dark]{--primary:#277af7;--on-primary:#fff;--bg:#000;--surface:#242424;--surface-2:#434343;--surface-3:#2d2d2d;--text:rgba(255,255,255,.9);--text-2:rgba(255,255,255,.5);--text-3:rgba(255,255,255,.4);--line:#393939;--inverse:#d9d9d9;--on-inverse:#242424;--danger:#f12522;--warn:#f0b35a;--scrim:rgba(0,0,0,.6);--focus:rgba(39,122,247,.34);--shadow:0 12px 34px rgba(0,0,0,.34)}
-html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:none}body{min-height:100vh;min-height:100dvh;padding:max(10px,var(--a2h-safe-top)) max(12px,var(--a2h-safe-right)) max(14px,var(--a2h-safe-bottom)) max(12px,var(--a2h-safe-left));font-size:14px;line-height:1.35;letter-spacing:0}body.overlay-open{overflow:hidden}.shell{width:min(100%,640px)}
+:root{--primary:#3482ff;--on-primary:#fff;--bg:#f7f7f7;--surface:#fff;--surface-2:#f0f0f0;--surface-3:#e8e8e8;--text:#000;--text-2:rgba(0,0,0,.6);--text-3:rgba(0,0,0,.4);--line:#e0e0e0;--inverse:#303030;--on-inverse:#f7f7f7;--danger:#e94634;--warn:#a05a00;--scrim:rgba(0,0,0,.3);--scrim-alpha:.3;--focus:rgba(52,130,255,.28);--shadow:0 10px 28px rgba(0,0,0,.1);--viewport-height:100vh;--viewport-offset:0px;--ime-inset:0px;--a2h-safe-top:var(--a2h-native-safe-top,var(--safe-area-inset-top,env(safe-area-inset-top,0px)));--a2h-safe-right:var(--a2h-native-safe-right,var(--safe-area-inset-right,env(safe-area-inset-right,0px)));--a2h-safe-bottom:var(--a2h-native-safe-bottom,var(--safe-area-inset-bottom,env(safe-area-inset-bottom,0px)));--a2h-safe-left:var(--a2h-native-safe-left,var(--safe-area-inset-left,env(safe-area-inset-left,0px)));--ease:cubic-bezier(.2,1,.2,1)}
+[data-theme=dark]{--primary:#277af7;--on-primary:#fff;--bg:#000;--surface:#242424;--surface-2:#434343;--surface-3:#2d2d2d;--text:rgba(255,255,255,.9);--text-2:rgba(255,255,255,.5);--text-3:rgba(255,255,255,.4);--line:#393939;--inverse:#d9d9d9;--on-inverse:#242424;--danger:#f12522;--warn:#f0b35a;--scrim:rgba(0,0,0,.6);--scrim-alpha:.6;--focus:rgba(39,122,247,.34);--shadow:0 12px 34px rgba(0,0,0,.34)}
+html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:none}body{height:100vh;height:100dvh;min-height:0;padding:max(10px,var(--a2h-safe-top)) max(12px,var(--a2h-safe-right)) max(14px,var(--a2h-safe-bottom)) max(12px,var(--a2h-safe-left));overflow:hidden;font-size:14px;line-height:1.35;letter-spacing:0;display:flex;flex-direction:column}body.overlay-open{overflow:hidden}.shell{width:min(100%,640px);height:100%;min-height:0;flex:1;display:flex;flex-direction:column}.main-content{min-height:0;flex:1 1 auto;display:flex;flex-direction:column}.top,.section-label,.main-content>.group,.author{flex:none}
 .top{height:auto;min-height:72px;gap:12px;padding:0 6px 2px}.brand{gap:12px}.mark{width:48px;height:48px}.mark-logo{width:48px;height:48px}.title{font-size:20px;font-weight:600;line-height:1.15}.title-part{white-space:nowrap}.sub{margin-top:4px;font-size:11px;line-height:1.2}.top-actions{gap:2px}.version{font-size:11px;margin-right:4px}.icon-btn{width:44px;height:44px}.icon-btn:hover{background:var(--surface-2)}.icon-btn:active{transform:scale(.92)}.icon-btn:focus-visible{outline:3px solid var(--focus);outline-offset:1px}.icon-btn svg{width:22px;height:22px;stroke-width:1.9}
 .section-label{height:30px;padding:0 16px 7px;font-size:13px;font-weight:700}.group{border-radius:18px;background:var(--surface);box-shadow:none}.preference{min-height:64px;gap:16px;padding:8px 16px}.preference+.preference:before{left:16px;right:16px}.preference:hover{background:var(--surface-2)}.pref-title{font-size:17px;font-weight:500;line-height:1.2}.pref-summary{margin-top:3px;font-size:13px;line-height:1.25}
 .switch{width:49px;height:44px}.switch input{position:absolute;inset:0;width:100%;height:100%;margin:0;opacity:0;cursor:pointer}.track{width:49px;height:28px;border-radius:14px;background:var(--surface-3);transition:background .22s var(--ease),opacity .2s ease}.track:after{left:4px;top:4px;width:20px;height:20px;box-shadow:0 1px 4px rgba(0,0,0,.22);transform:translateX(0) scale(1);transition:transform .24s var(--ease)}.switch:active .track:after{width:20px;transform:scale(1.127)}.switch input:checked+.track{background:var(--primary)}.switch input:checked+.track:after{transform:translateX(21px) scale(1)}.switch input:checked:active+.track:after{transform:translateX(21px) scale(1.127)}.switch input:focus-visible+.track{outline:3px solid var(--focus);outline-offset:2px}.switch input:disabled{cursor:not-allowed}.switch input:disabled+.track{opacity:.38}
-.whitelist{margin-top:12px}.toolbar{height:56px;padding:0 8px 0 16px}.list-title{font-size:17px;font-weight:500}.count{font-size:13px}.toolbar-actions{gap:0}.slots{display:grid}.slot{height:52px;grid-template-columns:30px minmax(0,1fr) 49px;gap:8px;padding:0 12px}.slot+.slot:before{left:50px;right:16px}.slot-num{font-size:11px}.slot-input{height:40px;padding:0 8px;border-radius:12px;font-size:12.5px;line-height:1.2}.slot-input.official{padding-right:42px}.slot-input:focus{background:var(--surface-2);box-shadow:inset 0 0 0 1.5px var(--primary)}.slot-input.invalid{box-shadow:inset 0 0 0 1.5px var(--danger)}.slot-input.dup{box-shadow:inset 0 0 0 1.5px var(--warn)}.slot-input:focus-visible{outline:0}.slot-tag{right:8px;padding:2px 6px;border-radius:7px;background:#eaf2ff;color:#3482ff;font-size:10px;font-weight:700}.slot-switch{width:49px;height:44px}.slot-switch .track{width:49px;height:28px}.slot-switch .track:after{left:4px;top:4px;width:20px;height:20px}.slot-switch:active .track:after{width:20px;transform:scale(1.127)}.slot-switch input:checked+.track:after{transform:translateX(21px) scale(1)}.slot-switch input:checked:active+.track:after{transform:translateX(21px) scale(1.127)}
+.root-status{min-height:54px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 16px;border-top:1px solid var(--line)}.root-status-copy{min-width:0}.root-status-title{font-size:15px;font-weight:500}.root-status-detail{margin-top:2px;color:var(--text-2);font-size:12px}.root-retry{min-height:36px;padding:0 14px;border-radius:18px;background:var(--surface-2);color:var(--primary);font-weight:600;cursor:pointer}.root-retry:focus-visible{outline:3px solid var(--focus);outline-offset:1px}.root-retry:disabled{opacity:.45;cursor:not-allowed}
+.whitelist-reveal{min-height:0;flex:1 1 0;display:grid;grid-template-rows:minmax(0,1fr);opacity:1;clip-path:inset(0 0 0 0 round 18px);transform:translateX(0);transition:flex-grow .34s var(--ease),grid-template-rows .34s var(--ease),opacity .2s ease,clip-path .34s var(--ease),transform .34s var(--ease),visibility 0s linear 0s;will-change:flex-grow,grid-template-rows,clip-path,transform}.whitelist-reveal-inner{min-height:0;overflow:hidden;display:flex}.whitelist-reveal.collapsed{min-height:0;flex-grow:0;grid-template-rows:0fr;opacity:0;clip-path:inset(0 0 0 100% round 18px);transform:translateX(12px);pointer-events:none;visibility:hidden;transition:flex-grow .34s var(--ease),grid-template-rows .34s var(--ease),opacity .2s ease,clip-path .34s var(--ease),transform .34s var(--ease),visibility 0s linear .34s}.whitelist-reveal.initializing{transition:none!important}.whitelist{min-height:0;flex:1;display:flex;flex-direction:column;margin-top:12px}.toolbar{height:56px;flex:none;padding:0 8px 0 16px}.list-title{font-size:17px;font-weight:500}.count{font-size:13px}.toolbar-actions{gap:0}.slots{min-height:0;flex:1;display:grid;grid-template-rows:repeat(10,minmax(34px,1fr))}.slot{height:auto;min-height:0;grid-template-columns:30px minmax(0,1fr) 49px;gap:8px;padding:0 12px}.slot+.slot:before{left:50px;right:16px}.slot-num{font-size:11px}.slot-input{height:min(40px,calc(100% - 4px));min-height:28px;padding:0 8px;border-radius:12px;font-size:12.5px;line-height:1.2}.slot-input.official{padding-right:42px}.slot-input:focus{background:var(--surface-2);box-shadow:inset 0 0 0 1.5px var(--primary)}.slot-input.invalid{box-shadow:inset 0 0 0 1.5px var(--danger)}.slot-input.dup{box-shadow:inset 0 0 0 1.5px var(--warn)}.slot-input:focus-visible{outline:0}.slot-tag{right:8px;padding:2px 6px;border-radius:7px;background:#eaf2ff;color:#3482ff;font-size:10px;font-weight:700}.slot-switch{width:49px;height:100%;min-height:34px}.slot-switch .track{width:49px;height:28px}.slot-switch .track:after{left:4px;top:4px;width:20px;height:20px}.slot-switch:active .track:after{width:20px;transform:scale(1.127)}.slot-switch input:checked+.track:after{transform:translateX(21px) scale(1)}.slot-switch input:checked:active+.track:after{transform:translateX(21px) scale(1.127)}
 .author{height:52px;gap:12px}.author-mark{font-size:12px}.socials{gap:2px}.social-link,.social-button{width:38px;height:38px}.social-link:hover,.social-button:hover{background:var(--surface-2);color:var(--primary)}.social-link:focus-visible,.social-button:focus-visible{outline:3px solid var(--focus);outline-offset:1px}.social-link svg,.social-button svg{width:19px;height:19px}
 .toast{--snackbar-x:0px;--notice-accent:transparent;z-index:80;bottom:calc(12px + var(--a2h-safe-bottom) + var(--ime-inset));min-height:48px;width:min(calc(100% - 24px),600px);padding:12px;border-radius:16px;background:var(--inverse);box-shadow:inset 3px 0 var(--notice-accent),0 10px 28px rgba(0,0,0,.18);color:var(--on-inverse);font-size:14px;line-height:1.35;text-align:left;transform:translate(calc(-50% + var(--snackbar-x)),18px) scale(.98);touch-action:pan-y}.toast.show{transform:translate(calc(-50% + var(--snackbar-x)),0) scale(1)}.toast.dragging{transition:none}.toast.dismissing{opacity:0;visibility:visible;transform:translate(calc(-50% + var(--snackbar-x)),0) scale(.98)}.toast.ok{--notice-accent:var(--primary);color:var(--on-inverse)}.toast.err{--notice-accent:var(--danger);color:var(--on-inverse)}.toast.warn{--notice-accent:var(--warn);color:var(--on-inverse)}
-.route-page{inset:auto 0 auto 0;top:var(--viewport-offset);bottom:auto;height:var(--viewport-height);padding-top:var(--a2h-safe-top);background:var(--scrim)}.route-shell{width:min(100%,640px);max-height:min(calc(var(--viewport-height) - var(--a2h-safe-top)),760px);min-height:0;overflow:auto;background:var(--surface);background-clip:padding-box;border-radius:28px 28px 0 0;box-shadow:none;isolation:isolate;padding:0 24px max(16px,var(--a2h-safe-bottom));transform:translateY(var(--sheet-drag,0px));overscroll-behavior:contain}.route-page.dragging .route-shell{transition:none}.route-page.settling .route-shell{transition:transform .22s var(--ease)}.sheet-chrome{position:sticky;z-index:4;top:0;margin:0 -24px;background:var(--surface)}.sheet-handle-area{height:24px;display:grid;place-items:center;touch-action:none;cursor:grab}.sheet-handle-area:active{cursor:grabbing}.sheet-handle{width:45px;height:4px;border-radius:2px;background:var(--text-3);transition:width .15s ease,transform .15s ease}.sheet-handle-area:active .sheet-handle{width:55px;transform:scaleY(1.15)}.route-top{position:relative;top:auto;height:48px;grid-template-columns:44px minmax(0,1fr) 44px;padding:0 12px;background:transparent}.route-title{font-size:18px;font-weight:600;line-height:1.2}.route-shell .group,.project-card{background:var(--surface-2)}
+.route-page{--sheet-scrim-alpha:var(--scrim-alpha);inset:auto 0 auto 0;top:var(--viewport-offset);bottom:auto;height:var(--viewport-height);padding-top:var(--a2h-safe-top);background:rgba(0,0,0,var(--sheet-scrim-alpha));transition:background-color .22s ease}.route-shell{width:min(100%,640px);max-height:min(calc(var(--viewport-height) - var(--a2h-safe-top)),760px);min-height:0;overflow:auto;background:var(--surface);background-clip:padding-box;border-radius:28px 28px 0 0;box-shadow:none;isolation:isolate;padding:0 24px max(16px,var(--a2h-safe-bottom));transform:translateY(var(--sheet-drag,0px));overscroll-behavior:contain}.route-page.dragging{transition:none}.route-page.dragging .route-shell{transition:none}.route-page.settling .route-shell{transition:transform .22s var(--ease)}.sheet-chrome{position:sticky;z-index:4;top:0;margin:0 -24px;background:var(--surface);touch-action:none}.sheet-handle-area{height:24px;display:grid;place-items:center;cursor:grab}.sheet-handle-area:active{cursor:grabbing}.sheet-handle{width:45px;height:4px;border-radius:2px;background:var(--text-3);transition:width .15s ease,transform .15s ease}.sheet-handle-area:active .sheet-handle{width:55px;transform:scaleY(1.15)}.route-top{position:relative;top:auto;height:48px;grid-template-columns:44px minmax(0,1fr) 44px;padding:0 12px;background:transparent}.route-title{font-size:18px;font-weight:600;line-height:1.2}.route-shell .group,.project-card{background:var(--surface-2)}
 .project-card{min-height:190px;gap:8px;padding:20px;border-radius:20px}.project-name{font-size:24px;font-weight:600}.project-sub{font-size:13px}.version-chip{height:32px;background:var(--surface-3);font-size:13px}.about-actions{gap:10px;margin-top:12px}.about-action{height:56px;border-radius:16px;background:var(--surface-2);font-size:14px;font-weight:600}.about-action:hover{background:var(--surface-3)}.about-action:focus-visible{outline:3px solid var(--focus);outline-offset:1px}.about-action.support{background:var(--primary);color:var(--on-primary)}.about-info{margin-top:12px}.about-row{min-height:64px;padding:8px 16px}.about-author{color:inherit;text-decoration:none;cursor:pointer}.about-author:hover{background:var(--surface-3)}.about-author:focus-visible{outline:3px solid var(--focus);outline-offset:-3px}.about-row-title{font-size:17px;font-weight:500}.about-row-summary{margin-top:3px;font-size:13px}.about-value{font-size:13px}.support-list{margin-top:4px}.support-option{min-height:64px;grid-template-columns:40px minmax(0,1fr) 24px;gap:12px;padding:8px 16px}.support-option+.support-option:before{left:68px;right:16px}.support-option:hover{background:var(--surface-3)}.support-option:focus-visible{outline:3px solid var(--focus);outline-offset:-3px}.support-option-title{font-size:17px;font-weight:500}.chevron{width:24px;height:24px;color:var(--text-3);fill:none;stroke:currentColor;stroke-width:1.8}.qr-stage{height:min(calc(var(--viewport-height) - 96px),680px);min-height:360px}.qr-card{width:min(100%,460px);height:min(62vh,520px);border-radius:20px;background:var(--surface-2)}.qr-hint{font-size:13px}
 .cmd-panel{inset:auto 0 auto 0;top:var(--viewport-offset);bottom:auto;height:var(--viewport-height);padding:20px max(20px,var(--a2h-safe-right)) max(20px,var(--a2h-safe-bottom)) max(20px,var(--a2h-safe-left));background:var(--scrim)}.cmd-box{width:min(100%,520px);max-height:calc(var(--viewport-height) - 40px);padding:20px;border-radius:28px;background:var(--surface)}.cmd-head{margin-bottom:12px;font-size:18px;font-weight:600}.cmd-close{width:44px;height:44px;display:grid;place-items:center;font-size:0}.cmd-close svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round}.cmd-close:focus-visible{outline:3px solid var(--focus)}.cmd-box code{max-height:45vh;padding:12px;border-radius:14px;background:var(--surface-2);font-size:11px}.cmd-copy{width:100%;min-height:48px;margin-top:12px;border:0;border-radius:16px;background:var(--primary);color:var(--on-primary);font-size:17px;cursor:pointer}.cmd-copy:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
-@media(max-height:900px){body{padding-top:max(6px,var(--a2h-safe-top));padding-bottom:max(8px,var(--a2h-safe-bottom))}.top{min-height:64px}.section-label{height:26px;padding-bottom:6px}.preference{min-height:58px}.whitelist{margin-top:8px}.toolbar{height:48px}.slot{height:44px}.slot-input{height:36px}.slot-switch{height:42px}.author{height:48px}}
-@media(max-height:700px){.top{min-height:56px}.mark,.mark-logo{width:42px;height:42px}.section-label{height:22px;padding-bottom:4px}.preference{min-height:54px}.whitelist{margin-top:6px}.toolbar{height:44px}.slot{height:44px}.slot-input{height:34px}.slot-switch{height:42px}.author{height:44px}.project-card{min-height:164px}.project-mark{width:88px;height:76px}.route-top{height:44px}}
+@media(max-height:900px){body{padding-top:max(6px,var(--a2h-safe-top));padding-bottom:max(8px,var(--a2h-safe-bottom))}.top{min-height:clamp(52px,7.5vh,64px)}.section-label{height:clamp(20px,3.05vh,26px);padding-bottom:6px}.preference{min-height:clamp(48px,6.8vh,58px)}.root-status{min-height:48px}.whitelist{margin-top:clamp(4px,1vh,8px)}.toolbar{height:clamp(40px,5.65vh,48px)}.author{height:clamp(38px,5.65vh,48px)}}
+@media(max-height:700px){.mark,.mark-logo{width:40px;height:40px}.pref-title{font-size:16px}.pref-summary{font-size:12px}.slot-input{font-size:11.5px}.author-mark{font-size:11px}.project-card{min-height:164px}.project-mark{width:88px;height:76px}.route-top{height:44px}}
 @media(max-width:480px){.version{display:none}}
-@media(prefers-reduced-motion:reduce){.sheet-handle,.toast{transition:none!important}}
+@media(prefers-reduced-motion:reduce){.sheet-handle,.toast,.whitelist-reveal,.route-page,.route-shell{transition:none!important}}
 </style>
 </head>
 <body>
 <main class="shell">
+  <div class="main-content">
   <header class="top">
     <div class="brand">
       <div class="mark" aria-hidden="true"><svg class="a2h-logo mark-logo" viewBox="0 0 64 64"><circle class="logo-orbit outer" cx="32" cy="32" r="26" pathLength="100"/><circle class="logo-orbit inner" cx="32" cy="32" r="19" pathLength="100"/><g class="logo-core"><path class="logo-note" d="M27 18v27M27 23l20-5v21M27 29l20-5"/><ellipse class="logo-note-head" cx="21" cy="46" rx="6.5" ry="5" transform="rotate(-10 21 46)"/><ellipse class="logo-note-head" cx="41" cy="40" rx="6.5" ry="5" transform="rotate(-10 41 40)"/></g><path class="logo-wave left" d="M11 19c-9 7-9 19 0 26"/><path class="logo-wave right" d="M53 19c9 7 9 19 0 26"/></svg></div>
@@ -96,7 +98,7 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
       </div>
     </div>
     <div class="top-actions">
-      <span class="version">v1.5.9</span>
+      <span class="version">v1.5.9.5</span>
       <button class="icon-btn" id="theme" data-haptic="button" type="button" title="切换主题" aria-label="切换主题"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v2M12 19v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M3 12h2M19 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/><circle cx="12" cy="12" r="4"/></svg></button>
       <button class="icon-btn" id="about" data-haptic="button" type="button" title="关于" aria-label="关于"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5h.01"/></svg></button>
     </div>
@@ -109,26 +111,35 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
       <span class="switch"><input id="globalMode" type="checkbox" role="switch" aria-label="全局模式"><span class="track"></span></span>
     </label>
     <label class="preference" for="gamePause">
-      <span class="pref-copy"><span class="pref-title">游戏时启动后台音乐触感</span><span class="pref-summary" id="policyValue">关闭 · 遵循官方策略</span></span>
-      <span class="switch"><input id="gamePause" type="checkbox" role="switch" aria-label="游戏时启动后台音乐触感"><span class="track"></span></span>
+      <span class="pref-copy"><span class="pref-title">后台音乐触感</span><span class="pref-summary" id="policyValue">关闭 · 按官方策略</span></span>
+      <span class="switch"><input id="gamePause" type="checkbox" role="switch" aria-label="后台音乐触感"><span class="track"></span></span>
     </label>
     <label class="preference" for="logEnabled">
       <span class="pref-copy"><span class="pref-title">日志记录</span><span class="pref-summary" id="logValue">开启 · 记录运行日志</span></span>
       <span class="switch"><input id="logEnabled" type="checkbox" role="switch" aria-label="日志记录"><span class="track"></span></span>
     </label>
-  </section>
-
-  <section class="group whitelist" aria-label="应用白名单">
-    <div class="toolbar">
-      <div class="toolbar-title"><span class="list-title">应用白名单</span><span class="count" id="count"></span></div>
-      <div class="toolbar-actions">
-        <button class="icon-btn" id="retry" data-haptic="button" type="button" title="重新读取配置" aria-label="重新读取配置" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.2 9A7 7 0 0 0 6.7 5.3L4 8M5.8 15A7 7 0 0 0 17.3 18.7L20 16"/></svg></button>
-        <button class="icon-btn" id="reset" data-haptic="confirm" type="button" title="恢复官方默认" aria-label="恢复官方默认"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v6h6M20 20v-6h-6"/><path d="M5.2 9A8 8 0 0 1 18.4 6M18.8 15A8 8 0 0 1 5.6 18"/></svg></button>
-      </div>
+    <div class="root-status" id="rootStatus" role="status" aria-live="polite" hidden>
+      <div class="root-status-copy"><div class="root-status-title" id="rootStatusTitle">Root 状态</div><div class="root-status-detail" id="rootStatusDetail">正在检查</div></div>
+      <button class="root-retry" id="rootRetry" type="button">重新授权</button>
     </div>
-    <div class="slots" id="slots"></div>
   </section>
 
+  <div class="whitelist-reveal initializing" id="whitelistReveal">
+    <div class="whitelist-reveal-inner">
+      <section class="group whitelist" aria-label="应用白名单">
+        <div class="toolbar">
+          <div class="toolbar-title"><span class="list-title">应用白名单</span><span class="count" id="count"></span></div>
+          <div class="toolbar-actions">
+            <button class="icon-btn" id="retry" data-haptic="button" type="button" title="重新读取配置" aria-label="重新读取配置" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6v5h-5M4 18v-5h5"/><path d="M18.2 9A7 7 0 0 0 6.7 5.3L4 8M5.8 15A7 7 0 0 0 17.3 18.7L20 16"/></svg></button>
+            <button class="icon-btn" id="reset" data-haptic="confirm" type="button" title="恢复官方默认" aria-label="恢复官方默认"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4v6h6M20 20v-6h-6"/><path d="M5.2 9A8 8 0 0 1 18.4 6M18.8 15A8 8 0 0 1 5.6 18"/></svg></button>
+          </div>
+        </div>
+        <div class="slots" id="slots"></div>
+      </section>
+    </div>
+  </div>
+
+  </div>
   <footer class="author">
     <span class="author-mark">© 2026 @bb_bomb</span>
     <nav class="socials" aria-label="作者链接">
@@ -155,7 +166,7 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
       <div class="project-mark" aria-hidden="true"><svg class="a2h-logo project-logo" viewBox="0 0 64 64"><circle class="logo-orbit outer" cx="32" cy="32" r="26" pathLength="100"/><circle class="logo-orbit inner" cx="32" cy="32" r="19" pathLength="100"/><g class="logo-core"><path class="logo-note" d="M27 18v27M27 23l20-5v21M27 29l20-5"/><ellipse class="logo-note-head" cx="21" cy="46" rx="6.5" ry="5" transform="rotate(-10 21 46)"/><ellipse class="logo-note-head" cx="41" cy="40" rx="6.5" ry="5" transform="rotate(-10 41 40)"/></g><path class="logo-wave left" d="M11 19c-9 7-9 19 0 26"/><path class="logo-wave right" d="M53 19c9 7 9 19 0 26"/></svg></div>
       <div class="project-name">A2HHook</div>
       <div class="project-sub">REDMI K80 Ultra 音乐触感</div>
-      <div class="version-chip">v1.5.9</div>
+      <div class="version-chip">v1.5.9.5</div>
     </section>
     <div class="about-actions">
       <a class="about-action" data-system-link data-haptic="button" href="https://github.com/bbbomb0/A2HHook" target="_blank" rel="noopener noreferrer"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .3A12 12 0 0 0 8.2 23.7c.6.1.8-.3.8-.6v-2.3c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.4 11.4 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.7.2 2.9.1 3.2.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3z"/></svg><span>项目地址</span></a>
@@ -244,6 +255,9 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
   let rootHapticTimer=0;
   let motionPausedUntil=0;
   let motionResumeTimer=0;
+  let rootProbeAttempted=false;
+  let rootAccessStatus='unknown';
+  let whitelistMotionReady=false;
   const routeReturnFocus={};
   const $=id=>document.getElementById(id);
   const ROUTES={about:'aboutPage',donate:'donatePage',qr:'qrPage'};
@@ -443,6 +457,7 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
       nextPage.setAttribute('aria-hidden','false');
       nextPage.classList.remove('closing','entering','dragging','settling');
       nextPage.querySelector('.route-shell').style.removeProperty('--sheet-drag');
+      nextPage.style.removeProperty('--sheet-scrim-alpha');
       if(!back){
         void nextPage.offsetWidth;
         nextPage.classList.add('entering');
@@ -457,6 +472,7 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
         previousPage.setAttribute('aria-hidden','true');
         previousPage.classList.remove('closing','dragging','settling');
         previousPage.querySelector('.route-shell').style.removeProperty('--sheet-drag');
+        previousPage.style.removeProperty('--sheet-scrim-alpha');
         if(previous==='qr'){
           $('donateImage').removeAttribute('src');
           $('donateImage').alt='';
@@ -586,53 +602,145 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
   function bindSheetDrag(handle){
     const page=handle.closest('.route-page');
     const shell=page.querySelector('.route-shell');
+    if(page.dataset.sheetDragBound==='1') return;
+    page.dataset.sheetDragBound='1';
     let pointerId=null;
+    let touchId=null;
+    let pointerOwner=null;
+    let startX=0;
     let startY=0;
     let currentY=0;
     let startedAt=0;
+    let tracking=false;
+    let dragging=false;
+    let settleTimer=0;
+    const reducedMotion=()=>Boolean(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    const scrimAlpha=()=>{
+      const value=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--scrim-alpha'));
+      return Number.isFinite(value)?value:.3;
+    };
+    const clearGesture=()=>{
+      if(pointerOwner&&pointerId!==null){try{pointerOwner.releasePointerCapture(pointerId);}catch(error){}}
+      pointerId=null;
+      touchId=null;
+      pointerOwner=null;
+      tracking=false;
+      dragging=false;
+      page.classList.remove('dragging');
+    };
+    const setDistance=distance=>{
+      const bounded=Math.max(0,distance);
+      shell.style.setProperty('--sheet-drag',bounded+'px');
+      const progress=Math.min(1,bounded/Math.max(1,shell.clientHeight));
+      page.style.setProperty('--sheet-scrim-alpha',String(scrimAlpha()*(1-progress*.92)));
+    };
     const finishActive=cancelled=>{
       const distance=Math.max(0,currentY-startY);
       const elapsed=Math.max(1,performance.now()-startedAt);
-      const shouldClose=!cancelled&&(distance>Math.max(72,page.clientHeight*.12)||distance/elapsed>.65);
-      pointerId=null;
-      page.classList.remove('dragging');
+      const shouldClose=!cancelled&&dragging&&(distance>Math.max(72,shell.clientHeight*.16)||distance/elapsed>.65);
+      const moved=dragging;
+      clearGesture();
+      if(!moved) return;
       if(shouldClose){
+        if(settleTimer) clearTimeout(settleTimer);
+        page.classList.remove('settling');
         haptic('button');
         window.A2HWebUIBack();
       }else{
         page.classList.add('settling');
-        shell.style.setProperty('--sheet-drag','0px');
-        setTimeout(()=>{
+        setDistance(0);
+        if(settleTimer) clearTimeout(settleTimer);
+        settleTimer=setTimeout(()=>{
+          settleTimer=0;
           page.classList.remove('settling');
           shell.style.removeProperty('--sheet-drag');
-        },240);
+          page.style.removeProperty('--sheet-scrim-alpha');
+        },reducedMotion()?20:240);
       }
     };
-    const move=clientY=>{
-      currentY=Math.max(startY,clientY);
-      shell.style.setProperty('--sheet-drag',(currentY-startY)+'px');
+    const begin=(x,y)=>{
+      if(settleTimer){clearTimeout(settleTimer);settleTimer=0;}
+      page.classList.remove('settling');
+      startX=x;
+      startY=currentY=y;
+      startedAt=performance.now();
+      tracking=true;
+      dragging=false;
     };
-    const finish=event=>{
+    const move=(x,y,event)=>{
+      if(!tracking) return;
+      const dx=x-startX;
+      const dy=y-startY;
+      if(!dragging){
+        if(Math.abs(dx)<6&&Math.abs(dy)<6) return;
+        if(dy<=0||Math.abs(dx)>dy||shell.scrollTop>0){clearGesture();return;}
+        dragging=true;
+        page.classList.add('dragging');
+      }
+      currentY=Math.max(startY,y);
+      setDistance(currentY-startY);
+      if(event.cancelable) event.preventDefault();
+    };
+    const finishPointer=event=>{
       if(pointerId===null||event.pointerId!==pointerId) return;
+      if(Number.isFinite(event.clientY)) currentY=Math.max(startY,event.clientY);
       finishActive(event.type==='pointercancel');
     };
-    handle.addEventListener('pointerdown',event=>{
-      if(page.hidden||ROUTES[activeRoute]!==page.id||event.button>0) return;
+    shell.addEventListener('pointerdown',event=>{
+      if(event.pointerType==='touch'||pointerId!==null||touchId!==null||page.hidden||ROUTES[activeRoute]!==page.id||event.button>0||event.isPrimary===false) return;
+      const target=event.target&&typeof event.target.closest==='function'?event.target:null;
+      if(target&&target.closest('button,a,input,textarea,select,label,[contenteditable="true"]')) return;
+      const fromChrome=Boolean(target&&target.closest('[data-sheet-handle],.sheet-chrome'));
+      if(!fromChrome){
+        if(shell.scrollTop>0) return;
+        const selection=window.getSelection&&window.getSelection();
+        if(selection&&!selection.isCollapsed) return;
+      }
       pointerId=event.pointerId;
-      startY=currentY=event.clientY;
-      startedAt=performance.now();
-      page.classList.remove('settling');
-      page.classList.add('dragging');
-      try{handle.setPointerCapture(pointerId);}catch(error){}
+      pointerOwner=fromChrome?handle:shell;
+      begin(event.clientX,event.clientY);
+      try{pointerOwner.setPointerCapture(pointerId);}catch(error){}
     });
-    handle.addEventListener('pointermove',event=>{
+    page.addEventListener('pointermove',event=>{
       if(event.pointerId!==pointerId) return;
-      move(event.clientY);
-    });
-    handle.addEventListener('pointerup',finish);
-    handle.addEventListener('pointercancel',finish);
-    window.addEventListener('mousemove',event=>{if(pointerId!==null) move(event.clientY);});
-    window.addEventListener('mouseup',()=>{if(pointerId!==null) finishActive(false);});
+      move(event.clientX,event.clientY,event);
+    },{passive:false});
+    page.addEventListener('pointerup',finishPointer);
+    page.addEventListener('pointercancel',finishPointer);
+    shell.addEventListener('touchstart',event=>{
+      if(page.hidden||ROUTES[activeRoute]!==page.id) return;
+      if(touchId!==null||pointerId!==null||event.touches.length!==1){
+        if(touchId!==null) finishActive(true);
+        return;
+      }
+      const target=event.target&&typeof event.target.closest==='function'?event.target:null;
+      if(target&&target.closest('button,a,input,textarea,select,label,[contenteditable="true"]')) return;
+      const fromChrome=Boolean(target&&target.closest('[data-sheet-handle],.sheet-chrome'));
+      if(!fromChrome){
+        if(shell.scrollTop>0) return;
+        const selection=window.getSelection&&window.getSelection();
+        if(selection&&!selection.isCollapsed) return;
+      }
+      const touch=event.changedTouches[0];
+      touchId=touch.identifier;
+      begin(touch.clientX,touch.clientY);
+    },{passive:true});
+    page.addEventListener('touchmove',event=>{
+      if(touchId===null) return;
+      if(event.touches.length!==1){finishActive(true);return;}
+      const touch=Array.from(event.touches).find(item=>item.identifier===touchId);
+      if(!touch){finishActive(true);return;}
+      move(touch.clientX,touch.clientY,event);
+    },{passive:false});
+    const finishTouch=(event,cancelled)=>{
+      if(touchId===null) return;
+      const touch=Array.from(event.changedTouches||[]).find(item=>item.identifier===touchId);
+      if(!cancelled&&!touch) return;
+      if(touch) currentY=Math.max(startY,touch.clientY);
+      finishActive(cancelled);
+    };
+    page.addEventListener('touchend',event=>finishTouch(event,false));
+    page.addEventListener('touchcancel',event=>finishTouch(event,true));
   }
   function bindSnackbarSwipe(){
     const toast=$('toast');
@@ -695,17 +803,21 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     const backgroundHaptic=gameAutoPause==='disabled';
     $('gamePause').checked=backgroundHaptic;
     $('gamePause').disabled=!deviceConfigReady||interactionLocked;
-    $('policyValue').textContent=deviceConfigReady?(backgroundHaptic?'开启 · 游戏内保持触感':'关闭 · 遵循官方策略'):(deviceConfigStatus==='error'?'读取失败':'正在读取');
+    $('policyValue').textContent=deviceConfigReady?(backgroundHaptic?'开启 · 切换应用时保持':'关闭 · 按官方策略'):(deviceConfigStatus==='error'?'读取失败':'正在读取');
     const recording=logEnabled!=='disabled';
     $('logEnabled').checked=recording;
     $('logEnabled').disabled=!deviceConfigReady||interactionLocked;
     $('logValue').textContent=deviceConfigReady?(recording?'开启 · 记录运行日志':'关闭 · 不写入日志文件'):(deviceConfigStatus==='error'?'读取失败':'正在读取');
     $('reset').disabled=!deviceConfigReady||interactionLocked;
-    document.querySelectorAll('.slot-input').forEach(input=>{input.disabled=!deviceConfigReady||interactionLocked;});
+    const reveal=$('whitelistReveal');
+    reveal.classList.toggle('collapsed',global);
+    reveal.setAttribute('aria-hidden',global?'true':'false');
+    if('inert' in reveal) reveal.inert=global;
+    document.querySelectorAll('.slot-input').forEach(input=>{input.disabled=!deviceConfigReady||interactionLocked||global;});
     document.querySelectorAll('.slot-switch input').forEach(toggle=>{
       const row=toggle.closest('.slot');
       const input=row&&row.querySelector('.slot-input');
-      toggle.disabled=!deviceConfigReady||interactionLocked||!normalizeSlot(input&&input.value);
+      toggle.disabled=!deviceConfigReady||interactionLocked||global||!normalizeSlot(input&&input.value);
     });
   }
   function updateCount(){
@@ -867,6 +979,75 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     return '# A2HHook apply command\n'+buildCommitCommand(state,data,writePackages);
   }
 
+  function hasNativeRootProbe(){
+    return Boolean(window.a2hNative&&typeof window.a2hNative.probeRoot==='function');
+  }
+  function setRootStatus(status,detail){
+    rootAccessStatus=status||'unknown';
+    const nativeProbe=hasNativeRootProbe();
+    const row=$('rootStatus');
+    const states={
+      loading:['正在请求 Root 权限','请在 Root 管理器中完成授权'],
+      granted:['Root 已授权','可以读取并修改模块配置'],
+      not_authorized:['Root 尚未授权','点击重新授权以触发 Root 请求'],
+      denied:['Root 授权已拒绝','可在 Root 管理器中允许后重试'],
+      unavailable:['Root 管理器不可用','未找到可用的 su 命令'],
+      timeout:['Root 请求超时','授权窗口未在限定时间内完成'],
+      module_missing:['模块未安装','未找到 A2HHook 模块或配置目录'],
+      config_missing:['模块配置缺失','请重新安装或修复 A2HHook 模块'],
+      command_failed:['Root 命令失败','请检查 Root 授权与模块状态']
+    };
+    const value=states[rootAccessStatus]||['Root 状态','等待检查'];
+    row.hidden=rootAccessStatus==='granted'||(!nativeProbe&&rootAccessStatus==='unknown');
+    $('rootStatusTitle').textContent=value[0];
+    $('rootStatusDetail').textContent=detail||value[1];
+    const retry=$('rootRetry');
+    retry.hidden=rootAccessStatus==='granted'||rootAccessStatus==='loading';
+    retry.disabled=rootAccessStatus==='loading';
+    retry.textContent=nativeProbe&&['not_authorized','denied','timeout'].includes(rootAccessStatus)?'重新授权':'重新读取';
+  }
+  function probeNativeRoot(){
+    return new Promise((resolve,reject)=>{
+      if(!hasNativeRootProbe()){resolve({status:'granted',code:0,stdout:'',stderr:''});return;}
+      let settled=false;
+      const callbackName='__a2h_root_probe_'+Date.now()+'_'+(++execSerial);
+      const cleanup=()=>{clearTimeout(timer);try{delete window[callbackName];}catch(error){window[callbackName]=undefined;}};
+      const finish=value=>{if(!settled){settled=true;cleanup();resolve(value);}};
+      const fail=error=>{if(!settled){settled=true;cleanup();reject(error);}};
+      const timer=setTimeout(()=>finish({status:'timeout',code:124,stdout:'',stderr:'probe-timeout'}),17000);
+      window[callbackName]=(status,code,stdout,stderr)=>finish({status:String(status||'command_failed'),code:Number(code),stdout:String(stdout||''),stderr:String(stderr||'')});
+      try{window.a2hNative.probeRoot(callbackName);}catch(error){fail(error);}
+    });
+  }
+  async function ensureRootAccess(force){
+    if(!hasNativeRootProbe()) return true;
+    if(rootAccessStatus==='granted'&&!force) return true;
+    if(rootProbeAttempted&&!force){
+      const cached=new Error('root-'+rootAccessStatus);
+      cached.rootStatus=rootAccessStatus;
+      throw cached;
+    }
+    rootProbeAttempted=true;
+    setRootStatus('loading');
+    let result;
+    try{result=await probeNativeRoot();}
+    catch(error){result={status:'command_failed',code:1,stdout:'',stderr:String(error&&error.message||error)};}
+    const allowed=['granted','not_authorized','denied','unavailable','timeout','command_failed'];
+    const status=allowed.includes(result.status)?result.status:'command_failed';
+    setRootStatus(status);
+    if(status==='granted') return true;
+    const failure=new Error('root-'+status);
+    failure.rootStatus=status;
+    failure.code=result.code;
+    failure.stderr=result.stderr;
+    throw failure;
+  }
+  function finishWhitelistInitialization(){
+    if(whitelistMotionReady) return;
+    whitelistMotionReady=true;
+    requestAnimationFrame(()=>requestAnimationFrame(()=>$('whitelistReveal').classList.remove('initializing')));
+  }
+
   function findExecBridge(){
     if(window.ksu&&typeof window.ksu.exec==='function') return {kind:'raw',owner:window.ksu,fn:window.ksu.exec};
     if(window.KSU&&typeof window.KSU.exec==='function') return {kind:'promise',owner:window.KSU,fn:window.KSU.exec};
@@ -962,7 +1143,12 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     if(!rcMatch) throw new Error('invalid-exec-status');
     const code=Number(rcMatch[1]);
     const stdout=result.stdout.slice(0,markerAt).replace(/\r?\n$/,'');
-    if(code!==0) throw new Error('exit '+code+(result.stderr?': '+result.stderr:''));
+    if(code!==0){
+      const error=new Error('exit '+code+(result.stderr?': '+result.stderr:''));
+      error.code=code;
+      error.stderr=result.stderr;
+      throw error;
+    }
     return {code,stdout,stderr:result.stderr};
   }
   function extractStdout(result){
@@ -1103,6 +1289,9 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
   }
   function buildReadDeviceCommand(includePackages){
     const lines=[
+      '[ -f /data/adb/modules/a2h_hook/module.prop ] || exit 21',
+      '[ -d /data/adb/modules/a2h_hook/config ] || exit 22',
+      '[ -f /data/adb/modules/a2h_hook/config/state ] && [ -f /data/adb/modules/a2h_hook/config/game_auto_pause ] || exit 23',
       "printf '%s\\n' "+shellQuote(DEVICE_MARKERS.state),
       'cat /data/adb/modules/a2h_hook/config/state 2>/dev/null || exit 2',
       "printf '%s\\n' "+shellQuote(DEVICE_MARKERS.policy),
@@ -1112,6 +1301,7 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     ];
     if(includePackages){
       lines.push(
+        '[ -f /data/adb/modules/a2h_hook/config/packages.txt ] && [ -f /data/adb/modules/a2h_hook/config/package_states ] || exit 23',
         "printf '%s\\n' "+shellQuote(DEVICE_MARKERS.packages),
         'cat /data/adb/modules/a2h_hook/config/packages.txt 2>/dev/null || exit 2',
         "printf '%s\\n' "+shellQuote(DEVICE_MARKERS.states),
@@ -1174,6 +1364,7 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     renderSlots();
     const startRevision=configRevision;
     try{
+      await ensureRootAccess(settings.forceRootPrompt===true);
       const text=extractStdout(await execRoot(buildReadDeviceCommand(true),6000));
       if(configRevision!==startRevision){
         if(!settings.preserveNotice) setNotice('保留当前编辑内容','warn');
@@ -1192,6 +1383,8 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
       saveLocal();
       lastAppliedKey=snapshotKey(snapshotConfig());
       $('retry').hidden=true;
+      setRootStatus('granted');
+      finishWhitelistInitialization();
       return true;
     }catch(error){
       console&&console.warn&&console.warn(error);
@@ -1200,7 +1393,23 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
       renderMode();
       renderSlots();
       $('retry').hidden=false;
-      if(!settings.preserveNotice) setNotice('设备配置读取失败','warn');
+      let notice='配置读取失败，请重试';
+      if(error&&error.rootStatus){
+        notice={not_authorized:'Root 尚未授权',denied:'Root 授权已拒绝',unavailable:'Root 管理器不可用',timeout:'Root 请求超时',command_failed:'Root 命令失败'}[error.rootStatus]||notice;
+      }else if(error&&error.code===21){
+        setRootStatus('module_missing');
+        notice='A2HHook 模块未安装';
+      }else if(error&&(error.code===22||error.code===23)){
+        setRootStatus('config_missing');
+        notice='A2HHook 模块配置缺失';
+      }else if(error&&error.message==='no-exec'){
+        setRootStatus('unavailable','当前 WebUI 宿主没有 Root 执行接口');
+        notice='Root 执行接口不可用';
+      }else if(hasNativeRootProbe()){
+        setRootStatus('command_failed');
+      }
+      finishWhitelistInitialization();
+      if(!settings.preserveNotice) setNotice(notice,'warn');
       return false;
     }
   }
@@ -1219,7 +1428,7 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
     configRevision++;
     renderMode();
     haptic('toggle');
-    requestApply(event.target.checked?'游戏后台音乐触感已开启':'已恢复官方游戏策略',false);
+    requestApply(event.target.checked?'后台音乐触感已开启':'已恢复官方策略',false);
   });
   $('logEnabled').addEventListener('change',event=>{
     if(!deviceConfigReady){event.target.checked=logEnabled!=='disabled';haptic('error');setNotice('设备配置尚未载入','warn');return;}
@@ -1248,7 +1457,11 @@ html{background:var(--bg);scrollbar-width:none}html::-webkit-scrollbar{display:n
   $('retry').addEventListener('click',()=>{
     $('retry').hidden=true;
     setNotice('正在重新读取配置','',true);
-    loadDeviceConfig();
+    loadDeviceConfig({forceRootPrompt:hasNativeRootProbe()&&rootAccessStatus!=='granted'});
+  });
+  $('rootRetry').addEventListener('click',()=>{
+    setNotice('正在请求 Root 授权','',true);
+    loadDeviceConfig({forceRootPrompt:true});
   });
   $('cmdClose').addEventListener('click',hideCommand);
   $('cmdPanel').addEventListener('click',event=>{if(event.target===$('cmdPanel')) hideCommand();});

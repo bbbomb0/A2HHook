@@ -37,8 +37,8 @@
         <service
             android:name=".A2HGameTileService"
             android:exported="true"
-            android:icon="@drawable/ic_a2h_tile_game_on"
-            android:label="游戏时启动后台音乐触感"
+            android:icon="@drawable/ic_a2h_tile_background_on"
+            android:label="后台音乐触感"
             android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
             <meta-data
                 android:name="android.service.quicksettings.TOGGLEABLE_TILE"

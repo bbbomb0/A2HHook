@@ -197,6 +197,14 @@ wait_for session_equals "$RUNTIME/sessions/com.example.game" 9001 || {
   echo "FAIL trigger-session"
   exit 1
 }
+session_dir_mode=$(stat -c '%a' "$RUNTIME/sessions/com.example.game" 2>/dev/null) || {
+  echo "FAIL trigger-session-dir-stat"
+  exit 1
+}
+[ "$session_dir_mode" = 1730 ] || {
+  echo "FAIL trigger-session-dir-mode mode=$session_dir_mode"
+  exit 1
+}
 
 # The trigger stream's own AudioPolicy start must not recurse or create a port.
 printf '%s\n' 'D/APM_AudioPolicyManager: startOutput() output 13, portId 90, stream 3, session 9001, sample_rate 48000, appname com.example.game)' >&5

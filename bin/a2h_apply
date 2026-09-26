@@ -43,6 +43,7 @@ RECONCILE_LOG_TAG=${A2H_RECONCILE_LOG_TAG:-a2h_audio_watch}
 
 CURRENT_MODE=disabled
 CURRENT_GAME_AUTO_PAUSE=enabled
+CURRENT_BACKGROUND_MUSIC=disabled
 CURRENT_SNAPSHOT=
 CURRENT_REVISION=0
 CURRENT_RAW_SIGNATURE=
@@ -285,6 +286,8 @@ normalize_game_auto_pause() {
   esac
   write_value_atomic "$CFG_GAME_POLICY" "$game_policy_value" 0644 || return 1
   CURRENT_GAME_AUTO_PAUSE=$game_policy_value
+  CURRENT_BACKGROUND_MUSIC=disabled
+  [ "$CURRENT_GAME_AUTO_PAUSE" = "disabled" ] && CURRENT_BACKGROUND_MUSIC=enabled
   return 0
 }
 
@@ -677,6 +680,8 @@ prepare_config_fast_unlocked() {
   case "$fast_policy" in enabled|disabled) ;; *) return 1 ;; esac
   CURRENT_MODE=$fast_mode
   CURRENT_GAME_AUTO_PAUSE=$fast_policy
+  CURRENT_BACKGROUND_MUSIC=disabled
+  [ "$CURRENT_GAME_AUTO_PAUSE" = "disabled" ] && CURRENT_BACKGROUND_MUSIC=enabled
 
   generate_runtime_config || return 1
   compute_snapshot || return 1
@@ -1501,7 +1506,7 @@ apply_current() {
   }
   apply_want=whitelist
   [ "$CURRENT_MODE" = "enabled" ] && apply_want=global
-  log "apply start reason=$apply_reason pid=$HAL_PID base=${HAL_BASE:-auto} mode=$CURRENT_MODE want=$apply_want game_auto_pause=$CURRENT_GAME_AUTO_PAUSE revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT"
+  log "apply start reason=$apply_reason pid=$HAL_PID base=${HAL_BASE:-auto} mode=$CURRENT_MODE want=$apply_want background_music=$CURRENT_BACKGROUND_MUSIC game_auto_pause=$CURRENT_GAME_AUTO_PAUSE revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT"
   log_slots
 
   apply_rc=1
@@ -1546,7 +1551,7 @@ apply_current() {
       log "apply FAIL reason=$apply_reason pid=$HAL_PID mode=$apply_want error=record-last-pid revision=$CURRENT_REVISION"
       return 74
     fi
-    log "apply verified reason=$apply_reason pid=$HAL_PID mode=$apply_want game_auto_pause=$CURRENT_GAME_AUTO_PAUSE revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT"
+    log "apply verified reason=$apply_reason pid=$HAL_PID mode=$apply_want background_music=$CURRENT_BACKGROUND_MUSIC game_auto_pause=$CURRENT_GAME_AUTO_PAUSE revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT"
     return 0
   fi
   log "apply FAIL reason=$apply_reason pid=$HAL_PID mode=$apply_want patch_rc=$apply_rc check_rc=$check_rc revision=$CURRENT_REVISION"
@@ -1652,7 +1657,7 @@ apply_stable() {
 
   release_apply_lock
   if [ "$stable_rc" -eq 0 ]; then
-    printf 'APPLY_OK mode=%s game_auto_pause=%s revision=%s snapshot=%s active=%s\n' "$CURRENT_MODE" "$CURRENT_GAME_AUTO_PAUSE" "$CURRENT_REVISION" "$CURRENT_SNAPSHOT" "$ACTIVE_COUNT"
+    printf 'APPLY_OK mode=%s background_music=%s game_auto_pause=%s revision=%s snapshot=%s active=%s\n' "$CURRENT_MODE" "$CURRENT_BACKGROUND_MUSIC" "$CURRENT_GAME_AUTO_PAUSE" "$CURRENT_REVISION" "$CURRENT_SNAPSHOT" "$ACTIVE_COUNT"
   else
     log "apply exhausted reason=$stable_reason attempts=$stable_try rc=$stable_rc"
   fi
@@ -1819,12 +1824,12 @@ queue_latest() {
     log "queue FAIL error=pending-write"
     return 2
   }
-  log "queue accepted mode=$CURRENT_MODE game_auto_pause=$CURRENT_GAME_AUTO_PAUSE revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT"
+  log "queue accepted mode=$CURRENT_MODE background_music=$CURRENT_BACKGROUND_MUSIC game_auto_pause=$CURRENT_GAME_AUTO_PAUSE revision=$CURRENT_REVISION snapshot=$CURRENT_SNAPSHOT active=$ACTIVE_COUNT"
   if ! start_worker; then
     log "queue FAIL error=worker-start pending=preserved"
     return 1
   fi
-  printf 'QUEUED mode=%s game_auto_pause=%s revision=%s snapshot=%s active=%s\n' "$CURRENT_MODE" "$CURRENT_GAME_AUTO_PAUSE" "$CURRENT_REVISION" "$CURRENT_SNAPSHOT" "$ACTIVE_COUNT"
+  printf 'QUEUED mode=%s background_music=%s game_auto_pause=%s revision=%s snapshot=%s active=%s\n' "$CURRENT_MODE" "$CURRENT_BACKGROUND_MUSIC" "$CURRENT_GAME_AUTO_PAUSE" "$CURRENT_REVISION" "$CURRENT_SNAPSHOT" "$ACTIVE_COUNT"
   return 0
 }
 
@@ -1966,12 +1971,12 @@ case "$command_name" in
     printf '%s\n' "$toggle_next"
     exit 0
     ;;
-  toggle-game-auto-pause|toggle_game_auto_pause|game-toggle)
+  toggle-background-music|toggle_background_music|background-music-toggle|toggle-game-auto-pause|toggle_game_auto_pause|game-toggle)
     toggle_game_auto_pause || exit $?
     queue_latest
     exit $?
     ;;
-  toggle-game-auto-pause-fast|toggle_game_auto_pause_fast|game-toggle-fast)
+  toggle-background-music-fast|toggle_background_music_fast|background-music-toggle-fast|toggle-game-auto-pause-fast|toggle_game_auto_pause_fast|game-toggle-fast)
     toggle_game_auto_pause || exit $?
     queue_changed_fast || exit $?
     printf '%s\n' "$toggle_policy_next"
@@ -2002,7 +2007,7 @@ case "$command_name" in
     exit $?
     ;;
   *)
-    printf '%s\n' 'usage: a2h_apply [commit-queue MODE POLICY GENERATION PACKAGE{10} STATE{10}|set-log [enabled|disabled]|queue [enabled|disabled] [enabled|disabled]|toggle|toggle-fast|toggle-game-auto-pause|toggle-game-auto-pause-fast|apply|enable|disable|show|status|check [global|whitelist]|snapshot|snapshot-state|busy]' >&2
+    printf '%s\n' 'usage: a2h_apply [commit-queue MODE POLICY GENERATION PACKAGE{10} STATE{10}|set-log [enabled|disabled]|queue [enabled|disabled] [enabled|disabled]|toggle|toggle-fast|toggle-background-music|toggle-background-music-fast|toggle-game-auto-pause|toggle-game-auto-pause-fast|apply|enable|disable|show|status|check [global|whitelist]|snapshot|snapshot-state|busy]' >&2
     exit 2
     ;;
 esac
