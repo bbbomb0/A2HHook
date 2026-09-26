@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="webui.png" alt="A2HHook" width="120">
+  <img src="a2h-icon-512.png" alt="A2HHook" width="120">
 </p>
 
 <h1 align="center">A2HHook</h1>
